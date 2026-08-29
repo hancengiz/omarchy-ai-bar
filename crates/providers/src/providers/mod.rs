@@ -11,6 +11,7 @@ pub mod elevenlabs;
 pub mod fireworks;
 pub mod ibmbob;
 pub mod litellm;
+pub mod llmproxy;
 pub mod moonshot;
 pub mod neuralwatt;
 pub mod openai;

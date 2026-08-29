@@ -1,0 +1,7 @@
+{
+  "providers": {
+    "openai": {
+      "total_requests": "response-canary"
+    }
+  }
+}
