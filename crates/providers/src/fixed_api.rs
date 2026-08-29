@@ -16,6 +16,7 @@ use crate::transport::{Authentication, HttpRequest, HttpResponse, HttpTransport,
 const MAX_API_KEY_BYTES: usize = 16 * 1024;
 
 /// A bounded, trimmed, zeroizing API key.
+#[derive(Clone)]
 pub struct ApiKeyCredential {
     value: Zeroizing<String>,
 }
@@ -59,6 +60,14 @@ impl ApiKeyCredential {
         Ok(Self { value })
     }
 
+    /// Reports whether the credential has a decodable JWT object payload.
+    ///
+    /// Only the boolean classification leaves this secret-owning boundary.
+    #[must_use]
+    pub fn is_structured_jwt(&self) -> bool {
+        jwt_payload_is_object(self.value.as_bytes())
+    }
+
     fn authentication(&self, header: &HeaderName) -> Result<Authentication, ClassifiedError> {
         Authentication::api_key(header.as_str(), self.value.as_str().to_owned())
             .map_err(|error| error.classified())
@@ -86,9 +95,11 @@ pub struct FixedApiClient {
     base_url: Url,
     authentication: ApiKeyAuthentication,
     credential: ApiKeyCredential,
+    config: TransportConfig,
     transport: HttpTransport,
 }
 
+#[derive(Clone)]
 enum ApiKeyAuthentication {
     Bearer,
     AuthorizationScheme(String),
@@ -211,6 +222,7 @@ impl FixedApiClient {
             base_url,
             authentication,
             credential,
+            config,
             transport,
         })
     }
@@ -225,6 +237,32 @@ impl FixedApiClient {
     #[must_use]
     pub const fn base_url(&self) -> &Url {
         &self.base_url
+    }
+
+    /// Rebinds this client's authentication and account scope to one newly
+    /// validated exact origin.
+    ///
+    /// This remains crate-private so only native provider adapters can apply
+    /// their provider-specific discovery allowlist before cloning a secret.
+    pub(crate) fn rebind(
+        &self,
+        base_url: Url,
+        endpoint_class: EndpointClass,
+    ) -> Result<Self, ClassifiedError> {
+        let origin = base_url.origin().ascii_serialization();
+        let endpoints = EndpointPolicy::new([(origin, endpoint_class)])
+            .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        endpoints
+            .validate(&base_url)
+            .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        Self::build(
+            self.scope.clone(),
+            base_url,
+            endpoints,
+            self.authentication.clone(),
+            self.credential.clone(),
+            self.config,
+        )
     }
 
     /// Resolves a provider-owned relative path under the validated base URL.
@@ -293,6 +331,28 @@ impl FixedApiClient {
         url: Url,
     ) -> Result<HttpResponse, ClassifiedError> {
         let request = HttpRequest::get_json(url);
+        self.send(context, request).await
+    }
+
+    /// Performs an authenticated JSON GET with bounded, non-secret metadata
+    /// headers and an explicit JSON content type.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable API error for invalid/reserved metadata headers or a
+    /// scope mismatch, plus classified transport failures.
+    pub async fn get_json_with_public_headers(
+        &self,
+        context: &ProviderContext,
+        url: Url,
+        headers: &[(&str, &str)],
+    ) -> Result<HttpResponse, ClassifiedError> {
+        let mut request = HttpRequest::get_json(url).empty_json_content_type();
+        for (name, value) in headers {
+            request = request
+                .public_header(name, value)
+                .map_err(|error| error.classified())?;
+        }
         self.send(context, request).await
     }
 
@@ -422,4 +482,64 @@ fn clean_secret(raw: &str) -> Option<Zeroizing<String>> {
     }
     let value = value.trim();
     (!value.is_empty()).then(|| Zeroizing::new(value.to_owned()))
+}
+
+fn jwt_payload_is_object(value: &[u8]) -> bool {
+    let mut parts = value.split(|byte| *byte == b'.');
+    let Some(_header) = parts.next() else {
+        return false;
+    };
+    let Some(payload) = parts.next() else {
+        return false;
+    };
+    let Some(_signature) = parts.next() else {
+        return false;
+    };
+    if parts.next().is_some() || payload.is_empty() {
+        return false;
+    }
+    let Some(decoded) = decode_base64_url(payload) else {
+        return false;
+    };
+    serde_json::from_slice::<serde_json::Value>(&decoded).is_ok_and(|value| value.is_object())
+}
+
+fn decode_base64_url(value: &[u8]) -> Option<Vec<u8>> {
+    let unpadded_length = value
+        .iter()
+        .position(|byte| *byte == b'=')
+        .unwrap_or(value.len());
+    let padding = value.len().saturating_sub(unpadded_length);
+    let remainder = unpadded_length % 4;
+    if value[unpadded_length..].iter().any(|byte| *byte != b'=')
+        || padding > 2
+        || remainder == 1
+        || (padding > 0 && padding != (4 - remainder) % 4)
+    {
+        return None;
+    }
+    let mut decoded = Vec::with_capacity(unpadded_length.saturating_mul(3) / 4 + 2);
+    let mut accumulator = 0_u32;
+    let mut bits = 0_u8;
+    for byte in &value[..unpadded_length] {
+        let digit = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'-' | b'+' => 62,
+            b'_' | b'/' => 63,
+            _ => return None,
+        };
+        accumulator = (accumulator << 6) | u32::from(digit);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            decoded.push(((accumulator >> bits) & 0xff) as u8);
+        }
+        accumulator &= if bits == 0 { 0 } else { (1_u32 << bits) - 1 };
+    }
+    if bits > 0 && accumulator & ((1_u32 << bits) - 1) != 0 {
+        return None;
+    }
+    Some(decoded)
 }

@@ -336,6 +336,7 @@ pub struct HttpRequest {
     public_headers: Vec<(HeaderName, HeaderValue)>,
     body: Vec<u8>,
     json: bool,
+    empty_json_content_type: bool,
 }
 
 impl HttpRequest {
@@ -349,6 +350,7 @@ impl HttpRequest {
             public_headers: Vec::new(),
             body: Vec::new(),
             json: false,
+            empty_json_content_type: false,
         }
     }
 
@@ -376,6 +378,7 @@ impl HttpRequest {
             public_headers: Vec::new(),
             body,
             json: false,
+            empty_json_content_type: false,
         })
     }
 
@@ -394,6 +397,15 @@ impl HttpRequest {
     #[must_use]
     pub fn authentication(mut self, authentication: Authentication) -> Self {
         self.authentication = Some(authentication);
+        self
+    }
+
+    /// Requests an explicit JSON content type for a body-free request.
+    ///
+    /// Some provider APIs require the same media-type headers on GET and POST.
+    #[must_use]
+    pub fn empty_json_content_type(mut self) -> Self {
+        self.empty_json_content_type = true;
         self
     }
 
@@ -440,6 +452,7 @@ impl Debug for HttpRequest {
             .field("authentication", &self.authentication)
             .field("public_header_count", &self.public_headers.len())
             .field("json", &self.json)
+            .field("empty_json_content_type", &self.empty_json_content_type)
             .field("body_bytes", &self.body.len())
             .finish()
     }
@@ -587,7 +600,7 @@ impl<C: RetryClock> HttpTransport<C> {
                 .request(request.method.clone(), endpoint.url().clone());
             if request.json {
                 builder = builder.header(ACCEPT, "application/json");
-                if !request.body.is_empty() {
+                if !request.body.is_empty() || request.empty_json_content_type {
                     builder = builder.header(CONTENT_TYPE, "application/json");
                 }
             }
