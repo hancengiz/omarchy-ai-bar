@@ -2,4 +2,5 @@
 
 pub mod azureopenai;
 pub mod elevenlabs;
+pub mod fireworks;
 pub mod openai;

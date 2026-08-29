@@ -1,0 +1,17 @@
+{
+  "lineItems": [
+    {
+      "category": "LLM input tokens (cached)",
+      "totalCost": { "currencyCode": "USD", "nanos": 492256016, "units": "0" }
+    },
+    {
+      "category": "LLM output tokens",
+      "totalCost": { "currencyCode": "USD", "nanos": 33292280, "units": "1" }
+    },
+    {
+      "category": "ignored mixed currency",
+      "totalCost": { "currencyCode": "EUR", "nanos": 0, "units": "99" }
+    }
+  ],
+  "usageBuckets": []
+}

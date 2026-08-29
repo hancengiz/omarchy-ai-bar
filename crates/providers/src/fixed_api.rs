@@ -241,6 +241,47 @@ impl FixedApiClient {
             .map_err(|error| error.classified())
     }
 
+    /// Performs one authenticated JSON GET for the exact selected account.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable classified configuration, network, and provider errors.
+    pub async fn get_json(
+        &self,
+        context: &ProviderContext,
+        url: Url,
+    ) -> Result<HttpResponse, ClassifiedError> {
+        let request = HttpRequest::get_json(url);
+        self.send(context, request).await
+    }
+
+    /// Performs one authenticated JSON GET while treating HTTP 404 as an
+    /// explicit absence signal.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable classified configuration, network, and provider errors
+    /// for every outcome except HTTP 404.
+    pub async fn get_optional_json(
+        &self,
+        context: &ProviderContext,
+        url: Url,
+    ) -> Result<Option<HttpResponse>, ClassifiedError> {
+        if context.scope() != &self.scope || context.source() != ProviderSource::ApiKey {
+            return Err(ClassifiedError::new(ErrorKind::Api));
+        }
+        let authentication = match &self.authentication {
+            ApiKeyAuthentication::Bearer => self.credential.bearer_authentication()?,
+            ApiKeyAuthentication::Header(header) => self.credential.authentication(header)?,
+        };
+        let request = HttpRequest::get_json(url).authentication(authentication);
+        match self.transport.send(&request, context.cancellation()).await {
+            Ok(response) => Ok(Some(response)),
+            Err(crate::transport::TransportError::Api { status: 404 }) => Ok(None),
+            Err(error) => Err(error.classified()),
+        }
+    }
+
     /// Performs one authenticated JSON POST for the exact selected account.
     ///
     /// # Errors
@@ -254,6 +295,15 @@ impl FixedApiClient {
         url: Url,
         body: Vec<u8>,
     ) -> Result<HttpResponse, ClassifiedError> {
+        let request = HttpRequest::post_json(url, body).map_err(|error| error.classified())?;
+        self.send(context, request).await
+    }
+
+    async fn send(
+        &self,
+        context: &ProviderContext,
+        request: HttpRequest,
+    ) -> Result<HttpResponse, ClassifiedError> {
         if context.scope() != &self.scope || context.source() != ProviderSource::ApiKey {
             return Err(ClassifiedError::new(ErrorKind::Api));
         }
@@ -261,9 +311,7 @@ impl FixedApiClient {
             ApiKeyAuthentication::Bearer => self.credential.bearer_authentication()?,
             ApiKeyAuthentication::Header(header) => self.credential.authentication(header)?,
         };
-        let request = HttpRequest::post_json(url, body)
-            .map_err(|error| error.classified())?
-            .authentication(authentication);
+        let request = request.authentication(authentication);
         self.transport
             .send(&request, context.cancellation())
             .await

@@ -309,6 +309,14 @@ impl HttpRequest {
         }
     }
 
+    /// Creates a body-free GET request that advertises JSON response support.
+    #[must_use]
+    pub fn get_json(url: Url) -> Self {
+        let mut request = Self::get(url);
+        request.json = true;
+        request
+    }
+
     /// Creates a bounded POST request body.
     ///
     /// # Errors
@@ -503,9 +511,10 @@ impl<C: RetryClock> HttpTransport<C> {
                 .client
                 .request(request.method.clone(), endpoint.url().clone());
             if request.json {
-                builder = builder
-                    .header(ACCEPT, "application/json")
-                    .header(CONTENT_TYPE, "application/json");
+                builder = builder.header(ACCEPT, "application/json");
+                if !request.body.is_empty() {
+                    builder = builder.header(CONTENT_TYPE, "application/json");
+                }
             }
             if !request.body.is_empty() {
                 builder = builder.body(request.body.clone());
