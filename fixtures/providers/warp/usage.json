@@ -1,0 +1,40 @@
+{
+  "data": {
+    "user": {
+      "__typename": "UserOutput",
+      "user": {
+        "requestLimitInfo": {
+          "isUnlimited": false,
+          "nextRefreshTime": "2026-09-01T00:00:00.000000Z",
+          "requestLimit": 1500,
+          "requestsUsedSinceLastRefresh": 5
+        },
+        "bonusGrants": [
+          {
+            "requestCreditsGranted": 20,
+            "requestCreditsRemaining": 10,
+            "expiration": "2026-09-03T10:00:00Z"
+          },
+          {
+            "requestCreditsGranted": 5,
+            "requestCreditsRemaining": 2,
+            "expiration": "2026-09-03T10:00:00Z"
+          }
+        ],
+        "workspaces": [
+          {
+            "bonusGrantsInfo": {
+              "grants": [
+                {
+                  "requestCreditsGranted": "15",
+                  "requestCreditsRemaining": "5",
+                  "expiration": "2026-09-15T10:00:00Z"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -101,6 +101,7 @@ pub struct UsageSampleBuilder {
     scope: AccountScope,
     fetched_at: Timestamp,
     primary: Option<RateWindow>,
+    secondary: Option<RateWindow>,
     extra_windows: Vec<NamedRateWindow>,
     organization: Option<BoundedText<256>>,
     login_method: Option<BoundedText<256>>,
@@ -118,6 +119,7 @@ impl UsageSampleBuilder {
             scope,
             fetched_at,
             primary: None,
+            secondary: None,
             extra_windows: Vec::new(),
             organization: None,
             login_method: None,
@@ -132,6 +134,13 @@ impl UsageSampleBuilder {
     #[must_use]
     pub fn primary(mut self, primary: RateWindow) -> Self {
         self.primary = Some(primary);
+        self
+    }
+
+    /// Sets the provider's secondary quota lane.
+    #[must_use]
+    pub fn secondary(mut self, secondary: RateWindow) -> Self {
+        self.secondary = Some(secondary);
         self
     }
 
@@ -235,7 +244,7 @@ impl UsageSampleBuilder {
             identity,
             self.fetched_at,
             self.primary,
-            None,
+            self.secondary,
             None,
             self.extra_windows,
             None,

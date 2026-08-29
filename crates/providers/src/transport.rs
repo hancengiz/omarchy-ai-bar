@@ -21,6 +21,8 @@ use crate::retry::{RetryClock, RetryPolicy, TokioRetryClock, parse_retry_after};
 
 const MAX_SECRET_BYTES: usize = 16 * 1024;
 const MAX_REQUEST_BODY_BYTES: usize = 4 * 1024 * 1024;
+const MAX_PUBLIC_REQUEST_HEADERS: usize = 32;
+const MAX_PUBLIC_HEADER_VALUE_BYTES: usize = 8 * 1024;
 const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_REDIRECTS: u8 = 10;
 
@@ -292,6 +294,7 @@ pub struct HttpRequest {
     method: Method,
     url: Url,
     authentication: Option<Authentication>,
+    public_headers: Vec<(HeaderName, HeaderValue)>,
     body: Vec<u8>,
     json: bool,
 }
@@ -304,6 +307,7 @@ impl HttpRequest {
             method: Method::GET,
             url,
             authentication: None,
+            public_headers: Vec::new(),
             body: Vec::new(),
             json: false,
         }
@@ -330,6 +334,7 @@ impl HttpRequest {
             method: Method::POST,
             url,
             authentication: None,
+            public_headers: Vec::new(),
             body,
             json: false,
         })
@@ -352,6 +357,36 @@ impl HttpRequest {
         self.authentication = Some(authentication);
         self
     }
+
+    /// Attaches one bounded, explicitly non-secret provider metadata header.
+    ///
+    /// Authentication, cookies, framing headers, and JSON media-type headers
+    /// remain owned by the transport and cannot be replaced here.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid or reserved names, invalid values, an
+    /// oversized value, or too many metadata headers.
+    pub fn public_header(
+        mut self,
+        name: impl AsRef<str>,
+        value: impl AsRef<str>,
+    ) -> Result<Self, TransportError> {
+        if self.public_headers.len() >= MAX_PUBLIC_REQUEST_HEADERS
+            || value.as_ref().len() > MAX_PUBLIC_HEADER_VALUE_BYTES
+        {
+            return Err(TransportError::InvalidConfiguration);
+        }
+        let name = HeaderName::from_bytes(name.as_ref().as_bytes())
+            .map_err(|_| TransportError::InvalidConfiguration)?;
+        if is_reserved_public_header(&name) {
+            return Err(TransportError::InvalidConfiguration);
+        }
+        let value = HeaderValue::from_str(value.as_ref())
+            .map_err(|_| TransportError::InvalidConfiguration)?;
+        self.public_headers.push((name, value));
+        Ok(self)
+    }
 }
 
 impl Debug for HttpRequest {
@@ -364,6 +399,7 @@ impl Debug for HttpRequest {
             .field("path", &"<redacted>")
             .field("query", &"<redacted>")
             .field("authentication", &self.authentication)
+            .field("public_header_count", &self.public_headers.len())
             .field("json", &self.json)
             .field("body_bytes", &self.body.len())
             .finish()
@@ -519,6 +555,9 @@ impl<C: RetryClock> HttpTransport<C> {
             if !request.body.is_empty() {
                 builder = builder.body(request.body.clone());
             }
+            for (name, value) in &request.public_headers {
+                builder = builder.header(name, value);
+            }
             if let Some(authentication) = &request.authentication {
                 builder = authentication.apply(builder)?;
             }
@@ -620,4 +659,8 @@ fn is_reserved_api_key_header(name: &HeaderName) -> bool {
                 | "upgrade"
                 | "www-authenticate"
         )
+}
+
+fn is_reserved_public_header(name: &HeaderName) -> bool {
+    is_reserved_api_key_header(name) || matches!(name, &ACCEPT | &CONTENT_TYPE)
 }

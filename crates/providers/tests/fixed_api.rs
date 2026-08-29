@@ -156,6 +156,52 @@ async fn json_post_sets_media_type_and_preserves_bounded_body() {
     assert_eq!(request.body(), br#"{"probe":"ping"}"#);
 }
 
+#[tokio::test]
+async fn json_post_supports_bounded_public_client_metadata_headers() {
+    let server = FakeHttpServer::start([FakeHttpResponse::new(200, Vec::new())]).await;
+    let client = FixedApiClient::new_bearer(
+        scope("account-a"),
+        server.url("/v1/"),
+        EndpointClass::LoopbackDevelopment,
+        ApiKeyCredential::new("fixture-bearer-canary").expect("credential"),
+        config(),
+    )
+    .expect("fixed API client");
+    let context = ProviderContext::new(
+        scope("account-a"),
+        ProviderSource::ApiKey,
+        CancellationToken::new(),
+    );
+    client
+        .post_json_with_public_headers(
+            &context,
+            client.url("query").expect("query URL"),
+            br#"{"query":"probe"}"#.to_vec(),
+            &[("user-agent", "Provider/1.0"), ("x-client-id", "desktop")],
+        )
+        .await
+        .expect("metadata JSON POST");
+    let request = &server.requests()[0];
+    assert_eq!(request.header("user-agent"), Some("Provider/1.0"));
+    assert_eq!(request.header("x-client-id"), Some("desktop"));
+    assert_eq!(
+        request.header("authorization"),
+        Some("Bearer fixture-bearer-canary")
+    );
+
+    let error = client
+        .post_json_with_public_headers(
+            &context,
+            client.url("query").expect("query URL"),
+            Vec::new(),
+            &[("authorization", "not-allowed")],
+        )
+        .await
+        .expect_err("reserved metadata header");
+    assert_eq!(error.kind(), ErrorKind::Api);
+    assert_eq!(server.requests().len(), 1);
+}
+
 #[test]
 fn fixed_paths_cannot_replace_the_approved_origin_or_inject_queries() {
     let client = FixedApiClient::new(

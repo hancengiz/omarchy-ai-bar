@@ -299,6 +299,30 @@ impl FixedApiClient {
         self.send(context, request).await
     }
 
+    /// Performs one authenticated JSON POST with bounded, non-secret provider
+    /// client-metadata headers.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable API error for invalid/reserved metadata headers,
+    /// scope/source mismatches, or an oversized body, plus the shared
+    /// classified transport errors for network/provider failures.
+    pub async fn post_json_with_public_headers(
+        &self,
+        context: &ProviderContext,
+        url: Url,
+        body: Vec<u8>,
+        headers: &[(&str, &str)],
+    ) -> Result<HttpResponse, ClassifiedError> {
+        let mut request = HttpRequest::post_json(url, body).map_err(|error| error.classified())?;
+        for (name, value) in headers {
+            request = request
+                .public_header(name, value)
+                .map_err(|error| error.classified())?;
+        }
+        self.send(context, request).await
+    }
+
     async fn send(
         &self,
         context: &ProviderContext,
