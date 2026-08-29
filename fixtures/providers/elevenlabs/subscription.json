@@ -1,0 +1,15 @@
+{
+  "tier": "creator",
+  "character_count": 25000,
+  "character_limit": 100000,
+  "voice_slots_used": 2,
+  "voice_limit": 10,
+  "professional_voice_slots_used": 1,
+  "professional_voice_limit": 2,
+  "current_overage": {
+    "amount": "0",
+    "currency": "usd"
+  },
+  "status": "active",
+  "next_character_count_reset_unix": 1738356858
+}
