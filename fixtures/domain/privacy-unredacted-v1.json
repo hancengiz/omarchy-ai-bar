@@ -1,0 +1,240 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-29T10:00:00Z",
+  "snapshots": [
+    {
+      "state": "ready",
+      "last_known_good": {
+        "scope": {
+          "provider": "codex",
+          "instance": "personal",
+          "account": "acct_fixture_7m3j"
+        },
+        "identity": {
+          "scope": {
+            "provider": "codex",
+            "instance": "personal",
+            "account": "acct_fixture_7m3j"
+          },
+          "provider_account_id": "usr_ada_private",
+          "email": "ada@example.com",
+          "organization": "Analytical Engines",
+          "account_label": "Ada personal",
+          "plan": "Pro",
+          "login_method": "OAuth"
+        },
+        "fetched_at": "2026-08-29T10:00:00Z",
+        "primary": {
+          "usage": {
+            "state": "known",
+            "used_percent": 42.5
+          },
+          "duration_seconds": 18000,
+          "resets_at": "2026-08-29T12:00:00Z",
+          "reset_description": "in 2 hours",
+          "next_regen_percent": 5.0,
+          "synthetic_placeholder": false
+        },
+        "secondary": null,
+        "tertiary": null,
+        "extra_windows": [
+          {
+            "id": "monthly-reset",
+            "title": "Monthly reset",
+            "window": {
+              "usage": {
+                "state": "unknown"
+              },
+              "duration_seconds": 2592000,
+              "resets_at": "2026-09-01T00:00:00Z",
+              "reset_description": "September 1",
+              "next_regen_percent": null,
+              "synthetic_placeholder": false
+            }
+          },
+          {
+            "id": "session-placeholder",
+            "title": "Session",
+            "window": {
+              "usage": {
+                "state": "known",
+                "used_percent": 0.0
+              },
+              "duration_seconds": 18000,
+              "resets_at": null,
+              "reset_description": null,
+              "next_regen_percent": null,
+              "synthetic_placeholder": true
+            }
+          }
+        ],
+        "credits": {
+          "scope": {
+            "provider": "codex",
+            "instance": "personal",
+            "account": "acct_fixture_7m3j"
+          },
+          "remaining": "123.45",
+          "events": [
+            {
+              "scope": {
+                "provider": "codex",
+                "instance": "personal",
+                "account": "acct_fixture_7m3j"
+              },
+              "id": "11111111111111111111111111111111",
+              "occurred_at": "2026-08-29T09:30:00Z",
+              "service": "Private API spend",
+              "used": "1.5"
+            }
+          ],
+          "updated_at": "2026-08-29T09:55:00Z",
+          "limit": {
+            "title": "Monthly credit limit",
+            "used": "36.797",
+            "limit": "1000",
+            "remaining": "963.203",
+            "remaining_percent": 96.0,
+            "resets_at": "2026-09-01T00:00:00Z",
+            "updated_at": "2026-08-29T09:50:00Z"
+          }
+        },
+        "balance": {
+          "amount": "19.99",
+          "currency": "USD"
+        },
+        "cost": {
+          "used": {
+            "amount": "12.34",
+            "currency": "USD"
+          },
+          "limit": "100",
+          "period": "Monthly",
+          "resets_at": "2026-09-01T00:00:00Z",
+          "next_regen_amount": "5",
+          "personal_used": "7.25",
+          "balance": "19.99",
+          "updated_at": "2026-08-29T10:00:00Z",
+          "period_start": "2026-08-01T00:00:00Z",
+          "period_end": "2026-09-01T00:00:00Z",
+          "provenance": "list_price_estimate"
+        },
+        "subscription_renews_at": "2026-09-01T00:00:00Z",
+        "subscription_expires_at": "2027-08-29T00:00:00Z",
+        "reset_credits": {
+          "scope": {
+            "provider": "codex",
+            "instance": "personal",
+            "account": "acct_fixture_7m3j"
+          },
+          "credits": [
+            {
+              "scope": {
+                "provider": "codex",
+                "instance": "personal",
+                "account": "acct_fixture_7m3j"
+              },
+              "id": "0123456789abcdef0123456789abcdef",
+              "reset_type": "rate_limit",
+              "status": "available",
+              "granted_at": "2026-08-01T00:00:00Z",
+              "expires_at": "2026-08-31T00:00:00Z",
+              "redeem_started_at": null,
+              "redeemed_at": null,
+              "title": "Bonus reset",
+              "description": "One additional quota reset"
+            }
+          ],
+          "reported_available_count": 1,
+          "updated_at": "2026-08-29T09:58:00Z"
+        },
+        "detail_sections": [
+          {
+            "title": "Workspace",
+            "rows": [
+              {
+                "label": "Project",
+                "value": "/home/ada/secret-project",
+                "secondary_value": null,
+                "sensitivity": "personal"
+              },
+              {
+                "label": "Contact",
+                "value": "owner ada@example.com",
+                "secondary_value": "ada@example.com",
+                "sensitivity": "public"
+              }
+            ],
+            "chart": {
+              "kind": "bars",
+              "title": "Requests by model",
+              "unit": "requests",
+              "points": [
+                {
+                  "label": "gpt-5",
+                  "value": 14.0
+                }
+              ]
+            }
+          }
+        ],
+        "extensions": [
+          {
+            "kind": "open_ai_api_usage",
+            "facts": [
+              {
+                "key": "cached_tokens",
+                "label": "Cached tokens",
+                "value": {
+                  "type": "decimal",
+                  "value": "512"
+                },
+                "sensitivity": "public"
+              }
+            ],
+            "sections": []
+          }
+        ],
+        "chart_points": [
+          {
+            "at": "2026-08-28T00:00:00Z",
+            "value": "1.25"
+          },
+          {
+            "at": "2026-08-29T00:00:00Z",
+            "value": "2.5"
+          }
+        ],
+        "provenance": [
+          {
+            "source": "Codex CLI",
+            "strategy": "local account ada@example.com"
+          }
+        ],
+        "confidence": "exact",
+        "status": {
+          "health": "operational",
+          "description": "All systems operational",
+          "checked_at": "2026-08-29T10:00:00Z",
+          "incidents": [],
+          "components": [
+            {
+              "id": "api",
+              "name": "API",
+              "health": "operational",
+              "raw_status": "operational",
+              "children": []
+            }
+          ]
+        }
+      },
+      "freshness": {
+        "state": "fresh"
+      },
+      "refresh": {
+        "state": "idle"
+      },
+      "error": null
+    }
+  ]
+}

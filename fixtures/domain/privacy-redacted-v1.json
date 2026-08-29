@@ -1,0 +1,170 @@
+{
+  "schema_version": 1,
+  "privacy": "redacted",
+  "generated_at": "2026-08-29T10:00:00Z",
+  "snapshots": [
+    {
+      "state": "ready",
+      "last_known_good": {
+        "scope": {
+          "provider": "codex",
+          "instance": "instance-96086166419cea4132ab7fab",
+          "account": "account-2d7d6886316a124fa54d3ccf"
+        },
+        "identity": {
+          "scope": {
+            "provider": "codex",
+            "instance": "instance-96086166419cea4132ab7fab",
+            "account": "account-2d7d6886316a124fa54d3ccf"
+          },
+          "provider_account_id": null,
+          "email": null,
+          "organization": null,
+          "account_label": null,
+          "plan": null,
+          "login_method": null
+        },
+        "fetched_at": "2026-08-29T10:00:00Z",
+        "primary": {
+          "usage": {
+            "state": "known",
+            "used_percent": 42.5
+          },
+          "duration_seconds": 18000,
+          "resets_at": "2026-08-29T12:00:00Z",
+          "reset_description": null,
+          "next_regen_percent": 5.0,
+          "synthetic_placeholder": false
+        },
+        "secondary": null,
+        "tertiary": null,
+        "extra_windows": [
+          {
+            "id": "window-1",
+            "title": "Window 1",
+            "window": {
+              "usage": {
+                "state": "unknown"
+              },
+              "duration_seconds": 2592000,
+              "resets_at": "2026-09-01T00:00:00Z",
+              "reset_description": null,
+              "next_regen_percent": null,
+              "synthetic_placeholder": false
+            }
+          },
+          {
+            "id": "window-2",
+            "title": "Window 2",
+            "window": {
+              "usage": {
+                "state": "known",
+                "used_percent": 0.0
+              },
+              "duration_seconds": 18000,
+              "resets_at": null,
+              "reset_description": null,
+              "next_regen_percent": null,
+              "synthetic_placeholder": true
+            }
+          }
+        ],
+        "credits": {
+          "scope": {
+            "provider": "codex",
+            "instance": "instance-96086166419cea4132ab7fab",
+            "account": "account-2d7d6886316a124fa54d3ccf"
+          },
+          "remaining": "123.45",
+          "events": [],
+          "updated_at": "2026-08-29T09:55:00Z",
+          "limit": {
+            "title": "Credit limit",
+            "used": "36.797",
+            "limit": "1000",
+            "remaining": "963.203",
+            "remaining_percent": 96.0,
+            "resets_at": "2026-09-01T00:00:00Z",
+            "updated_at": "2026-08-29T09:50:00Z"
+          }
+        },
+        "balance": {
+          "amount": "19.99",
+          "currency": "USD"
+        },
+        "cost": {
+          "used": {
+            "amount": "12.34",
+            "currency": "USD"
+          },
+          "limit": "100",
+          "period": null,
+          "resets_at": "2026-09-01T00:00:00Z",
+          "next_regen_amount": "5",
+          "personal_used": null,
+          "balance": "19.99",
+          "updated_at": "2026-08-29T10:00:00Z",
+          "period_start": "2026-08-01T00:00:00Z",
+          "period_end": "2026-09-01T00:00:00Z",
+          "provenance": "list_price_estimate"
+        },
+        "subscription_renews_at": "2026-09-01T00:00:00Z",
+        "subscription_expires_at": "2027-08-29T00:00:00Z",
+        "reset_credits": {
+          "scope": {
+            "provider": "codex",
+            "instance": "instance-96086166419cea4132ab7fab",
+            "account": "account-2d7d6886316a124fa54d3ccf"
+          },
+          "credits": [
+            {
+              "scope": {
+                "provider": "codex",
+                "instance": "instance-96086166419cea4132ab7fab",
+                "account": "account-2d7d6886316a124fa54d3ccf"
+              },
+              "id": "39fb1c762ed7b941165c40d1075f9514",
+              "reset_type": "reset",
+              "status": "available",
+              "granted_at": "2026-08-01T00:00:00Z",
+              "expires_at": "2026-08-31T00:00:00Z",
+              "redeem_started_at": null,
+              "redeemed_at": null,
+              "title": null,
+              "description": null
+            }
+          ],
+          "reported_available_count": 1,
+          "updated_at": "2026-08-29T09:58:00Z"
+        },
+        "detail_sections": [],
+        "extensions": [],
+        "chart_points": [
+          {
+            "at": "2026-08-28T00:00:00Z",
+            "value": "1.25"
+          },
+          {
+            "at": "2026-08-29T00:00:00Z",
+            "value": "2.5"
+          }
+        ],
+        "provenance": [],
+        "confidence": "exact",
+        "status": {
+          "health": "operational",
+          "description": null,
+          "checked_at": "2026-08-29T10:00:00Z",
+          "incidents": []
+        }
+      },
+      "freshness": {
+        "state": "fresh"
+      },
+      "refresh": {
+        "state": "idle"
+      },
+      "error": null
+    }
+  ]
+}

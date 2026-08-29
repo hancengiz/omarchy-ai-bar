@@ -28,7 +28,7 @@ macro_rules! provider_ids {
             fn from_str(value: &str) -> Result<Self, Self::Err> {
                 match value {
                     $($value => Ok(Self::$variant),)+
-                    _ => Err(ParseProviderIdError(value.to_owned())),
+                    _ => Err(ParseProviderIdError),
                 }
             }
         }
@@ -133,11 +133,11 @@ impl<'de> Deserialize<'de> for ProviderId {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParseProviderIdError(String);
+pub struct ParseProviderIdError;
 
 impl Display for ParseProviderIdError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        write!(formatter, "unknown provider: {}", self.0)
+        formatter.write_str("unknown provider")
     }
 }
 
