@@ -1,0 +1,1 @@
+{"type":"hello","protocol":{"major":1,"minor":0},"bridge_version":{"major":1,"minor":0,"patch":0},"session_id":"0123456789abcdef0123456789abcdef","capabilities":["display_snapshots","runtime_actions"]}
