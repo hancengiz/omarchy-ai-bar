@@ -1391,18 +1391,30 @@
         "Sources/CodexBarCore/Providers/ProviderManifest.swift"
       ],
       "cells": {
-        "authentication": "planned",
-        "usage_resets": "planned",
-        "costs_history": "planned",
-        "sessions": "planned",
-        "browser": "planned",
-        "status_errors": "planned",
-        "refresh": "planned",
-        "cli_server": "planned",
+        "authentication": "not-applicable",
+        "usage_resets": "not-applicable",
+        "costs_history": "not-applicable",
+        "sessions": "not-applicable",
+        "browser": "not-applicable",
+        "status_errors": "passing",
+        "refresh": "passing",
+        "cli_server": "in-progress",
         "qml_ui": "planned"
       },
-      "status": "planned",
-      "tests": []
+      "status": "in-progress",
+      "tests": [
+        "crates/providers/tests/configured_endpoint.rs",
+        "crates/providers/tests/endpoint_policy.rs",
+        "crates/providers/tests/http_transport.rs",
+        "crates/providers/tests/provider_wayfinder.rs"
+      ],
+      "not_applicable_reasons": {
+        "authentication": "The pinned baseline polls Wayfinder's read-only gateway endpoints without credentials.",
+        "usage_resets": "The pinned baseline reports routing and savings analytics, not a quota or reset window.",
+        "costs_history": "The pinned baseline exposes a current 30-day savings aggregate and no cost-history series.",
+        "sessions": "The pinned baseline has no Wayfinder agent-session source.",
+        "browser": "The pinned baseline reads the local gateway API directly and does not use browser state."
+      }
     },
     {
       "id": "zenmux",

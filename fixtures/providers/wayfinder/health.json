@@ -1,0 +1,5 @@
+{
+  "status": "ok",
+  "models": ["cloud", "local"],
+  "offline": false
+}

@@ -1,0 +1,11 @@
+# HELP wayfinder_router_requests_total Routed requests by model and mode.
+# TYPE wayfinder_router_requests_total counter
+wayfinder_router_requests_total{model="local",mode="scored"} 10
+wayfinder_router_requests_total{model="cloud",mode="scored"} 4
+# HELP wayfinder_router_decision_latency_seconds Time to score a prompt and pick a model.
+# TYPE wayfinder_router_decision_latency_seconds histogram
+wayfinder_router_decision_latency_seconds_bucket{le="0.0001"} 13
+wayfinder_router_decision_latency_seconds_bucket{le="0.00025"} 14
+wayfinder_router_decision_latency_seconds_bucket{le="+Inf"} 14
+wayfinder_router_decision_latency_seconds_sum 0.00112602
+wayfinder_router_decision_latency_seconds_count 14
