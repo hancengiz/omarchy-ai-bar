@@ -455,6 +455,7 @@ dependencies = [
 name = "oab-ipc"
 version = "0.1.0"
 dependencies = [
+ "getrandom",
  "nix",
  "oab-domain",
  "serde",
@@ -496,6 +497,10 @@ name = "omarchy-ai-bar"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "nix",
+ "oab-domain",
+ "oab-ipc",
+ "serde",
  "serde_json",
 ]
 

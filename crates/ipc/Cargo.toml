@@ -9,6 +9,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+getrandom.workspace = true
 nix.workspace = true
 oab-domain = { path = "../domain" }
 serde.workspace = true

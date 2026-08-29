@@ -5,17 +5,25 @@ use oab_ipc::codec::{
     JsonLineDecoder, JsonLineError, MAX_JSON_LINE_BYTES, decode_json_line, encode_json_line,
 };
 use oab_ipc::protocol::{
-    AcceptedClientFrame, BridgeVersion, Capability, CapabilitySet, ClientHello, ClientMessage,
-    FrontendSessionId, HandshakeError, HandshakeGuard, MAX_REPLAY_SESSIONS, ProtocolVersion,
+    AcceptedClientFrame, BackendStreamId, BridgeVersion, Capability, CapabilitySet, ClientHello,
+    ClientMessage, FrontendSessionId, HandshakeError, MAX_REPLAY_SESSIONS, ProtocolVersion,
     RequestId, RequestReplayDisposition, RequestReplayRegistry, RequestReplayRegistryError,
-    RuntimeAction, Sequence, SequenceDisposition, SequenceTracker, ServerMessage, V1_PROTOCOL,
-    WireIntegerError, negotiate_v1,
+    RuntimeAction, Sequence, SequenceDisposition, SequenceTracker, ServerHandshakeContext,
+    ServerMessage, V1_PROTOCOL, WireIntegerError,
 };
 use serde::Serialize;
 use serde::ser::{Error as _, SerializeSeq};
 
 fn session_id(suffix: u8) -> FrontendSessionId {
     FrontendSessionId::parse(format!("{suffix:032x}")).expect("canonical frontend session ID")
+}
+
+fn stream_id(suffix: u8) -> BackendStreamId {
+    BackendStreamId::parse(format!("{suffix:032x}")).expect("canonical backend stream ID")
+}
+
+fn handshake_context(capabilities: CapabilitySet) -> ServerHandshakeContext {
+    ServerHandshakeContext::new(capabilities).expect("OS randomness initializes handshake context")
 }
 
 fn client_hello(
@@ -51,7 +59,13 @@ fn v1_handshake_negotiates_a_canonical_capability_intersection() {
     ])
     .expect("unique capabilities");
 
-    let negotiated = negotiate_v1(&client, &server).expect("compatible v1 handshake");
+    let mut guard = handshake_context(server).connection();
+    let AcceptedClientFrame::Hello(negotiated) = guard
+        .accept(&ClientMessage::hello(client))
+        .expect("compatible v1 handshake")
+    else {
+        panic!("expected negotiated hello");
+    };
 
     assert_eq!(negotiated.protocol(), V1_PROTOCOL);
     assert_eq!(
@@ -69,7 +83,9 @@ fn handshake_rejects_an_unsupported_major() {
     );
 
     assert_eq!(
-        negotiate_v1(&client, &CapabilitySet::default()),
+        handshake_context(CapabilitySet::default())
+            .connection()
+            .accept(&ClientMessage::hello(client)),
         Err(HandshakeError::UnsupportedMajor {
             received: 2,
             supported: 1,
@@ -83,7 +99,7 @@ fn handshake_accepts_every_frame_and_enforces_state_and_capabilities() {
         CapabilitySet::new([Capability::DisplaySnapshots, Capability::RuntimeActions])
             .expect("unique capabilities");
     let frontend_session = session_id(1);
-    let mut guard = HandshakeGuard::new(capabilities.clone());
+    let mut guard = handshake_context(capabilities.clone()).connection();
     let action: ClientMessage = decode_json_line(include_bytes!(
         "../../../fixtures/ipc/client-action-v1.jsonl"
     ))
@@ -104,9 +120,19 @@ fn handshake_accepts_every_frame_and_enforces_state_and_capabilities() {
         capabilities.clone(),
     ));
     let accepted = guard.accept(&hello).expect("hello accepted");
-    assert!(matches!(accepted, AcceptedClientFrame::Hello(_)));
+    assert!(matches!(&accepted, AcceptedClientFrame::Hello(_)));
     assert!(guard.is_complete());
     assert_eq!(guard.session_id(), Some(&frontend_session));
+    assert_eq!(
+        guard
+            .negotiated()
+            .expect("negotiated hello retained")
+            .stream_id(),
+        match &accepted {
+            AcceptedClientFrame::Hello(hello) => hello.stream_id(),
+            _ => unreachable!("accepted frame was already checked as hello"),
+        }
+    );
     assert_eq!(
         guard
             .negotiated()
@@ -140,10 +166,11 @@ fn handshake_accepts_every_frame_and_enforces_state_and_capabilities() {
 
 #[test]
 fn handshake_rejects_runtime_frames_without_their_negotiated_capability() {
-    let mut guard = HandshakeGuard::new(
+    let mut guard = handshake_context(
         CapabilitySet::new([Capability::DisplaySnapshots, Capability::RuntimeActions])
             .expect("unique capabilities"),
-    );
+    )
+    .connection();
     let hello = ClientMessage::hello(client_hello(
         V1_PROTOCOL,
         session_id(1),
@@ -173,7 +200,7 @@ fn handshake_rejects_runtime_frames_without_their_negotiated_capability() {
 
 #[test]
 fn unsupported_major_does_not_create_a_negotiated_session() {
-    let mut guard = HandshakeGuard::new(CapabilitySet::default());
+    let mut guard = handshake_context(CapabilitySet::default()).connection();
     let unsupported = ClientMessage::hello(client_hello(
         ProtocolVersion::new(2, 0),
         session_id(1),
@@ -254,6 +281,33 @@ fn frontend_session_ids_are_stable_canonical_and_error_safe() {
 }
 
 #[test]
+fn backend_stream_ids_are_canonical_and_error_safe_on_reencode() {
+    let identifier = stream_id(42);
+    let encoded = serde_json::to_string(&identifier).expect("stream ID serializes");
+    assert_eq!(encoded, r#""0000000000000000000000000000002a""#);
+    let decoded = serde_json::from_str::<BackendStreamId>(&encoded).expect("stream ID round trip");
+    assert_eq!(decoded, identifier);
+    assert_eq!(
+        serde_json::to_string(&decoded).expect("canonical stream ID reencode"),
+        encoded
+    );
+    assert_eq!(format!("{identifier:?}"), "BackendStreamId(<redacted>)");
+
+    for invalid in [
+        "short",
+        "0123456789ABCDEF0123456789ABCDEF",
+        "gggggggggggggggggggggggggggggggg",
+        "0123456789abcdef0123456789abcdef00",
+    ] {
+        let payload = format!("\"{invalid}\"");
+        let error = serde_json::from_str::<BackendStreamId>(&payload)
+            .expect_err("invalid stream ID")
+            .to_string();
+        assert!(!error.contains(invalid));
+    }
+}
+
+#[test]
 fn request_replay_registry_is_monotonic_across_reconnects() {
     let frontend_session = session_id(1);
     let action: ClientMessage = decode_json_line(include_bytes!(
@@ -261,13 +315,14 @@ fn request_replay_registry_is_monotonic_across_reconnects() {
     ))
     .expect("action fixture");
     let capabilities = CapabilitySet::new([Capability::RuntimeActions]).expect("unique capability");
+    let handshake = handshake_context(capabilities.clone());
     let mut registry = RequestReplayRegistry::new(2).expect("bounded registry");
 
     for expected in [
         RequestReplayDisposition::New,
         RequestReplayDisposition::Replay,
     ] {
-        let mut connection = HandshakeGuard::new(capabilities.clone());
+        let mut connection = handshake.connection();
         connection
             .accept(&ClientMessage::hello(client_hello(
                 V1_PROTOCOL,
@@ -370,9 +425,10 @@ fn forward_minor_hello_negotiates_only_known_capabilities() {
         b"{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":99},\"bridge_version\":{\"major\":1,\"minor\":0,\"patch\":0},\"session_id\":\"0123456789abcdef0123456789abcdef\",\"capabilities\":[\"display_snapshots\",\"future_widget\"]}\n",
     )
     .expect("future-minor hello");
-    let mut guard = HandshakeGuard::new(
+    let mut guard = handshake_context(
         CapabilitySet::new([Capability::DisplaySnapshots]).expect("known capability"),
-    );
+    )
+    .connection();
     let AcceptedClientFrame::Hello(response) =
         guard.accept(&hello).expect("compatible major negotiates")
     else {
@@ -416,6 +472,7 @@ fn capability_names_are_bounded_canonical_and_unique_before_filtering() {
 fn canonical_server_fixtures_match_the_serialize_only_wire_types() {
     let hello = ServerMessage::Hello {
         protocol: V1_PROTOCOL,
+        stream_id: stream_id(1),
         capabilities: CapabilitySet::new([
             Capability::DisplaySnapshots,
             Capability::RuntimeActions,

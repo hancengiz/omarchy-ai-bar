@@ -24,6 +24,8 @@ const MAX_CAPABILITIES: usize = 32;
 const MAX_CAPABILITY_NAME_BYTES: usize = 64;
 const MAX_PUBLIC_ROUTE_ID_BYTES: usize = 96;
 const FRONTEND_SESSION_ID_HEX_BYTES: usize = 32;
+const BACKEND_STREAM_ID_HEX_BYTES: usize = 32;
+const BACKEND_STREAM_ID_RANDOM_BYTES: usize = BACKEND_STREAM_ID_HEX_BYTES / 2;
 
 /// A wire protocol version. Major compatibility is checked by the handshake.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -299,6 +301,123 @@ impl<'de> Deserialize<'de> for FrontendSessionId {
 #[error("invalid frontend session ID")]
 pub struct FrontendSessionIdError;
 
+/// A stable, non-secret identifier for one backend process lifetime.
+///
+/// The canonical representation is exactly 128 bits written as 32 lowercase
+/// hexadecimal characters. A backend reuses this identifier for every
+/// display-socket connection in the same process lifetime and generates a new
+/// identifier after restart.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(transparent)]
+pub struct BackendStreamId(String);
+
+impl BackendStreamId {
+    /// Parses one canonical backend stream identifier.
+    ///
+    /// # Errors
+    ///
+    /// Values that are not exactly 32 lowercase hexadecimal bytes are rejected.
+    pub fn parse(value: impl Into<String>) -> Result<Self, BackendStreamIdError> {
+        let value = value.into();
+        if value.len() != BACKEND_STREAM_ID_HEX_BYTES
+            || !value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+        {
+            return Err(BackendStreamIdError);
+        }
+        Ok(Self(value))
+    }
+
+    fn generate() -> Result<Self, ServerHandshakeContextError> {
+        const LOWER_HEX: &[u8; 16] = b"0123456789abcdef";
+
+        let mut random = [0_u8; BACKEND_STREAM_ID_RANDOM_BYTES];
+        getrandom::getrandom(&mut random)
+            .map_err(|source| ServerHandshakeContextError { source })?;
+
+        let mut encoded = String::with_capacity(BACKEND_STREAM_ID_HEX_BYTES);
+        for byte in random {
+            encoded.push(char::from(LOWER_HEX[usize::from(byte >> 4)]));
+            encoded.push(char::from(LOWER_HEX[usize::from(byte & 0x0f)]));
+        }
+        Ok(Self(encoded))
+    }
+}
+
+impl Debug for BackendStreamId {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str("BackendStreamId(<redacted>)")
+    }
+}
+
+impl<'de> Deserialize<'de> for BackendStreamId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Self::parse(String::deserialize(deserializer)?).map_err(de::Error::custom)
+    }
+}
+
+/// A backend stream identifier failed canonical validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error("invalid backend stream ID")]
+pub struct BackendStreamIdError;
+
+/// Failure to initialize the process-lifetime server handshake context.
+#[derive(Debug, Error)]
+#[error("could not initialize the server handshake context")]
+pub struct ServerHandshakeContextError {
+    #[source]
+    source: getrandom::Error,
+}
+
+/// Process-lifetime handshake state shared by every display connection.
+///
+/// Construct this once when the backend starts, then use [`Self::connection`]
+/// for each accepted display socket. Every connection reports the same stream
+/// identifier, while a restarted backend creates a fresh identifier.
+#[derive(Debug, Clone)]
+pub struct ServerHandshakeContext {
+    server_capabilities: CapabilitySet,
+    stream_id: BackendStreamId,
+}
+
+impl ServerHandshakeContext {
+    /// Creates a process-lifetime context with a fresh OS-random stream ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the operating system cannot provide randomness.
+    pub fn new(server_capabilities: CapabilitySet) -> Result<Self, ServerHandshakeContextError> {
+        Ok(Self::with_stream_id(
+            server_capabilities,
+            BackendStreamId::generate()?,
+        ))
+    }
+
+    const fn with_stream_id(
+        server_capabilities: CapabilitySet,
+        stream_id: BackendStreamId,
+    ) -> Self {
+        Self {
+            server_capabilities,
+            stream_id,
+        }
+    }
+
+    /// Creates hello-first protocol state for one display connection.
+    #[must_use]
+    pub fn connection(&self) -> HandshakeGuard {
+        HandshakeGuard {
+            server_capabilities: self.server_capabilities.clone(),
+            stream_id: self.stream_id.clone(),
+            session: None,
+        }
+    }
+}
+
 /// A validated frontend hello independent of the outer message tag.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -351,6 +470,7 @@ impl ClientHello {
 #[serde(deny_unknown_fields)]
 pub struct ServerHello {
     protocol: ProtocolVersion,
+    stream_id: BackendStreamId,
     capabilities: CapabilitySet,
 }
 
@@ -358,6 +478,11 @@ impl ServerHello {
     #[must_use]
     pub const fn protocol(&self) -> ProtocolVersion {
         self.protocol
+    }
+
+    #[must_use]
+    pub const fn stream_id(&self) -> &BackendStreamId {
+        &self.stream_id
     }
 
     #[must_use]
@@ -371,9 +496,10 @@ impl ServerHello {
 /// # Errors
 ///
 /// A client using any other protocol major is rejected.
-pub fn negotiate_v1(
+fn negotiate_v1(
     client: &ClientHello,
     server_capabilities: &CapabilitySet,
+    stream_id: &BackendStreamId,
 ) -> Result<ServerHello, HandshakeError> {
     if client.protocol.major != PROTOCOL_V1_MAJOR {
         return Err(HandshakeError::UnsupportedMajor {
@@ -384,6 +510,7 @@ pub fn negotiate_v1(
 
     Ok(ServerHello {
         protocol: V1_PROTOCOL,
+        stream_id: stream_id.clone(),
         capabilities: client.capabilities.intersection(server_capabilities),
     })
 }
@@ -687,6 +814,7 @@ pub enum CompatibilityErrorCode {
 pub enum ServerMessage<'a> {
     Hello {
         protocol: ProtocolVersion,
+        stream_id: BackendStreamId,
         capabilities: CapabilitySet,
     },
     Snapshot {
@@ -712,6 +840,7 @@ impl ServerMessage<'_> {
     pub fn hello(hello: ServerHello) -> Self {
         Self::Hello {
             protocol: hello.protocol,
+            stream_id: hello.stream_id,
             capabilities: hello.capabilities,
         }
     }
@@ -1277,6 +1406,7 @@ pub enum AcceptedClientFrame<'a> {
 #[derive(Debug, Clone)]
 pub struct HandshakeGuard {
     server_capabilities: CapabilitySet,
+    stream_id: BackendStreamId,
     session: Option<NegotiatedSession>,
 }
 
@@ -1287,14 +1417,6 @@ struct NegotiatedSession {
 }
 
 impl HandshakeGuard {
-    #[must_use]
-    pub const fn new(server_capabilities: CapabilitySet) -> Self {
-        Self {
-            server_capabilities,
-            session: None,
-        }
-    }
-
     /// Validates one frame against the complete connection state.
     ///
     /// # Errors
@@ -1311,7 +1433,7 @@ impl HandshakeGuard {
                     return Err(HandshakeError::AlreadyComplete);
                 }
                 let hello = message.as_hello().ok_or(HandshakeError::HelloRequired)?;
-                let negotiated = negotiate_v1(&hello, &self.server_capabilities)?;
+                let negotiated = negotiate_v1(&hello, &self.server_capabilities, &self.stream_id)?;
                 self.session = Some(NegotiatedSession {
                     session_id: hello.session_id,
                     hello: negotiated.clone(),
@@ -1357,5 +1479,52 @@ impl HandshakeGuard {
             return Err(HandshakeError::CapabilityNotNegotiated { required });
         }
         Ok(session)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stream_id(suffix: u8) -> BackendStreamId {
+        BackendStreamId::parse(format!("{suffix:032x}")).expect("test stream ID must be canonical")
+    }
+
+    fn negotiated_hello(context: &ServerHandshakeContext) -> ServerHello {
+        let hello = ClientMessage::hello(ClientHello::new(
+            V1_PROTOCOL,
+            BridgeVersion::new(1, 0, 0),
+            FrontendSessionId::parse("0123456789abcdef0123456789abcdef")
+                .expect("test frontend session ID must be canonical"),
+            CapabilitySet::default(),
+        ));
+        let mut connection = context.connection();
+        let AcceptedClientFrame::Hello(hello) =
+            connection.accept(&hello).expect("hello must negotiate")
+        else {
+            panic!("expected a negotiated hello");
+        };
+        hello
+    }
+
+    #[test]
+    fn server_context_reuses_one_stream_id_and_separates_process_epochs() {
+        let first_context =
+            ServerHandshakeContext::with_stream_id(CapabilitySet::default(), stream_id(1));
+        let restarted_context =
+            ServerHandshakeContext::with_stream_id(CapabilitySet::default(), stream_id(2));
+
+        let first_connection = negotiated_hello(&first_context);
+        let reconnected = negotiated_hello(&first_context);
+        let restarted = negotiated_hello(&restarted_context);
+
+        assert_eq!(first_connection.stream_id(), reconnected.stream_id());
+        assert_ne!(first_connection.stream_id(), restarted.stream_id());
+        assert_ne!(
+            serde_json::to_vec(&ServerMessage::hello(first_connection))
+                .expect("first process hello serializes"),
+            serde_json::to_vec(&ServerMessage::hello(restarted))
+                .expect("restarted process hello serializes")
+        );
     }
 }

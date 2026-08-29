@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -u
+
+trap '' TERM
+while IFS= read -r _line; do
+  :
+done

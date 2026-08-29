@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "local.omarchy-ai-bar",
+  "name": "Omarchy AI Bar",
+  "version": "0.1.0",
+  "author": "Omarchy AI Bar contributors",
+  "description": "AI provider usage, quota, reset, and cost monitoring",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Omarchy AI Bar",
+    "description": "AI provider usage and quota status",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
