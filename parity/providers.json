@@ -1,0 +1,1396 @@
+{
+  "schema_version": 1,
+  "required_cells": [
+    "authentication",
+    "usage_resets",
+    "costs_history",
+    "sessions",
+    "browser",
+    "status_errors",
+    "refresh",
+    "cli_server",
+    "qml_ui"
+  ],
+  "providers": [
+    {
+      "id": "codex",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Codex/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "openai",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/OpenAI/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "azureopenai",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/AzureOpenAI/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "claude",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Claude/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "clinepass",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/ClinePass/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "cursor",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Cursor/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "opencode",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/OpenCode/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "opencodego",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/OpenCodeGo/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "alibaba",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Alibaba/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "alibabatokenplan",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Alibaba/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "qwencloud",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/QwenCloud/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "factory",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Factory/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "fireworks",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Fireworks/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "gemini",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Gemini/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "antigravity",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Antigravity/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "copilot",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Copilot/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "devin",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Devin/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "zai",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Zai/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "minimax",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/MiniMax/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "manus",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Manus/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "kimi",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Kimi/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "kilo",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Kilo/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "kiro",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Kiro/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "vertexai",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/VertexAI/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "augment",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Augment/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "jetbrains",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/JetBrains/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "moonshot",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Moonshot/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "amp",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Amp/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "t3chat",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/T3Chat/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "ollama",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Ollama/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "synthetic",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Synthetic/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "openrouter",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/OpenRouter/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "elevenlabs",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/ElevenLabs/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "warp",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Warp/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "windsurf",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Windsurf/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "zed",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Zed/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "perplexity",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Perplexity/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "mimo",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/MiMo/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "doubao",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Doubao/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "sakana",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Sakana/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "abacus",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Abacus/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "mistral",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Mistral/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "deepseek",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/DeepSeek/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "deepinfra",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/DeepInfra/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "codebuff",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Codebuff/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "crof",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Crof/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "venice",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Venice/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "commandcode",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/CommandCode/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "qoder",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Qoder/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "stepfun",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/StepFun/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "bedrock",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Bedrock/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "grok",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Grok/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "groq",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Groq/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "llmproxy",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/LLMProxy/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "litellm",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/LiteLLM/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "deepgram",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Deepgram/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "poe",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Poe/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "chutes",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Chutes/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "neuralwatt",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/NeuralWatt/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "clawrouter",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/ClawRouter/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "longcat",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/LongCat/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "sub2api",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Sub2API/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "wayfinder",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Wayfinder/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "zenmux",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/ZenMux/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "aiand",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/AiAnd/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "zoommate",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/ZoomMate/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "xai",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/XAI/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "notion",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/Notion/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    },
+    {
+      "id": "ibmbob",
+      "baseline_sources": [
+        "Sources/CodexBarCore/Providers/IBMBob/",
+        "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+      ],
+      "cells": {
+        "authentication": "planned",
+        "usage_resets": "planned",
+        "costs_history": "planned",
+        "sessions": "planned",
+        "browser": "planned",
+        "status_errors": "planned",
+        "refresh": "planned",
+        "cli_server": "planned",
+        "qml_ui": "planned"
+      },
+      "status": "planned",
+      "tests": []
+    }
+  ]
+}

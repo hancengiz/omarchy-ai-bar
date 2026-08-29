@@ -1,0 +1,601 @@
+{
+  "schema_version": 1,
+  "features": [
+    {
+      "id": "privacy-redaction",
+      "baseline_sources": [
+        "docs/configuration.md",
+        "docs/dashboard-api.md"
+      ],
+      "omarchy_mapping": "Domain-level privacy policy applied to QML, CLI/server, hooks, exports, diagnostics, and fleet snapshots",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "per-account-bar-items",
+      "baseline_sources": [
+        "docs/claude-multi-account-and-status-items.md"
+      ],
+      "omarchy_mapping": "Multiple account indicators inside the Omarchy bar widget, capped at four",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "claude-swap",
+      "baseline_sources": [
+        "docs/claude-multi-account-and-status-items.md"
+      ],
+      "omarchy_mapping": "Bounded cswap JSON adapter with no direct credential reads",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "preferred-currency",
+      "baseline_sources": [
+        "Sources/CodexBar/PreferencesGeneralPane.swift",
+        "Sources/CodexBar/PreferencesSpendDashboardPane.swift"
+      ],
+      "omarchy_mapping": "Preferred-currency setting with native-currency grouping and provenance",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "cost-controls",
+      "baseline_sources": [
+        "docs/cost-window-comparisons.md",
+        "Sources/CodexBar/PreferencesSpendDashboardPane.swift"
+      ],
+      "omarchy_mapping": "Opt-in cost ranges, provenance, coverage, and breakdown controls",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "models-dev-pricing",
+      "baseline_sources": [
+        "docs/model-pricing.md"
+      ],
+      "omarchy_mapping": "XDG cache, offline fallback, and custom pricing overlay",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "advanced-display",
+      "baseline_sources": [
+        "docs/ui.md",
+        "Sources/CodexBar/PreferencesMenuBarPane.swift"
+      ],
+      "omarchy_mapping": "QML equivalents for all menu-bar display and pace controls",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "config-cli",
+      "baseline_sources": [
+        "docs/cli-configuration.md",
+        "docs/configuration.md"
+      ],
+      "omarchy_mapping": "Typed config validation, mutation, redaction, path override, and permissions",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "cards-dashboard",
+      "baseline_sources": [
+        "docs/cli.md",
+        "docs/dashboard-api.md"
+      ],
+      "omarchy_mapping": "Responsive terminal cards, dashboard snapshots, file output, health, and last-good state",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "provider-storage",
+      "baseline_sources": [
+        "docs/ui.md",
+        "Sources/CodexBar/StorageBreakdownMenuView.swift"
+      ],
+      "omarchy_mapping": "Opt-in known-path totals and copyable read-only breakdown",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "share-export",
+      "baseline_sources": [
+        "Sources/CodexBar/ShareStatsPayload.swift",
+        "Sources/CodexBar/ShareStatsRenderer.swift"
+      ],
+      "omarchy_mapping": "QML copy text, copy image, and save PNG without credentials",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "diagnostics",
+      "baseline_sources": [
+        "Sources/CodexBar/PreferencesDebugPane.swift",
+        "Sources/CodexBarCLI/CLIDiagnoseCommand.swift"
+      ],
+      "omarchy_mapping": "Redacted logs, PATH, plugin, fetch, and cache diagnostics",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "multi-account",
+      "baseline_sources": [
+        "docs/configuration.md",
+        "docs/claude-multi-account-and-status-items.md"
+      ],
+      "omarchy_mapping": "Provider-instance and account-scoped state and UI",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "bar-popup",
+      "baseline_sources": [
+        "docs/ui.md",
+        "Sources/CodexBar/StatusItemController.swift"
+      ],
+      "omarchy_mapping": "Exact Omarchy bar anchoring with CodexBar-style overview and cards",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "settings",
+      "baseline_sources": [
+        "docs/configuration.md",
+        "Sources/CodexBar/PreferencesView.swift"
+      ],
+      "omarchy_mapping": "Complete QML settings surface backed by typed Rust actions",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "refresh-status-notifications",
+      "baseline_sources": [
+        "docs/refresh-loop.md",
+        "docs/status.md"
+      ],
+      "omarchy_mapping": "Linux adaptive scheduling, status polling, and freedesktop notifications",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "sessions-hooks",
+      "baseline_sources": [
+        "docs/sessions.md",
+        "docs/configuration.md"
+      ],
+      "omarchy_mapping": "Linux agent sessions, Hyprland focus, and bounded opt-in hooks",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "user-plugins",
+      "baseline_sources": [
+        "docs/plugins.md"
+      ],
+      "omarchy_mapping": "Embedded QuickJS provider sandbox with explicit authority approval",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "browser-auth",
+      "baseline_sources": [
+        "docs/providers.md",
+        "Sources/CodexBarCore/BrowserLocalStorageAPI.swift"
+      ],
+      "omarchy_mapping": "Linux Chromium/Firefox import, Secret Service, manual capture, and device flow",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "local-server",
+      "baseline_sources": [
+        "docs/dashboard-api.md"
+      ],
+      "omarchy_mapping": "Loopback-first authenticated local HTTP dashboard and API",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "fleet-sync",
+      "baseline_sources": [
+        "Sources/CodexBar/Sync/CloudSyncEngine.swift"
+      ],
+      "platform_sources": [
+        "/usr/share/omarchy/shell/plugins/agents/manifest.json"
+      ],
+      "omarchy_mapping": "Non-secret per-device snapshots in a user-selected synchronized folder",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "localization-rtl",
+      "baseline_sources": [
+        "README.md",
+        "Sources/CodexBar/Resources/en.lproj/Localizable.strings"
+      ],
+      "omarchy_mapping": "Twenty-one QML locales with reviewed RTL behavior",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "aur-packaging",
+      "baseline_sources": [
+        "docs/packaging.md"
+      ],
+      "omarchy_mapping": "AUR source package, optional prebuilt package, and direct archive",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "sni-fallback",
+      "baseline_sources": [
+        "docs/ui.md"
+      ],
+      "omarchy_mapping": "StatusNotifierItem fallback whenever the Omarchy plugin is unavailable",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "secret-service",
+      "baseline_sources": [
+        "docs/keychain-prompts.md",
+        "Sources/CodexBarCore/KeychainCacheStore.swift"
+      ],
+      "omarchy_mapping": "Linux Secret Service with explicit protected-file headless fallback",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "widget-forms",
+      "baseline_sources": [
+        "docs/widgets.md"
+      ],
+      "omarchy_mapping": "QML compact, wide, usage, history, metric, burndown, and switcher forms",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "cost-history",
+      "baseline_sources": [
+        "docs/model-pricing.md",
+        "docs/cost-window-comparisons.md"
+      ],
+      "omarchy_mapping": "WAL-backed bounded histories and spend dashboards",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "private-ipc",
+      "baseline_sources": [
+        "docs/dashboard-api.md",
+        "Sources/CodexBarCLI/DashboardPayloads.swift"
+      ],
+      "omarchy_mapping": "Versioned bounded Unix-socket snapshots plus a separate one-shot credential channel; QML remains presentation-only",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "daemon-lifecycle",
+      "baseline_sources": [
+        "Sources/CodexBar/LaunchAtLoginManager.swift",
+        "Sources/CodexBar/StatusItemController+Shutdown.swift"
+      ],
+      "omarchy_mapping": "systemd user lifecycle, graceful shutdown, restart recovery, and headless operation",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "bridge-lifecycle",
+      "baseline_sources": [
+        "Sources/CodexBar/StatusItemController.swift",
+        "Sources/CodexBar/StatusItemController+Shutdown.swift"
+      ],
+      "omarchy_mapping": "Validated atomic install, update, status, backup, compatibility, and uninstall for the user-owned Omarchy QML bridge",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "hyprland-integration",
+      "baseline_sources": [
+        "Sources/CodexBar/StatusItemController+MenuPresentation.swift",
+        "Sources/CodexBarCore/SessionWindowFocuser.swift"
+      ],
+      "omarchy_mapping": "Omarchy popup coordination, keyboard invocation, monitor-aware placement, and Hyprland session focus",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "provider-login-actions",
+      "baseline_sources": [
+        "Sources/CodexBar/Providers/Shared/ProviderLoginFlow.swift",
+        "Sources/CodexBar/StatusItemController+Actions.swift"
+      ],
+      "omarchy_mapping": "Typed bounded login, logout, account switch, open-provider, and retry actions owned by Rust",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "accessibility-keyboard",
+      "baseline_sources": [
+        "Sources/CodexBar/MenuBarLayoutRenderer.swift",
+        "Sources/CodexBar/MenuBarLayoutEditorChip.swift"
+      ],
+      "omarchy_mapping": "Accessible QML names, values, focus order, full keyboard navigation, and high-contrast states",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "reduced-motion",
+      "baseline_sources": [
+        "Sources/CodexBar/ScreenConfettiOverlayController.swift",
+        "Sources/CodexBar/StatusItemController+Animation.swift"
+      ],
+      "omarchy_mapping": "Bounded animations and confetti that honor Qt reduced-motion settings and can be disabled",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "multi-monitor-scaling",
+      "baseline_sources": [
+        "Sources/CodexBar/StatusItemController+MenuPresentation.swift",
+        "Sources/CodexBar/MenuBarStatusItemWindowProbe.swift"
+      ],
+      "omarchy_mapping": "Correct popup anchoring and rendering across monitor edges, orientations, and fractional device-pixel ratios",
+      "disposition": "required",
+      "status": "planned",
+      "tests": [],
+      "cells": {
+        "implementation": "planned",
+        "integration": "planned",
+        "verification": "planned"
+      }
+    },
+    {
+      "id": "apple-secret-sync",
+      "baseline_sources": [
+        "Sources/CodexBar/Sync/CloudSyncEngine.swift"
+      ],
+      "omarchy_mapping": "Unsupported: no hosted Omarchy equivalent; never synchronize credentials",
+      "disposition": "unsupported-approved",
+      "status": "unsupported-approved",
+      "unsupported_reason": "Omarchy has no hosted encrypted secret-sync service; non-secret fleet snapshots use a user-selected synchronized folder instead",
+      "tests": [
+        "crates/providers/tests/ledger.rs"
+      ],
+      "cells": {
+        "implementation": "unsupported-approved",
+        "integration": "unsupported-approved",
+        "verification": "unsupported-approved"
+      }
+    },
+    {
+      "id": "apple-widget-host-semantics",
+      "baseline_sources": [
+        "docs/widgets.md",
+        "WidgetExtension/"
+      ],
+      "omarchy_mapping": "Unsupported: QML reproduces designs but not WidgetKit timeline/app-group semantics",
+      "disposition": "unsupported-approved",
+      "status": "unsupported-approved",
+      "unsupported_reason": "Omarchy and Quickshell do not expose WidgetKit timeline or app-group container semantics",
+      "tests": [
+        "crates/providers/tests/ledger.rs"
+      ],
+      "cells": {
+        "implementation": "unsupported-approved",
+        "integration": "unsupported-approved",
+        "verification": "unsupported-approved"
+      }
+    }
+  ],
+  "required_cells": [
+    "implementation",
+    "integration",
+    "verification"
+  ]
+}

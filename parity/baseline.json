@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "source": {
+    "project": "CodexBar",
+    "repository": "https://github.com/steipete/CodexBar.git",
+    "commit": "1680b4ed5",
+    "commit_full": "1680b4ed5bca69f167d388ed17a5b2c36dd05d1f",
+    "provider_registry": "Sources/CodexBarCore/Providers/Providers.swift",
+    "descriptor_manifest": "Sources/CodexBarCore/Providers/ProviderManifest.swift"
+  },
+  "provider_count": 69,
+  "captured_at": "2026-08-29"
+}
