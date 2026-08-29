@@ -1,0 +1,24 @@
+{
+  "success": true,
+  "code": 200,
+  "data": {
+    "packageName": "Credit Pack",
+    "limits": [
+      {
+        "type": "CREDIT_LIMIT",
+        "unit": 3,
+        "number": 5,
+        "percentage": 3,
+        "usage": 100,
+        "currentValue": 30,
+        "remaining": 75
+      },
+      {
+        "type": "CREDIT_LIMIT",
+        "unit": 1,
+        "number": 30,
+        "percentage": 62
+      }
+    ]
+  }
+}

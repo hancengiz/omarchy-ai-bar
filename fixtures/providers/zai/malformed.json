@@ -1,0 +1,14 @@
+{
+  "success": true,
+  "code": 200,
+  "data": {
+    "limits": [
+      {
+        "type": "TOKENS_LIMIT",
+        "unit": 3,
+        "number": 5,
+        "percentage": "response-canary"
+      }
+    ]
+  }
+}

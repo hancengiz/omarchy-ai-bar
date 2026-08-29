@@ -1,0 +1,12 @@
+{
+  "success": true,
+  "code": 200,
+  "data": {
+    "x_time": ["2026-08-28", "2026-08-29", "2026-08-30"],
+    "modelDataList": [
+      { "modelName": "GLM-5", "tokensUsage": [1000, 2000, 0] },
+      { "modelName": "Alpha", "tokensUsage": [0, 250, 750] },
+      { "modelName": "Beta", "tokensUsage": [500, 0, 250] }
+    ]
+  }
+}

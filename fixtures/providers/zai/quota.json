@@ -1,0 +1,62 @@
+{
+  "success": true,
+  "code": 200,
+  "data": {
+    "planName": "  GLM Coding Pro  ",
+    "limits": [
+      {
+        "type": "TOKENS_LIMIT",
+        "unit": 1,
+        "number": 30,
+        "percentage": 99,
+        "usage": 10000,
+        "currentValue": 3000,
+        "remaining": 8000,
+        "nextResetTime": 1798761600000
+      },
+      {
+        "type": "TOKENS_LIMIT",
+        "unit": 1,
+        "number": 7,
+        "percentage": 70,
+        "usage": 7000,
+        "currentValue": 3500,
+        "remaining": 3500,
+        "nextResetTime": 1799366400000
+      },
+      {
+        "type": "TOKENS_LIMIT",
+        "unit": 3,
+        "number": 5,
+        "percentage": -40,
+        "usage": 1000,
+        "currentValue": 100,
+        "remaining": 800,
+        "nextResetTime": 1788174000000
+      },
+      {
+        "type": "TIME_LIMIT",
+        "unit": 5,
+        "number": 1,
+        "percentage": 125,
+        "usage": 500,
+        "currentValue": 250,
+        "remaining": 275,
+        "nextResetTime": 1798761600000,
+        "usageDetails": [
+          { "modelCode": "glm-4.5", "usage": 180 },
+          { "modelCode": "glm-4.5-air", "usage": 70 },
+          { "modelCode": 42, "usage": 99 },
+          { "modelCode": "ignored-fraction", "usage": 1.5 },
+          null
+        ]
+      },
+      {
+        "type": "FUTURE_LIMIT",
+        "unit": 5,
+        "number": 9,
+        "percentage": 88
+      }
+    ]
+  }
+}

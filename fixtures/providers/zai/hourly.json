@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "code": 200,
+  "data": {
+    "x_time": ["09:00", "10:00", "11:00"],
+    "modelDataList": [
+      { "modelName": "GLM-4", "tokensUsage": [100, 0, 200] },
+      { "modelName": "Alpha", "tokensUsage": [50, -2, 50] },
+      { "tokensUsage": [10, null, 0] },
+      { "modelName": "Unused", "tokensUsage": [0, 0, 0] }
+    ]
+  }
+}

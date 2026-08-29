@@ -377,6 +377,30 @@ impl FixedApiClient {
         self.send(context, request).await
     }
 
+    /// Performs an authenticated JSON GET with bounded public metadata and a
+    /// provider-specific mapping for completed HTTP statuses.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable API error for invalid/reserved metadata headers or a
+    /// scope mismatch, plus classified transport failures.
+    pub async fn get_json_with_public_headers_and_status_map(
+        &self,
+        context: &ProviderContext,
+        url: Url,
+        headers: &[(&str, &str)],
+        status_map: impl Fn(u16) -> Option<ErrorKind>,
+    ) -> Result<HttpResponse, ClassifiedError> {
+        let mut request = HttpRequest::get_json(url);
+        for (name, value) in headers {
+            request = request
+                .public_header(name, value)
+                .map_err(|error| error.classified())?;
+        }
+        self.send_with_status_map(context, request, status_map)
+            .await
+    }
+
     /// Performs one authenticated JSON GET while treating HTTP 404 as an
     /// explicit absence signal.
     ///

@@ -1,0 +1,11 @@
+{
+  "success": true,
+  "code": 200,
+  "data": {
+    "availableBalance": 12.346,
+    "balance": 99,
+    "rechargeAmount": 20,
+    "giveAmount": 3.5,
+    "totalSpendAmount": 11.656
+  }
+}
