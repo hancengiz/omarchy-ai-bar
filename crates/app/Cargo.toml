@@ -1,0 +1,20 @@
+[package]
+name = "omarchy-ai-bar"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+clap.workspace = true
+serde_json.workspace = true
+
+[[bin]]
+name = "omarchy-ai-bar"
+path = "src/main.rs"
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true
