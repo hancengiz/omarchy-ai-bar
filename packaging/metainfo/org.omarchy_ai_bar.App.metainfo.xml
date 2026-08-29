@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.omarchy_ai_bar.App</id>
+  <name>Omarchy AI Bar</name>
+  <summary>Monitor AI provider usage, quota, cost, and sessions</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="io.github.hancengiz">
+    <name>Omarchy AI Bar contributors</name>
+  </developer>
+  <description>
+    <p>
+      Omarchy AI Bar presents provider usage, quota reset times, costs, and
+      agent sessions through an Omarchy bar widget backed by one Rust process.
+    </p>
+    <p>
+      The backend also offers scriptable command-line output and a
+      StatusNotifierItem fallback when the Omarchy plugin is unavailable.
+    </p>
+  </description>
+  <launchable type="desktop-id">org.omarchy_ai_bar.App.desktop</launchable>
+  <url type="homepage">https://github.com/hancengiz/omarchy-ai-bar</url>
+  <provides>
+    <binary>omarchy-ai-bar</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-08-29">
+      <description>
+        <p>Initial development release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

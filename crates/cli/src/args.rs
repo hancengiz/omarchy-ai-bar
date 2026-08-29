@@ -114,8 +114,14 @@ pub enum BridgeTransport {
         #[arg(long, value_name = "FD", hide = true)]
         authorization_fd: i32,
     },
-    /// Install, inspect, update, or remove the per-user Omarchy bridge.
-    Manage,
+    /// Install and enable the packaged per-user Omarchy bridge.
+    Install,
+    /// Atomically replace an intact managed bridge with the packaged payload.
+    Update,
+    /// Inspect bridge ownership, integrity, protocol compatibility, and package drift.
+    Status,
+    /// Disable and remove an intact application-managed bridge.
+    Uninstall,
 }
 
 #[cfg(test)]
@@ -173,5 +179,15 @@ mod tests {
                 format: OutputFormat::Toon
             }))
         ));
+    }
+
+    #[test]
+    fn bridge_lifecycle_actions_are_direct_and_explicit() {
+        for action in ["install", "update", "status", "uninstall"] {
+            let cli = Cli::try_parse_from(["omarchy-ai-bar", "bridge", action])
+                .expect("parse bridge lifecycle action");
+            assert!(matches!(cli.command, Some(Command::Bridge { .. })));
+        }
+        assert!(Cli::try_parse_from(["omarchy-ai-bar", "bridge", "manage"]).is_err());
     }
 }

@@ -61,6 +61,9 @@ jobs:
       - name: Enforce dependency families
         run: scripts/verify-dependency-families.sh
 
+      - name: Validate source-package and release layout
+        run: scripts/verify-package.sh --layout-only
+
       - name: Prove secret-canary gate behavior
         run: scripts/scan-secret-canaries.sh --self-test
 

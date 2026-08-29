@@ -57,7 +57,6 @@ fn every_unimplemented_handler_returns_stable_unavailable() {
         &["plugins"],
         &["sessions"],
         &["diagnose"],
-        &["bridge", "manage"],
         &["completion"],
     ];
 
@@ -109,4 +108,20 @@ fn invalid_command_uses_clap_usage_status_without_stdout_noise() {
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
     assert!(!output.stderr.is_empty());
+}
+
+#[test]
+fn bridge_status_is_an_implemented_read_only_command() {
+    let fixture = DaemonFixture::new("bridge-status");
+    let output = fixture
+        .command()
+        .args(["bridge", "status"])
+        .output()
+        .expect("run bridge status");
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("UTF-8 bridge status"),
+        "Omarchy bridge: not installed\n"
+    );
 }

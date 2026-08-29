@@ -1,0 +1,62 @@
+# Maintainer: Omarchy AI Bar contributors
+
+pkgname=omarchy-ai-bar
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Omarchy-native AI provider usage, quota, cost, and session monitoring'
+arch=('x86_64')
+url='https://github.com/hancengiz/omarchy-ai-bar'
+license=('MIT')
+depends=(
+  'dbus'
+  'gcc-libs'
+  'glibc'
+  'omarchy'
+  'qt6-declarative'
+  'quickshell'
+  'sqlite'
+)
+makedepends=('cargo')
+install=omarchy-ai-bar.install
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+# Release automation replaces SKIP with the published archive checksum.
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  cargo fetch --locked --target "$CARCH-unknown-linux-gnu"
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  CARGO_TARGET_DIR=target cargo build --release --locked --frozen --package omarchy-ai-bar
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  CARGO_TARGET_DIR=target cargo test --workspace --locked --frozen
+  omarchy plugin validate qml/omarchy-plugin
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+
+  install -Dm755 target/release/omarchy-ai-bar \
+    "$pkgdir/usr/bin/omarchy-ai-bar"
+  install -dm755 "$pkgdir/usr/share/omarchy-ai-bar/omarchy-plugin"
+  cp -a -- qml/omarchy-plugin/. \
+    "$pkgdir/usr/share/omarchy-ai-bar/omarchy-plugin/"
+
+  install -Dm644 packaging/systemd/omarchy-ai-bar.service \
+    "$pkgdir/usr/lib/systemd/user/omarchy-ai-bar.service"
+  install -Dm644 packaging/desktop/org.omarchy_ai_bar.App.desktop \
+    "$pkgdir/usr/share/applications/org.omarchy_ai_bar.App.desktop"
+  install -Dm644 packaging/metainfo/org.omarchy_ai_bar.App.metainfo.xml \
+    "$pkgdir/usr/share/metainfo/org.omarchy_ai_bar.App.metainfo.xml"
+  install -Dm644 packaging/release/org.omarchy_ai_bar.App.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/org.omarchy_ai_bar.App.svg"
+  install -Dm644 packaging/release/INSTALL.md \
+    "$pkgdir/usr/share/doc/omarchy-ai-bar/INSTALL.md"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/omarchy-ai-bar/LICENSE"
+  install -Dm644 NOTICE "$pkgdir/usr/share/licenses/omarchy-ai-bar/NOTICE"
+}

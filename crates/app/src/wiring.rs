@@ -4,8 +4,12 @@ use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsString;
 use std::io::{self, Write};
+use std::path::PathBuf;
 
 use oab_cli::args::{BridgeTransport, Cli, Command, OutputArgs};
+use oab_cli::commands::bridge::{
+    BridgeError, BridgeManager, BridgeStatus, PACKAGED_PLUGIN_PATH, SystemOmarchyCommands,
+};
 use oab_cli::exit_code::AppExitCode;
 use oab_cli::output::write_json_line;
 use oab_storage::paths::AppPaths;
@@ -64,6 +68,18 @@ pub(crate) fn run(cli: Cli) -> AppExitCode {
                 AppExitCode::Internal
             }
         },
+        Some(Command::Bridge {
+            transport: BridgeTransport::Install,
+        }) => run_bridge(BridgeLifecycleAction::Install),
+        Some(Command::Bridge {
+            transport: BridgeTransport::Update,
+        }) => run_bridge(BridgeLifecycleAction::Update),
+        Some(Command::Bridge {
+            transport: BridgeTransport::Status,
+        }) => run_bridge(BridgeLifecycleAction::Status),
+        Some(Command::Bridge {
+            transport: BridgeTransport::Uninstall,
+        }) => run_bridge(BridgeLifecycleAction::Uninstall),
         Some(Command::Version { json }) => write_version(json),
         Some(
             Command::Serve
@@ -73,12 +89,95 @@ pub(crate) fn run(cli: Cli) -> AppExitCode {
             | Command::Cookie
             | Command::Cache
             | Command::Plugins
-            | Command::Completion { .. }
-            | Command::Bridge {
-                transport: BridgeTransport::Manage,
-            },
+            | Command::Completion { .. },
         ) => unavailable(),
     }
+}
+
+#[derive(Clone, Copy)]
+enum BridgeLifecycleAction {
+    Install,
+    Update,
+    Status,
+    Uninstall,
+}
+
+fn run_bridge(action: BridgeLifecycleAction) -> AppExitCode {
+    let Some(config_home) = bridge_config_home() else {
+        eprintln!("{INTERNAL_MESSAGE}");
+        return AppExitCode::Internal;
+    };
+    let source = env::var_os("OMARCHY_AI_BAR_BRIDGE_SOURCE")
+        .map_or_else(|| PathBuf::from(PACKAGED_PLUGIN_PATH), PathBuf::from);
+    let manager = BridgeManager::new(source, config_home, SystemOmarchyCommands);
+    let result = match action {
+        BridgeLifecycleAction::Install => manager.install().map(|()| {
+            println!("Installed and enabled the Omarchy AI Bar bridge.");
+        }),
+        BridgeLifecycleAction::Update => manager.update().map(|()| {
+            println!("Updated the Omarchy AI Bar bridge; placement and settings were preserved.");
+        }),
+        BridgeLifecycleAction::Status => manager.status().map(print_bridge_status),
+        BridgeLifecycleAction::Uninstall => manager.uninstall().map(|()| {
+            println!("Disabled and removed the Omarchy AI Bar bridge.");
+        }),
+    };
+    match result {
+        Ok(()) => AppExitCode::Success,
+        Err(error) => {
+            eprintln!("omarchy-ai-bar: {error}");
+            bridge_error_exit_code(&error)
+        }
+    }
+}
+
+fn print_bridge_status(status: BridgeStatus) {
+    match status {
+        BridgeStatus::NotInstalled => println!("Omarchy bridge: not installed"),
+        BridgeStatus::Installed {
+            payload_version,
+            protocol_major,
+            update_available,
+        } => {
+            let package_state = match update_available {
+                Some(true) => "package update available",
+                Some(false) => "matches package",
+                None => "packaged payload unavailable",
+            };
+            println!(
+                "Omarchy bridge: installed (payload {payload_version}, protocol {protocol_major}, {package_state})"
+            );
+        }
+        BridgeStatus::Modified => {
+            println!("Omarchy bridge: locally modified; automatic update refused");
+        }
+        BridgeStatus::Unrecognized => {
+            println!("Omarchy bridge: destination exists but is not application-managed");
+        }
+        BridgeStatus::Incompatible { protocol_major } => println!(
+            "Omarchy bridge: protocol {protocol_major} is outside the supported rolling-update window"
+        ),
+    }
+}
+
+const fn bridge_error_exit_code(error: &BridgeError) -> AppExitCode {
+    match error {
+        BridgeError::MissingPayload | BridgeError::NotInstalled | BridgeError::OmarchyCommand => {
+            AppExitCode::Unavailable
+        }
+        BridgeError::UnsafePayload
+        | BridgeError::UnrecognizedTree
+        | BridgeError::AlreadyInstalled
+        | BridgeError::ModifiedTree
+        | BridgeError::IncompatibleProtocol => AppExitCode::Usage,
+        BridgeError::Filesystem(_) => AppExitCode::Internal,
+    }
+}
+
+fn bridge_config_home() -> Option<PathBuf> {
+    env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
 }
 
 fn run_daemon_or_forward() -> AppExitCode {

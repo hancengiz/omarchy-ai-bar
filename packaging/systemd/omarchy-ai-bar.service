@@ -1,0 +1,15 @@
+[Unit]
+Description=Omarchy AI Bar backend
+Documentation=https://github.com/hancengiz/omarchy-ai-bar
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/omarchy-ai-bar daemon
+Restart=on-failure
+RestartSec=3s
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=graphical-session.target

@@ -14,6 +14,8 @@ use thiserror::Error;
 
 /// The largest integer that JavaScript and QML can represent exactly.
 pub const MAX_EXACT_JSON_INTEGER: u64 = 9_007_199_254_740_991;
+/// Oldest wire major accepted during package/plugin rolling updates.
+pub const MIN_SUPPORTED_PROTOCOL_MAJOR: u16 = PROTOCOL_V1_MAJOR - 1;
 pub const PROTOCOL_V1_MAJOR: u16 = 1;
 pub const PROTOCOL_V1_MINOR: u16 = 0;
 pub const V1_PROTOCOL: ProtocolVersion = ProtocolVersion::new(PROTOCOL_V1_MAJOR, PROTOCOL_V1_MINOR);
@@ -491,17 +493,17 @@ impl ServerHello {
     }
 }
 
-/// Negotiates protocol v1 and a stable capability intersection.
+/// Negotiates the current or immediately previous protocol major.
 ///
 /// # Errors
 ///
-/// A client using any other protocol major is rejected.
-fn negotiate_v1(
+/// A client outside the rolling compatibility window is rejected.
+fn negotiate_bridge(
     client: &ClientHello,
     server_capabilities: &CapabilitySet,
     stream_id: &BackendStreamId,
 ) -> Result<ServerHello, HandshakeError> {
-    if client.protocol.major != PROTOCOL_V1_MAJOR {
+    if !(MIN_SUPPORTED_PROTOCOL_MAJOR..=PROTOCOL_V1_MAJOR).contains(&client.protocol.major) {
         return Err(HandshakeError::UnsupportedMajor {
             received: client.protocol.major,
             supported: PROTOCOL_V1_MAJOR,
@@ -509,7 +511,7 @@ fn negotiate_v1(
     }
 
     Ok(ServerHello {
-        protocol: V1_PROTOCOL,
+        protocol: ProtocolVersion::new(client.protocol.major, PROTOCOL_V1_MINOR),
         stream_id: stream_id.clone(),
         capabilities: client.capabilities.intersection(server_capabilities),
     })
@@ -1435,7 +1437,8 @@ impl HandshakeGuard {
                     return Err(HandshakeError::AlreadyComplete);
                 }
                 let hello = message.as_hello().ok_or(HandshakeError::HelloRequired)?;
-                let negotiated = negotiate_v1(&hello, &self.server_capabilities, &self.stream_id)?;
+                let negotiated =
+                    negotiate_bridge(&hello, &self.server_capabilities, &self.stream_id)?;
                 self.session = Some(NegotiatedSession {
                     session_id: hello.session_id,
                     hello: negotiated.clone(),

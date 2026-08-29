@@ -14,8 +14,8 @@ use oab_domain::{SnapshotEnvelopeV1, SurfaceSnapshotEnvelope};
 use oab_ipc::codec::{JsonLineDecoder, encode_json_line};
 use oab_ipc::permissions::effective_uid;
 use oab_ipc::protocol::{
-    BackendStreamId, Capability, CapabilitySet, ClientMessage, PROTOCOL_V1_MAJOR, ProtocolVersion,
-    RequestId, Sequence, ServerMessage,
+    BackendStreamId, Capability, CapabilitySet, ClientMessage, MIN_SUPPORTED_PROTOCOL_MAJOR,
+    PROTOCOL_V1_MAJOR, ProtocolVersion, RequestId, Sequence, ServerMessage,
 };
 use oab_ipc::socket::verify_peer_uid;
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
@@ -208,7 +208,7 @@ impl ServerFrameGuard {
                     capabilities,
                     ..
                 },
-            ) if protocol.major() == PROTOCOL_V1_MAJOR => {
+            ) if (MIN_SUPPORTED_PROTOCOL_MAJOR..=PROTOCOL_V1_MAJOR).contains(&protocol.major()) => {
                 self.state = ServerFrameState::Ready(capabilities.clone());
                 Ok(())
             }

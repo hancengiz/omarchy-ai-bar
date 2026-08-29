@@ -1,0 +1,14 @@
+omarchy-ai-bar-VERSION/
+omarchy-ai-bar-VERSION/bin/omarchy-ai-bar
+omarchy-ai-bar-VERSION/lib/systemd/user/omarchy-ai-bar.service
+omarchy-ai-bar-VERSION/share/applications/org.omarchy_ai_bar.App.desktop
+omarchy-ai-bar-VERSION/share/icons/hicolor/scalable/apps/org.omarchy_ai_bar.App.svg
+omarchy-ai-bar-VERSION/share/metainfo/org.omarchy_ai_bar.App.metainfo.xml
+omarchy-ai-bar-VERSION/share/omarchy-ai-bar/omarchy-plugin/
+omarchy-ai-bar-VERSION/share/bash-completion/completions/omarchy-ai-bar
+omarchy-ai-bar-VERSION/share/fish/vendor_completions.d/omarchy-ai-bar.fish
+omarchy-ai-bar-VERSION/share/zsh/site-functions/_omarchy-ai-bar
+omarchy-ai-bar-VERSION/LICENSE
+omarchy-ai-bar-VERSION/NOTICE
+omarchy-ai-bar-VERSION/INSTALL.md
+omarchy-ai-bar-VERSION/SHA256SUMS

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Omarchy AI Bar
+Comment=Monitor AI provider usage, quota, cost, and sessions
+Exec=omarchy-ai-bar dashboard
+Icon=org.omarchy_ai_bar.App
+Terminal=false
+Categories=System;Monitor;
+Keywords=AI;usage;quota;tokens;cost;Omarchy;
+StartupNotify=false

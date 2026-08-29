@@ -1,0 +1,23 @@
+post_install() {
+  printf '%s\n' \
+    'Omarchy AI Bar was installed without changing any user home directory.' \
+    'As the desktop user, install and enable its bar plugin with:' \
+    '  omarchy-ai-bar bridge install' \
+    'Optionally enable the backend at login with:' \
+    '  systemctl --user enable --now omarchy-ai-bar.service'
+}
+
+post_upgrade() {
+  printf '%s\n' \
+    'Omarchy AI Bar was upgraded by pacman.' \
+    'As the desktop user, atomically refresh the plugin payload with:' \
+    '  omarchy-ai-bar bridge update' \
+    'This preserves Omarchy placement, enabled state, and settings.'
+}
+
+pre_remove() {
+  printf '%s\n' \
+    'Before removing the package, a desktop user can remove its Omarchy copy with:' \
+    '  omarchy-ai-bar bridge uninstall' \
+    'The package script never edits a user home directory automatically.'
+}
