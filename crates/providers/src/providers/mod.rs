@@ -18,4 +18,5 @@ pub mod openai;
 pub mod sub2api;
 pub mod warp;
 pub mod wayfinder;
+pub mod xai;
 pub mod zenmux;

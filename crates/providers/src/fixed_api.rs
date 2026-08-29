@@ -334,6 +334,27 @@ impl FixedApiClient {
         self.send(context, request).await
     }
 
+    /// Performs one authenticated JSON GET with a provider-specific mapping
+    /// for completed HTTP statuses.
+    ///
+    /// The mapping runs only after endpoint validation, authentication
+    /// isolation, redirects, and retries. Transport timeouts and connection
+    /// failures have no HTTP status and retain the shared classification.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable classified configuration, network, and provider errors.
+    pub async fn get_json_with_status_map(
+        &self,
+        context: &ProviderContext,
+        url: Url,
+        status_map: impl Fn(u16) -> Option<ErrorKind>,
+    ) -> Result<HttpResponse, ClassifiedError> {
+        let request = HttpRequest::get_json(url);
+        self.send_with_status_map(context, request, status_map)
+            .await
+    }
+
     /// Performs an authenticated JSON GET with bounded, non-secret metadata
     /// headers and an explicit JSON content type.
     ///
@@ -432,6 +453,15 @@ impl FixedApiClient {
         context: &ProviderContext,
         request: HttpRequest,
     ) -> Result<HttpResponse, ClassifiedError> {
+        self.send_with_status_map(context, request, |_| None).await
+    }
+
+    async fn send_with_status_map(
+        &self,
+        context: &ProviderContext,
+        request: HttpRequest,
+        status_map: impl Fn(u16) -> Option<ErrorKind>,
+    ) -> Result<HttpResponse, ClassifiedError> {
         if context.scope() != &self.scope || context.source() != ProviderSource::ApiKey {
             return Err(ClassifiedError::new(ErrorKind::Api));
         }
@@ -446,7 +476,12 @@ impl FixedApiClient {
         self.transport
             .send(&request, context.cancellation())
             .await
-            .map_err(|error| error.classified())
+            .map_err(|error| {
+                error
+                    .http_status()
+                    .and_then(status_map)
+                    .map_or_else(|| error.classified(), |kind| error.classified_as(kind))
+            })
     }
 }
 

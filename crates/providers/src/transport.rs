@@ -102,6 +102,10 @@ impl TransportError {
             }
             Self::Endpoint(_) | Self::InvalidConfiguration | Self::Api { .. } => ErrorKind::Api,
         };
+        self.classified_as(kind)
+    }
+
+    pub(crate) fn classified_as(&self, kind: ErrorKind) -> ClassifiedError {
         let error = ClassifiedError::new(kind);
         let Some(delay) = self.retry_after() else {
             return error;
@@ -111,6 +115,27 @@ impl TransportError {
             return error;
         };
         error.clone().with_retry_after(duration).unwrap_or(error)
+    }
+
+    /// Returns the provider's numeric HTTP status when this failure came from
+    /// a completed HTTP response rather than connection or parsing state.
+    #[must_use]
+    pub const fn http_status(&self) -> Option<u16> {
+        match self {
+            Self::AuthenticationExpired => Some(401),
+            Self::PermissionDenied => Some(403),
+            Self::RequestTimeout => Some(408),
+            Self::RateLimited { .. } => Some(429),
+            Self::ProviderUnavailable { status, .. } | Self::Api { status } => Some(*status),
+            Self::Endpoint(_)
+            | Self::InvalidConfiguration
+            | Self::Cancelled
+            | Self::Timeout
+            | Self::Network
+            | Self::ResponseTooLarge
+            | Self::MalformedResponse
+            | Self::TooManyRedirects => None,
+        }
     }
 
     /// Whether the shared one-retry policy may retry this failure.

@@ -1,0 +1,37 @@
+{
+  "timeSeries": [
+    {
+      "dataPoints": [
+        {
+          "timestamp": "2027-01-13T00:00:00Z",
+          "values": [0.75973725]
+        },
+        {
+          "timestamp": "2027-01-14T00:00:00Z",
+          "values": [0.5]
+        },
+        {
+          "timestamp": "2027-01-15T00:00:00Z",
+          "values": [0]
+        }
+      ]
+    },
+    {
+      "dataPoints": [
+        {
+          "timestamp": "2027-01-13T00:00:00Z",
+          "values": [0.5]
+        },
+        {
+          "timestamp": "2027-01-14T00:00:00Z",
+          "values": [0]
+        },
+        {
+          "timestamp": "2027-01-15T00:00:00Z",
+          "values": [0]
+        }
+      ]
+    }
+  ],
+  "limitReached": false
+}
