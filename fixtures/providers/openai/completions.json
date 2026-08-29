@@ -1,0 +1,45 @@
+{
+  "object": "page",
+  "data": [
+    {
+      "object": "bucket",
+      "start_time": 1700000000,
+      "end_time": 1700086400,
+      "results": [
+        {
+          "object": "organization.usage.completions.result",
+          "input_tokens": 1000,
+          "input_cached_tokens": 250,
+          "input_audio_tokens": 20,
+          "output_tokens": 500,
+          "output_audio_tokens": 10,
+          "num_model_requests": 7,
+          "model": "gpt-5.2"
+        },
+        {
+          "object": "organization.usage.completions.result",
+          "input_tokens": 300,
+          "output_tokens": 200,
+          "num_model_requests": 3,
+          "model": "gpt-5.2-codex"
+        }
+      ]
+    },
+    {
+      "object": "bucket",
+      "start_time": 1700086400,
+      "end_time": 1700172800,
+      "results": [
+        {
+          "object": "organization.usage.completions.result",
+          "input_tokens": 200,
+          "output_tokens": 100,
+          "num_model_requests": 2,
+          "model": "gpt-5.2"
+        }
+      ]
+    }
+  ],
+  "has_more": false,
+  "next_page": null
+}

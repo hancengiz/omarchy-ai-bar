@@ -1,0 +1,36 @@
+{
+  "object": "page",
+  "data": [
+    {
+      "object": "bucket",
+      "start_time": 1700000000,
+      "end_time": 1700086400,
+      "results": [
+        {
+          "object": "organization.costs.result",
+          "amount": { "value": 12.50, "currency": "usd" },
+          "line_item": "Text tokens"
+        },
+        {
+          "object": "organization.costs.result",
+          "amount": { "value": "2.25", "currency": "usd" },
+          "line_item": "Web search tool calls"
+        }
+      ]
+    },
+    {
+      "object": "bucket",
+      "start_time": 1700086400,
+      "end_time": 1700172800,
+      "results": [
+        {
+          "object": "organization.costs.result",
+          "amount": { "value": 4.00, "currency": "USD" },
+          "line_item": "Text tokens"
+        }
+      ]
+    }
+  ],
+  "has_more": false,
+  "next_page": null
+}

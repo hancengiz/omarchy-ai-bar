@@ -63,6 +63,10 @@ impl ApiKeyCredential {
         Authentication::api_key(header.as_str(), self.value.as_str().to_owned())
             .map_err(|error| error.classified())
     }
+
+    fn bearer_authentication(&self) -> Result<Authentication, ClassifiedError> {
+        Authentication::bearer(self.value.as_str().to_owned()).map_err(|error| error.classified())
+    }
 }
 
 impl Debug for ApiKeyCredential {
@@ -75,9 +79,14 @@ impl Debug for ApiKeyCredential {
 pub struct FixedApiClient {
     scope: AccountScope,
     base_url: Url,
-    header: HeaderName,
+    authentication: ApiKeyAuthentication,
     credential: ApiKeyCredential,
     transport: HttpTransport,
+}
+
+enum ApiKeyAuthentication {
+    Bearer,
+    Header(HeaderName),
 }
 
 impl FixedApiClient {
@@ -109,12 +118,60 @@ impl FixedApiClient {
             .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
         // Validate the header class before any network request can be made.
         credential.authentication(&header)?;
+        Self::build(
+            scope,
+            base_url,
+            endpoints,
+            ApiKeyAuthentication::Header(header),
+            credential,
+            config,
+        )
+    }
+
+    /// Creates an exact-origin bearer-token client.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable API error for malformed endpoints or transport
+    /// configuration.
+    pub fn new_bearer(
+        scope: AccountScope,
+        base_url: Url,
+        endpoint_class: EndpointClass,
+        credential: ApiKeyCredential,
+        config: TransportConfig,
+    ) -> Result<Self, ClassifiedError> {
+        let origin = base_url.origin().ascii_serialization();
+        let endpoints = EndpointPolicy::new([(origin, endpoint_class)])
+            .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        endpoints
+            .validate(&base_url)
+            .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        credential.bearer_authentication()?;
+        Self::build(
+            scope,
+            base_url,
+            endpoints,
+            ApiKeyAuthentication::Bearer,
+            credential,
+            config,
+        )
+    }
+
+    fn build(
+        scope: AccountScope,
+        base_url: Url,
+        endpoints: EndpointPolicy,
+        authentication: ApiKeyAuthentication,
+        credential: ApiKeyCredential,
+        config: TransportConfig,
+    ) -> Result<Self, ClassifiedError> {
         let transport =
             HttpTransport::new(endpoints, config).map_err(|error| error.classified())?;
         Ok(Self {
             scope,
             base_url,
-            header,
+            authentication,
             credential,
             transport,
         })
@@ -146,9 +203,17 @@ impl FixedApiClient {
         {
             return Err(ClassifiedError::new(ErrorKind::Api));
         }
-        self.base_url
+        let url = self
+            .base_url
             .join(relative_path)
-            .map_err(|_| ClassifiedError::new(ErrorKind::Api))
+            .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        if url.origin() != self.base_url.origin()
+            || !url.username().is_empty()
+            || url.password().is_some()
+        {
+            return Err(ClassifiedError::new(ErrorKind::Api));
+        }
+        Ok(url)
     }
 
     /// Performs one authenticated GET for the exact selected account.
@@ -165,7 +230,10 @@ impl FixedApiClient {
         if context.scope() != &self.scope || context.source() != ProviderSource::ApiKey {
             return Err(ClassifiedError::new(ErrorKind::Api));
         }
-        let authentication = self.credential.authentication(&self.header)?;
+        let authentication = match &self.authentication {
+            ApiKeyAuthentication::Bearer => self.credential.bearer_authentication()?,
+            ApiKeyAuthentication::Header(header) => self.credential.authentication(header)?,
+        };
         let request = HttpRequest::get(url).authentication(authentication);
         self.transport
             .send(&request, context.cancellation())
@@ -182,7 +250,13 @@ impl Debug for FixedApiClient {
             .field("scheme", &self.base_url.scheme())
             .field("host", &self.base_url.host_str())
             .field("path", &"<redacted>")
-            .field("header", &self.header)
+            .field(
+                "authentication",
+                &match &self.authentication {
+                    ApiKeyAuthentication::Bearer => "bearer",
+                    ApiKeyAuthentication::Header(_) => "api-key-header",
+                },
+            )
             .field("credential", &self.credential)
             .finish_non_exhaustive()
     }

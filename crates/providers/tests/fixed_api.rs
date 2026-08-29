@@ -98,6 +98,32 @@ async fn fixed_client_keeps_scope_source_and_authentication_isolated() {
     assert_eq!(server.requests().len(), 1);
 }
 
+#[tokio::test]
+async fn bearer_client_uses_the_same_validation_and_scope_boundary() {
+    let server = FakeHttpServer::start([FakeHttpResponse::new(200, Vec::new())]).await;
+    let client = FixedApiClient::new_bearer(
+        scope("account-a"),
+        server.url("/v1/"),
+        EndpointClass::LoopbackDevelopment,
+        ApiKeyCredential::new("fixture-bearer-canary").expect("credential"),
+        config(),
+    )
+    .expect("bearer client");
+    let context = ProviderContext::new(
+        scope("account-a"),
+        ProviderSource::ApiKey,
+        CancellationToken::new(),
+    );
+    client
+        .get(&context, client.url("usage").expect("usage URL"))
+        .await
+        .expect("bearer request");
+    assert_eq!(
+        server.requests()[0].header("authorization"),
+        Some("Bearer fixture-bearer-canary")
+    );
+}
+
 #[test]
 fn fixed_paths_cannot_replace_the_approved_origin_or_inject_queries() {
     let client = FixedApiClient::new(
@@ -114,6 +140,7 @@ fn fixed_paths_cannot_replace_the_approved_origin_or_inject_queries() {
         "/replace-origin-path",
         "../escape",
         "https://attacker.example/steal",
+        "\\\\attacker.example/steal",
         "usage?api_key=secret",
     ] {
         assert!(client.url(rejected).is_err(), "accepted {rejected}");

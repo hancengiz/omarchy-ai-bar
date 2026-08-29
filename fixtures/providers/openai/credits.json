@@ -1,0 +1,19 @@
+{
+  "total_granted": "100.00",
+  "total_used": 25,
+  "total_available": "75.00",
+  "grants": {
+    "data": [
+      {
+        "grant_amount": 50,
+        "used_amount": 10,
+        "expires_at": 1800000000
+      },
+      {
+        "grant_amount": 50,
+        "used_amount": 15,
+        "expires_at": 1750000000
+      }
+    ]
+  }
+}

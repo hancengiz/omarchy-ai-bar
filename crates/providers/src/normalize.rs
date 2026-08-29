@@ -3,9 +3,9 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use oab_domain::{
-    AccountScope, BoundedText, ClassifiedError, DataConfidence, ErrorKind, IdentitySnapshot,
-    NamedRateWindow, Provenance, ProviderHealth, ProviderStatus, RateWindow, Timestamp,
-    UsagePercent, UsageSample, WindowUsage,
+    AccountScope, BoundedText, ClassifiedError, CostSummary, CostUsageSnapshot, DataConfidence,
+    ErrorKind, IdentitySnapshot, Money, NamedRateWindow, Provenance, ProviderHealth,
+    ProviderStatus, RateWindow, Timestamp, UsagePercent, UsageSample, WindowUsage,
 };
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
@@ -102,7 +102,11 @@ pub struct UsageSampleBuilder {
     fetched_at: Timestamp,
     primary: Option<RateWindow>,
     extra_windows: Vec<NamedRateWindow>,
+    organization: Option<BoundedText<256>>,
     login_method: Option<BoundedText<256>>,
+    balance: Option<Money>,
+    cost: Option<CostSummary>,
+    cost_usage: Option<CostUsageSnapshot>,
     provenance: Vec<Provenance>,
 }
 
@@ -115,7 +119,11 @@ impl UsageSampleBuilder {
             fetched_at,
             primary: None,
             extra_windows: Vec::new(),
+            organization: None,
             login_method: None,
+            balance: None,
+            cost: None,
+            cost_usage: None,
             provenance: Vec::new(),
         }
     }
@@ -134,6 +142,19 @@ impl UsageSampleBuilder {
         self
     }
 
+    /// Adds a bounded provider organization/project label.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable parse error when provider text violates domain bounds.
+    pub fn organization(mut self, value: Option<String>) -> Result<Self, ClassifiedError> {
+        self.organization = value
+            .map(BoundedText::new)
+            .transpose()
+            .map_err(|_| ClassifiedError::new(ErrorKind::Parse))?;
+        Ok(self)
+    }
+
     /// Adds a bounded plan/login label.
     ///
     /// # Errors
@@ -145,6 +166,27 @@ impl UsageSampleBuilder {
             .transpose()
             .map_err(|_| ClassifiedError::new(ErrorKind::Parse))?;
         Ok(self)
+    }
+
+    /// Attaches a native-currency balance.
+    #[must_use]
+    pub fn balance(mut self, balance: Money) -> Self {
+        self.balance = Some(balance);
+        self
+    }
+
+    /// Attaches the provider's current cost summary.
+    #[must_use]
+    pub fn cost(mut self, cost: CostSummary) -> Self {
+        self.cost = Some(cost);
+        self
+    }
+
+    /// Attaches the complete typed cost/history model.
+    #[must_use]
+    pub fn cost_usage(mut self, cost_usage: CostUsageSnapshot) -> Self {
+        self.cost_usage = Some(cost_usage);
+        self
     }
 
     /// Adds a public-safe fixed provenance pair.
@@ -175,7 +217,7 @@ impl UsageSampleBuilder {
             self.scope.clone(),
             None,
             None,
-            None,
+            self.organization,
             None,
             None,
             self.login_method,
@@ -187,7 +229,8 @@ impl UsageSampleBuilder {
             Vec::new(),
         )
         .map_err(|_| ClassifiedError::new(ErrorKind::Parse))?;
-        UsageSample::new(
+        let cost_usage = self.cost_usage;
+        let sample = UsageSample::new(
             self.scope,
             identity,
             self.fetched_at,
@@ -196,8 +239,8 @@ impl UsageSampleBuilder {
             None,
             self.extra_windows,
             None,
-            None,
-            None,
+            self.balance,
+            self.cost,
             None,
             None,
             None,
@@ -208,6 +251,10 @@ impl UsageSampleBuilder {
             DataConfidence::Exact,
             status,
         )
-        .map_err(|_| ClassifiedError::new(ErrorKind::Parse))
+        .map_err(|_| ClassifiedError::new(ErrorKind::Parse))?;
+        Ok(match cost_usage {
+            Some(cost_usage) => sample.with_cost_usage(cost_usage),
+            None => sample,
+        })
     }
 }
