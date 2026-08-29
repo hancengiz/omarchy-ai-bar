@@ -407,6 +407,31 @@ fn canonical_client_fixtures_decode_and_reencode_byte_for_byte() {
 }
 
 #[test]
+fn quit_is_a_closed_payload_free_runtime_action() {
+    let canonical = b"{\"type\":\"action\",\"request_id\":9,\"action\":{\"id\":\"quit\"}}\n";
+    let decoded: ClientMessage = decode_json_line(canonical).expect("typed quit action");
+    assert!(matches!(
+        &decoded,
+        ClientMessage::Action {
+            request_id,
+            action: RuntimeAction::Quit {},
+        } if request_id.get() == 9
+    ));
+    assert_eq!(
+        encode_json_line(&decoded).expect("canonical quit action"),
+        canonical
+    );
+
+    assert!(
+        decode_json_line::<ClientMessage>(
+            b"{\"type\":\"action\",\"request_id\":9,\"action\":{\"id\":\"quit\",\"command\":\"shutdown\"}}\n"
+        )
+        .is_err(),
+        "quit must never admit a command payload"
+    );
+}
+
+#[test]
 fn forward_minor_capabilities_are_ignored_without_authorizing_them() {
     let decoded: CapabilitySet = serde_json::from_str(
         r#"["future_widget","display_snapshots","another_future_capability"]"#,

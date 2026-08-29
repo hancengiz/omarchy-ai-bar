@@ -725,6 +725,8 @@ pub enum RuntimeAction {
     CancelRequest {
         target_request_id: RequestId,
     },
+    /// Requests an orderly application shutdown from a trusted UI surface.
+    Quit {},
 }
 
 /// Messages accepted on the long-lived display socket.

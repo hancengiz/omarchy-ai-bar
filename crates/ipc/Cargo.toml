@@ -10,9 +10,15 @@ workspace = true
 
 [dependencies]
 getrandom.workspace = true
+ksni.workspace = true
 nix.workspace = true
 oab-domain = { path = "../domain" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 zeroize.workspace = true
+
+[dev-dependencies]
+futures-util.workspace = true
+tokio.workspace = true
+zbus.workspace = true
