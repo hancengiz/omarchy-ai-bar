@@ -1,0 +1,7 @@
+{
+  "months": [
+    { "period": "2026-07", "total_cost": 150 },
+    { "period": "2026-08", "total_cost": 394 }
+  ],
+  "initial_month": "2026-07"
+}
