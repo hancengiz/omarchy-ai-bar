@@ -8,7 +8,7 @@
 
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use nix::errno::Errno;
@@ -56,6 +56,10 @@ pub enum AtomicWriteError {
     /// A non-cooperating writer replaced one of the pathnames mid-transaction.
     #[error("storage entry changed during atomic replacement: {0}")]
     ConcurrentMutation(PathBuf),
+
+    /// A private file exceeded the caller-provided read bound.
+    #[error("private storage file exceeds its size limit: {0}")]
+    TooLarge(PathBuf),
 }
 
 /// A fully written and synced file that has not yet published its predecessor.
@@ -86,6 +90,39 @@ impl StagedWrite {
     #[must_use]
     pub fn target_path(&self) -> &Path {
         &self.state.target_path
+    }
+
+    /// Commits the staged file without retaining the old inode under another name.
+    ///
+    /// This variant exists for secret material, where a recoverable plaintext
+    /// predecessor would create an unwanted second copy. The existing target,
+    /// when present, must have exactly one hard link.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the current entry is unsafe, has another hard link,
+    /// changes during the transaction, has an existing predecessor pathname,
+    /// or cannot be durably replaced.
+    pub fn commit_without_predecessor(mut self) -> Result<(), AtomicWriteError> {
+        let previous_display = self
+            .state
+            .target_path
+            .with_file_name(&self.state.previous_name);
+        if validate_regular_or_absent(
+            &self.state.parent.directory,
+            &self.state.previous_name,
+            &previous_display,
+        )?
+        .is_some()
+        {
+            return Err(LockError::UnsafeEntry {
+                path: previous_display,
+                reason: "private no-predecessor storage forbids a backup entry",
+            }
+            .into());
+        }
+        self.state.expected_current = pin_private_current(&self.state)?;
+        PreparedWrite { state: self.state }.commit()
     }
 }
 
@@ -214,6 +251,90 @@ pub fn atomic_write(target: impl AsRef<Path>, contents: &[u8]) -> Result<(), Ato
     stage_write(target, contents)?.prepare()?.commit()
 }
 
+/// Durably replaces a private file without preserving its predecessor.
+///
+/// Use this only for data, such as credentials, whose previous plaintext must
+/// not survive under a backup pathname. The target and lock remain mode
+/// `0600`, and every path component is opened without following symlinks.
+///
+/// # Errors
+///
+/// Returns any path, locking, staging, identity, permission, replacement, or
+/// durability error encountered by the transaction.
+pub fn atomic_write_without_predecessor(
+    target: impl AsRef<Path>,
+    contents: &[u8],
+) -> Result<(), AtomicWriteError> {
+    stage_write(target, contents)?.commit_without_predecessor()
+}
+
+/// Reads a bounded private regular file while holding its writer lock.
+///
+/// Missing files return `Ok(None)`. Existing files must be owned by the current
+/// user, have exactly one hard link, and have mode `0600`. The path is resolved
+/// through pinned directory descriptors without following symlinks.
+///
+/// # Errors
+///
+/// Returns an error for unsafe paths or entries, permission mismatches,
+/// concurrent replacement, I/O failure, or contents larger than `max_bytes`.
+pub fn read_private_file(
+    target: impl AsRef<Path>,
+    max_bytes: usize,
+) -> Result<Option<Vec<u8>>, AtomicWriteError> {
+    let target = target.as_ref();
+    let parent = SafeParent::open(target)?;
+    let lock_name = suffixed_name(&parent.file_name, ".lock");
+    let lock_path = target.with_file_name(&lock_name);
+    let _lock = ExclusiveLock::acquire_at(&parent.directory, &lock_name, &lock_path)?;
+    let Some(named) = validate_regular_or_absent(&parent.directory, &parent.file_name, target)?
+    else {
+        return Ok(None);
+    };
+
+    let fd = openat(
+        &parent.directory,
+        parent.file_name.as_os_str(),
+        OFlag::O_RDONLY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+        Mode::empty(),
+    )
+    .map_err(|error| atomic_nix_io("open private file", target, error))?;
+    let mut file = File::from(fd);
+    validate_open_private(&file, target)?;
+    let opened =
+        fstat(&file).map_err(|error| atomic_nix_io("inspect private file", target, error))?;
+    let identity = FileIdentity::from_stat(&opened);
+    if identity != FileIdentity::from_stat(&named) {
+        return Err(AtomicWriteError::ConcurrentMutation(target.to_path_buf()));
+    }
+
+    let read_bound = u64::try_from(max_bytes)
+        .unwrap_or(u64::MAX)
+        .saturating_add(1);
+    let mut contents = Vec::new();
+    Read::by_ref(&mut file)
+        .take(read_bound)
+        .read_to_end(&mut contents)
+        .map_err(|source| AtomicWriteError::Io {
+            operation: "read private file",
+            path: target.to_path_buf(),
+            source,
+        })?;
+    if contents.len() > max_bytes {
+        return Err(AtomicWriteError::TooLarge(target.to_path_buf()));
+    }
+    let current = fstatat(
+        &parent.directory,
+        parent.file_name.as_os_str(),
+        AtFlags::AT_SYMLINK_NOFOLLOW,
+    )
+    .map_err(|error| atomic_nix_io("reinspect private file", target, error))?;
+    if FileIdentity::from_stat(&current) != identity {
+        return Err(AtomicWriteError::ConcurrentMutation(target.to_path_buf()));
+    }
+    Ok(Some(contents))
+}
+
 /// Returns the recoverable predecessor pathname for a syntactically safe
 /// absolute target path.
 ///
@@ -266,6 +387,59 @@ impl FileIdentity {
             inode: stat.st_ino,
         }
     }
+}
+
+fn pin_private_current(state: &WriteState) -> Result<Option<FileIdentity>, AtomicWriteError> {
+    let Some(named) = validate_regular_or_absent(
+        &state.parent.directory,
+        &state.parent.file_name,
+        &state.target_path,
+    )?
+    else {
+        return Ok(None);
+    };
+    let fd = openat(
+        &state.parent.directory,
+        state.parent.file_name.as_os_str(),
+        OFlag::O_RDONLY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+        Mode::empty(),
+    )
+    .map_err(|error| atomic_nix_io("open current private file", &state.target_path, error))?;
+    let file = File::from(fd);
+    validate_open_private(&file, &state.target_path)?;
+    let opened = fstat(&file).map_err(|error| {
+        atomic_nix_io("inspect current private file", &state.target_path, error)
+    })?;
+    let identity = FileIdentity::from_stat(&opened);
+    if identity != FileIdentity::from_stat(&named) {
+        return Err(AtomicWriteError::ConcurrentMutation(
+            state.target_path.clone(),
+        ));
+    }
+    fsync(&file)
+        .map_err(|error| atomic_nix_io("sync current private file", &state.target_path, error))?;
+    Ok(Some(identity))
+}
+
+fn validate_open_private(file: &File, target: &Path) -> Result<(), AtomicWriteError> {
+    validate_open_regular(file, target)?;
+    let stat = fstat(file)
+        .map_err(|error| atomic_nix_io("inspect private file metadata for", target, error))?;
+    if stat.st_nlink != 1 {
+        return Err(LockError::UnsafeEntry {
+            path: target.to_path_buf(),
+            reason: "private entry must have exactly one hard link",
+        }
+        .into());
+    }
+    if stat.st_mode & 0o777 != PRIVATE_FILE_MODE.bits() as nix::libc::mode_t {
+        return Err(LockError::UnsafeEntry {
+            path: target.to_path_buf(),
+            reason: "private entry must have mode 0600",
+        }
+        .into());
+    }
+    Ok(())
 }
 
 fn publish_predecessor(state: &mut WriteState) -> Result<Option<FileIdentity>, AtomicWriteError> {

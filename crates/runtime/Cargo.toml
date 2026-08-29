@@ -9,6 +9,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+notify-rust.workspace = true
 oab-domain = { path = "../domain" }
 thiserror.workspace = true
 time.workspace = true
