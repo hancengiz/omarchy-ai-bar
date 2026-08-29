@@ -1,6 +1,7 @@
 //! First-party provider implementations.
 
 pub mod capability;
+pub mod configured_endpoint;
 pub mod context;
 pub mod descriptor;
 pub mod endpoint;

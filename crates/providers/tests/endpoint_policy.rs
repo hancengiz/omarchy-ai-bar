@@ -70,6 +70,35 @@ fn loopback_http_requires_an_exact_typed_approval() {
 }
 
 #[test]
+fn private_http_requires_an_exact_typed_private_origin() {
+    for origin in [
+        "http://10.0.0.4:4000",
+        "http://192.168.1.8",
+        "http://169.254.10.2",
+        "http://[fc00::1]:8080",
+        "http://litellm.local",
+    ] {
+        let policy = EndpointPolicy::new([(origin, EndpointClass::PrivateHttp)])
+            .expect("explicit private HTTP policy");
+        let mut request = Url::parse(origin).expect("private HTTP origin");
+        request.set_path("/usage");
+        assert!(policy.validate(&request).is_ok(), "rejected {origin}");
+    }
+
+    for origin in [
+        "http://api.example.com",
+        "http://8.8.8.8",
+        "http://127.0.0.1",
+        "https://10.0.0.4",
+    ] {
+        assert!(
+            EndpointPolicy::new([(origin, EndpointClass::PrivateHttp)]).is_err(),
+            "accepted mismatched private HTTP origin {origin}"
+        );
+    }
+}
+
+#[test]
 fn configured_https_endpoints_are_classified_without_weakening_host_policy() {
     for (endpoint, expected) in [
         ("https://api.example.com/base", EndpointClass::PublicHttps),

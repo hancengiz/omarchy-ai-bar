@@ -17,6 +17,9 @@ pub enum EndpointClass {
     LoopbackDevelopment,
     /// Explicit private-network origin with mandatory HTTPS.
     PrivateHttps,
+    /// Explicit self-hosted private-network origin where HTTP is supported by
+    /// the provider's existing configuration contract.
+    PrivateHttp,
 }
 
 /// Selects the exact endpoint class for a configured HTTPS URL.
@@ -241,6 +244,7 @@ fn validate_request_components(url: &Url) -> Result<(), EndpointError> {
 const fn validate_scheme(scheme: &str, class: EndpointClass) -> Result<(), EndpointError> {
     match class {
         EndpointClass::PublicHttps | EndpointClass::PrivateHttps if is_https(scheme) => Ok(()),
+        EndpointClass::PrivateHttp if is_http(scheme) => Ok(()),
         EndpointClass::LoopbackDevelopment if is_https(scheme) || is_http(scheme) => Ok(()),
         _ => Err(EndpointError::InsecureScheme),
     }
@@ -261,11 +265,26 @@ fn validate_host_class(url: &Url, class: EndpointClass) -> Result<(), EndpointEr
         EndpointClass::PublicHttps => is_public_host(&host),
         EndpointClass::LoopbackDevelopment => is_loopback_host(&host),
         EndpointClass::PrivateHttps => !is_public_host(&host) && !is_loopback_host(&host),
+        EndpointClass::PrivateHttp => is_private_http_host(&host),
     };
     if allowed {
         Ok(())
     } else {
         Err(EndpointError::DisallowedHost)
+    }
+}
+
+fn is_private_http_host(host: &Host<&str>) -> bool {
+    match host {
+        Host::Domain(domain) => {
+            let domain = domain.trim_end_matches('.');
+            !domain.is_empty() && ends_with_dns_label(domain, "local")
+        }
+        Host::Ipv4(address) => address.is_private() || address.is_link_local(),
+        Host::Ipv6(address) => {
+            let first = address.segments()[0];
+            first & 0xfe00 == 0xfc00 || first & 0xffc0 == 0xfe80
+        }
     }
 }
 
