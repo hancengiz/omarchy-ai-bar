@@ -110,6 +110,7 @@ pub struct UsageSampleBuilder {
     cost_usage: Option<CostUsageSnapshot>,
     detail_sections: Vec<DetailSection>,
     provenance: Vec<Provenance>,
+    confidence: DataConfidence,
 }
 
 impl UsageSampleBuilder {
@@ -129,6 +130,7 @@ impl UsageSampleBuilder {
             cost_usage: None,
             detail_sections: Vec::new(),
             provenance: Vec::new(),
+            confidence: DataConfidence::Exact,
         }
     }
 
@@ -207,6 +209,13 @@ impl UsageSampleBuilder {
         self
     }
 
+    /// Sets the provider's confidence after bounded/truncation analysis.
+    #[must_use]
+    pub fn confidence(mut self, confidence: DataConfidence) -> Self {
+        self.confidence = confidence;
+        self
+    }
+
     /// Adds a public-safe fixed provenance pair.
     ///
     /// # Errors
@@ -266,7 +275,7 @@ impl UsageSampleBuilder {
             Vec::new(),
             Vec::new(),
             self.provenance,
-            DataConfidence::Exact,
+            self.confidence,
             status,
         )
         .map_err(|_| ClassifiedError::new(ErrorKind::Parse))?;

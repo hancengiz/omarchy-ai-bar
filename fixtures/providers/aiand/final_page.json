@@ -1,0 +1,10 @@
+{
+  "data": [
+    { "cost": "7.02344000", "currency": "jpy" },
+    { "cost": "1.10000000", "currency": "jpy" },
+    { "cost": null, "currency": "jpy" }
+  ],
+  "has_more": false,
+  "next_after": null,
+  "next_after_id": null
+}

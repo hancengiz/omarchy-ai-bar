@@ -1,5 +1,6 @@
 //! Native first-party provider modules.
 
+pub mod aiand;
 pub mod azureopenai;
 pub mod deepgram;
 pub mod deepinfra;
