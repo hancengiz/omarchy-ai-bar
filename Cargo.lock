@@ -1379,6 +1379,7 @@ dependencies = [
  "oab-domain",
  "oab-test-support",
  "reqwest",
+ "rust_decimal",
  "serde",
  "serde_json",
  "thiserror",
