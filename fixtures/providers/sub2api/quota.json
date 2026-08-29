@@ -1,0 +1,41 @@
+{
+  "mode": "quota_limited",
+  "isValid": true,
+  "status": "active",
+  "remaining": 75,
+  "unit": "USD",
+  "quota": {
+    "limit": 100,
+    "used": 25,
+    "remaining": 75,
+    "unit": "USD"
+  },
+  "rate_limits": [
+    {
+      "window": "5h",
+      "limit": 20,
+      "used": 5,
+      "remaining": 15,
+      "reset_at": "2026-07-11T12:30:00Z"
+    },
+    {
+      "window": "7d",
+      "limit": 200,
+      "used": 40,
+      "remaining": 160
+    }
+  ],
+  "expires_at": "2026-08-01T00:00:00Z",
+  "usage": {
+    "today": {
+      "requests": 4,
+      "total_tokens": 1200,
+      "actual_cost": 1.25
+    },
+    "total": {
+      "requests": 40,
+      "total_tokens": 12000,
+      "actual_cost": 25
+    }
+  }
+}

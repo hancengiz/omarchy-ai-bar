@@ -1,0 +1,16 @@
+{
+  "mode": "unrestricted",
+  "isValid": true,
+  "planName": "Claude Team",
+  "remaining": 8,
+  "unit": "USD",
+  "subscription": {
+    "daily_usage_usd": 120.23,
+    "weekly_usage_usd": 229.20,
+    "monthly_usage_usd": 1296.23,
+    "daily_limit_usd": 120,
+    "weekly_limit_usd": 700,
+    "monthly_limit_usd": 2800,
+    "expires_at": "2026-08-15T00:00:00.123Z"
+  }
+}

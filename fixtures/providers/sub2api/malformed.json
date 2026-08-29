@@ -1,0 +1,8 @@
+{
+  "mode": "quota_limited",
+  "quota": {
+    "limit": "response-canary",
+    "used": 25,
+    "remaining": 75
+  }
+}

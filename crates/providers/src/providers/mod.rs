@@ -15,4 +15,5 @@ pub mod llmproxy;
 pub mod moonshot;
 pub mod neuralwatt;
 pub mod openai;
+pub mod sub2api;
 pub mod warp;
