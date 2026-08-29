@@ -1246,18 +1246,26 @@
         "Sources/CodexBarCore/Providers/ProviderManifest.swift"
       ],
       "cells": {
-        "authentication": "planned",
-        "usage_resets": "planned",
-        "costs_history": "planned",
-        "sessions": "planned",
-        "browser": "planned",
-        "status_errors": "planned",
-        "refresh": "planned",
-        "cli_server": "planned",
+        "authentication": "passing",
+        "usage_resets": "passing",
+        "costs_history": "not-applicable",
+        "sessions": "not-applicable",
+        "browser": "not-applicable",
+        "status_errors": "passing",
+        "refresh": "passing",
+        "cli_server": "in-progress",
         "qml_ui": "planned"
       },
-      "status": "planned",
-      "tests": []
+      "status": "in-progress",
+      "tests": [
+        "crates/providers/tests/fixed_api.rs",
+        "crates/providers/tests/provider_neuralwatt.rs"
+      ],
+      "not_applicable_reasons": {
+        "costs_history": "The pinned baseline exposes a prepaid balance and current-month summary but no Neuralwatt token-cost history.",
+        "sessions": "The pinned baseline has no Neuralwatt agent-session source.",
+        "browser": "The pinned baseline uses bearer API-key authentication only."
+      }
     },
     {
       "id": "clawrouter",
