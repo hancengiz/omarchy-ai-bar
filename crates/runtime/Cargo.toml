@@ -8,3 +8,13 @@ license.workspace = true
 [lints]
 workspace = true
 
+[dependencies]
+oab-domain = { path = "../domain" }
+thiserror.workspace = true
+time.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+oab-test-support = { path = "../test-support" }
+tokio = { workspace = true, features = ["test-util"] }

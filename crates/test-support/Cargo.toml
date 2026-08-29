@@ -8,3 +8,7 @@ license.workspace = true
 [lints]
 workspace = true
 
+[dependencies]
+oab-domain = { path = "../domain" }
+tokio.workspace = true
+tokio-util.workspace = true
