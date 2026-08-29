@@ -6,7 +6,8 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use oab_domain::{ClassifiedError, ErrorKind, WindowDuration};
 use reqwest::header::{
-    AUTHORIZATION, CONTENT_LENGTH, COOKIE, HeaderMap, HeaderName, HeaderValue, LOCATION,
+    ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HeaderMap, HeaderName,
+    HeaderValue, LOCATION,
 };
 use reqwest::{Client, Method, StatusCode};
 use serde::de::DeserializeOwned;
@@ -292,6 +293,7 @@ pub struct HttpRequest {
     url: Url,
     authentication: Option<Authentication>,
     body: Vec<u8>,
+    json: bool,
 }
 
 impl HttpRequest {
@@ -303,6 +305,7 @@ impl HttpRequest {
             url,
             authentication: None,
             body: Vec::new(),
+            json: false,
         }
     }
 
@@ -320,7 +323,19 @@ impl HttpRequest {
             url,
             authentication: None,
             body,
+            json: false,
         })
+    }
+
+    /// Creates a bounded JSON POST request body.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the body exceeds the request ceiling.
+    pub fn post_json(url: Url, body: Vec<u8>) -> Result<Self, TransportError> {
+        let mut request = Self::post(url, body)?;
+        request.json = true;
+        Ok(request)
     }
 
     /// Attaches typed authentication to be applied after endpoint validation.
@@ -341,6 +356,7 @@ impl Debug for HttpRequest {
             .field("path", &"<redacted>")
             .field("query", &"<redacted>")
             .field("authentication", &self.authentication)
+            .field("json", &self.json)
             .field("body_bytes", &self.body.len())
             .finish()
     }
@@ -486,6 +502,11 @@ impl<C: RetryClock> HttpTransport<C> {
             let mut builder = self
                 .client
                 .request(request.method.clone(), endpoint.url().clone());
+            if request.json {
+                builder = builder
+                    .header(ACCEPT, "application/json")
+                    .header(CONTENT_TYPE, "application/json");
+            }
             if !request.body.is_empty() {
                 builder = builder.body(request.body.clone());
             }

@@ -1,4 +1,6 @@
-use oab_providers::endpoint::{EndpointClass, EndpointError, EndpointPolicy};
+use oab_providers::endpoint::{
+    EndpointClass, EndpointError, EndpointPolicy, classify_https_endpoint,
+};
 use url::Url;
 
 #[test]
@@ -65,6 +67,34 @@ fn loopback_http_requires_an_exact_typed_approval() {
         EndpointPolicy::new([("http://api.example.com", EndpointClass::LoopbackDevelopment)])
             .is_err()
     );
+}
+
+#[test]
+fn configured_https_endpoints_are_classified_without_weakening_host_policy() {
+    for (endpoint, expected) in [
+        ("https://api.example.com/base", EndpointClass::PublicHttps),
+        ("https://10.0.0.4/base", EndpointClass::PrivateHttps),
+        (
+            "https://localhost:8443/base",
+            EndpointClass::LoopbackDevelopment,
+        ),
+    ] {
+        assert_eq!(
+            classify_https_endpoint(&Url::parse(endpoint).expect("endpoint URL"))
+                .expect("classified endpoint"),
+            expected
+        );
+    }
+    for rejected in [
+        "http://api.example.com",
+        "https://user:secret@api.example.com",
+        "https://api.example.com?api_key=secret",
+    ] {
+        assert!(
+            classify_https_endpoint(&Url::parse(rejected).expect("rejected URL")).is_err(),
+            "accepted {rejected}"
+        );
+    }
 }
 
 #[test]

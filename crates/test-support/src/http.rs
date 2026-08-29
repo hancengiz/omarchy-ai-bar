@@ -11,6 +11,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 const MAX_REQUEST_HEAD_BYTES: usize = 64 * 1024;
+const MAX_REQUEST_BODY_BYTES: usize = 4 * 1024 * 1024;
 
 /// One deterministic response emitted for one accepted request.
 #[derive(Clone)]
@@ -89,6 +90,7 @@ pub struct CapturedHttpRequest {
     method: String,
     target: String,
     headers: Vec<(String, String)>,
+    body: Vec<u8>,
 }
 
 impl CapturedHttpRequest {
@@ -106,6 +108,18 @@ impl CapturedHttpRequest {
     pub fn target(&self) -> &str {
         &self.target
     }
+
+    /// Returns the captured request method.
+    #[must_use]
+    pub fn method(&self) -> &str {
+        &self.method
+    }
+
+    /// Returns the bounded captured request body.
+    #[must_use]
+    pub fn body(&self) -> &[u8] {
+        &self.body
+    }
 }
 
 impl Debug for CapturedHttpRequest {
@@ -115,6 +129,7 @@ impl Debug for CapturedHttpRequest {
             .field("method", &self.method)
             .field("target", &"<redacted-target>")
             .field("header_count", &self.headers.len())
+            .field("body_bytes", &self.body.len())
             .finish()
     }
 }
@@ -313,7 +328,8 @@ async fn read_request(stream: &mut TcpStream) -> Option<CapturedHttpRequest> {
     if bytes.len() > MAX_REQUEST_HEAD_BYTES {
         return None;
     }
-    let head = std::str::from_utf8(&bytes).ok()?;
+    let head_end = bytes.windows(4).position(|window| window == b"\r\n\r\n")? + 4;
+    let head = std::str::from_utf8(&bytes[..head_end]).ok()?;
     let mut lines = head.split("\r\n");
     let mut request_line = lines.next()?.split_ascii_whitespace();
     let method = request_line.next()?.to_owned();
@@ -327,10 +343,27 @@ async fn read_request(stream: &mut TcpStream) -> Option<CapturedHttpRequest> {
         let (name, value) = line.split_once(':')?;
         headers.push((name.trim().to_ascii_lowercase(), value.trim().to_owned()));
     }
+    let content_length = headers
+        .iter()
+        .find(|(name, _)| name == "content-length")
+        .map_or(Some(0), |(_, value)| value.parse::<usize>().ok())?;
+    if content_length > MAX_REQUEST_BODY_BYTES {
+        return None;
+    }
+    let mut body = bytes[head_end..].to_vec();
+    if body.len() > content_length {
+        body.truncate(content_length);
+    } else if body.len() < content_length {
+        let missing = content_length - body.len();
+        let mut remaining = vec![0_u8; missing];
+        stream.read_exact(&mut remaining).await.ok()?;
+        body.extend_from_slice(&remaining);
+    }
     Some(CapturedHttpRequest {
         method,
         target,
         headers,
+        body,
     })
 }
 

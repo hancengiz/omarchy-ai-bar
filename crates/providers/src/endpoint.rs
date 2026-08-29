@@ -19,6 +19,33 @@ pub enum EndpointClass {
     PrivateHttps,
 }
 
+/// Selects the exact endpoint class for a configured HTTPS URL.
+///
+/// This preserves enterprise/private Azure-style endpoints while keeping the
+/// transport's public, private, and loopback policies explicit.
+///
+/// # Errors
+///
+/// Returns an error for non-HTTPS, credential-bearing, or malformed URLs.
+pub fn classify_https_endpoint(url: &Url) -> Result<EndpointClass, EndpointError> {
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || !is_https(url.scheme())
+    {
+        return Err(EndpointError::InvalidUrl);
+    }
+    let host = url.host().ok_or(EndpointError::InvalidUrl)?;
+    if is_loopback_host(&host) {
+        Ok(EndpointClass::LoopbackDevelopment)
+    } else if is_public_host(&host) {
+        Ok(EndpointClass::PublicHttps)
+    } else {
+        Ok(EndpointClass::PrivateHttps)
+    }
+}
+
 /// Safe URL-policy failures. Variants deliberately carry no raw URL text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum EndpointError {

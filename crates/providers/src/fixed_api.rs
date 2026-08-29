@@ -240,6 +240,35 @@ impl FixedApiClient {
             .await
             .map_err(|error| error.classified())
     }
+
+    /// Performs one authenticated JSON POST for the exact selected account.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable API error for scope/source mismatches or an oversized
+    /// body and shared classified transport errors for network/provider
+    /// failures.
+    pub async fn post_json(
+        &self,
+        context: &ProviderContext,
+        url: Url,
+        body: Vec<u8>,
+    ) -> Result<HttpResponse, ClassifiedError> {
+        if context.scope() != &self.scope || context.source() != ProviderSource::ApiKey {
+            return Err(ClassifiedError::new(ErrorKind::Api));
+        }
+        let authentication = match &self.authentication {
+            ApiKeyAuthentication::Bearer => self.credential.bearer_authentication()?,
+            ApiKeyAuthentication::Header(header) => self.credential.authentication(header)?,
+        };
+        let request = HttpRequest::post_json(url, body)
+            .map_err(|error| error.classified())?
+            .authentication(authentication);
+        self.transport
+            .send(&request, context.cancellation())
+            .await
+            .map_err(|error| error.classified())
+    }
 }
 
 impl Debug for FixedApiClient {

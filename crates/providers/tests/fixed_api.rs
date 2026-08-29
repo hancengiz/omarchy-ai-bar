@@ -124,6 +124,38 @@ async fn bearer_client_uses_the_same_validation_and_scope_boundary() {
     );
 }
 
+#[tokio::test]
+async fn json_post_sets_media_type_and_preserves_bounded_body() {
+    let server = FakeHttpServer::start([FakeHttpResponse::new(200, Vec::new())]).await;
+    let client = FixedApiClient::new(
+        scope("account-a"),
+        server.url("/v1/"),
+        EndpointClass::LoopbackDevelopment,
+        "api-key",
+        ApiKeyCredential::new("fixture-key-canary").expect("credential"),
+        config(),
+    )
+    .expect("fixed API client");
+    let context = ProviderContext::new(
+        scope("account-a"),
+        ProviderSource::ApiKey,
+        CancellationToken::new(),
+    );
+    client
+        .post_json(
+            &context,
+            client.url("validate").expect("validation URL"),
+            br#"{"probe":"ping"}"#.to_vec(),
+        )
+        .await
+        .expect("JSON POST");
+    let request = &server.requests()[0];
+    assert_eq!(request.method(), "POST");
+    assert_eq!(request.header("accept"), Some("application/json"));
+    assert_eq!(request.header("content-type"), Some("application/json"));
+    assert_eq!(request.body(), br#"{"probe":"ping"}"#);
+}
+
 #[test]
 fn fixed_paths_cannot_replace_the_approved_origin_or_inject_queries() {
     let client = FixedApiClient::new(
