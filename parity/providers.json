@@ -574,18 +574,27 @@
         "Sources/CodexBarCore/Providers/ProviderManifest.swift"
       ],
       "cells": {
-        "authentication": "planned",
-        "usage_resets": "planned",
-        "costs_history": "planned",
-        "sessions": "planned",
-        "browser": "planned",
-        "status_errors": "planned",
-        "refresh": "planned",
-        "cli_server": "planned",
+        "authentication": "passing",
+        "usage_resets": "not-applicable",
+        "costs_history": "not-applicable",
+        "sessions": "not-applicable",
+        "browser": "not-applicable",
+        "status_errors": "passing",
+        "refresh": "passing",
+        "cli_server": "in-progress",
         "qml_ui": "planned"
       },
-      "status": "planned",
-      "tests": []
+      "status": "in-progress",
+      "tests": [
+        "crates/providers/tests/fixed_api.rs",
+        "crates/providers/tests/provider_moonshot.rs"
+      ],
+      "not_applicable_reasons": {
+        "usage_resets": "The pinned baseline intentionally exposes Moonshot balance as identity-only data with no quota window or reset.",
+        "costs_history": "The pinned baseline exposes only current Moonshot balance fields and no cost history.",
+        "sessions": "The pinned baseline has no Moonshot agent-session source.",
+        "browser": "The pinned baseline uses a region-bound bearer API key only."
+      }
     },
     {
       "id": "amp",
