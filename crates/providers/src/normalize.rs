@@ -108,6 +108,7 @@ pub struct UsageSampleBuilder {
     balance: Option<Money>,
     cost: Option<CostSummary>,
     cost_usage: Option<CostUsageSnapshot>,
+    subscription_renews_at: Option<Timestamp>,
     detail_sections: Vec<DetailSection>,
     provenance: Vec<Provenance>,
     confidence: DataConfidence,
@@ -128,6 +129,7 @@ impl UsageSampleBuilder {
             balance: None,
             cost: None,
             cost_usage: None,
+            subscription_renews_at: None,
             detail_sections: Vec::new(),
             provenance: Vec::new(),
             confidence: DataConfidence::Exact,
@@ -216,6 +218,13 @@ impl UsageSampleBuilder {
         self
     }
 
+    /// Sets a provider-reported subscription renewal timestamp.
+    #[must_use]
+    pub fn subscription_renews_at(mut self, value: Option<Timestamp>) -> Self {
+        self.subscription_renews_at = value;
+        self
+    }
+
     /// Adds a public-safe fixed provenance pair.
     ///
     /// # Errors
@@ -268,7 +277,7 @@ impl UsageSampleBuilder {
             None,
             self.balance,
             self.cost,
-            None,
+            self.subscription_renews_at,
             None,
             None,
             self.detail_sections,
