@@ -766,6 +766,11 @@ version = "0.1.0"
 [[package]]
 name = "oab-cli"
 version = "0.1.0"
+dependencies = [
+ "clap",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "oab-cost"
@@ -859,10 +864,15 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "nix",
+ "oab-cli",
  "oab-domain",
  "oab-ipc",
+ "oab-runtime",
+ "oab-storage",
  "serde",
  "serde_json",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]

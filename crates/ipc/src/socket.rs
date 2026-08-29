@@ -3,7 +3,7 @@
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::net::Shutdown;
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Component, Path, PathBuf};
 
@@ -109,6 +109,12 @@ pub struct DisplaySocket {
     listener: UnixListener,
     cleanup: SocketCleanup,
     expected_peer_uid: u32,
+}
+
+impl AsRawFd for DisplaySocket {
+    fn as_raw_fd(&self) -> RawFd {
+        self.listener.as_raw_fd()
+    }
 }
 
 impl DisplaySocket {

@@ -8,10 +8,15 @@ license.workspace = true
 [dependencies]
 clap.workspace = true
 nix.workspace = true
+oab-cli = { path = "../cli" }
 oab-domain = { path = "../domain" }
 oab-ipc = { path = "../ipc" }
+oab-runtime = { path = "../runtime" }
+oab-storage = { path = "../storage" }
 serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
 
 [[bin]]
 name = "omarchy-ai-bar"

@@ -8,7 +8,8 @@ use std::process::ExitCode;
 use std::sync::mpsc;
 use std::thread;
 
-use clap::{Parser, Subcommand};
+use clap::Parser;
+use oab_cli::args::Cli;
 use oab_domain::{SnapshotEnvelopeV1, SurfaceSnapshotEnvelope};
 use oab_ipc::codec::{JsonLineDecoder, encode_json_line};
 use oab_ipc::permissions::effective_uid;
@@ -19,117 +20,18 @@ use oab_ipc::protocol::{
 use oab_ipc::socket::verify_peer_uid;
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::{Number, Value, json};
+use serde_json::{Number, Value};
 
+mod daemon;
 mod hyprland_events;
+mod single_instance;
+mod wiring;
 
 const IO_CHUNK_BYTES: usize = 8 * 1024;
 const BRIDGE_FAILURE_MESSAGE: &str = "omarchy-ai-bar: UI bridge failed";
 
-#[derive(Debug, Parser)]
-#[command(name = "omarchy-ai-bar")]
-#[command(about = "Omarchy-native AI provider usage monitoring")]
-struct Cli {
-    #[command(subcommand)]
-    command: Option<Command>,
-}
-
-#[derive(Debug, Subcommand)]
-enum Command {
-    /// Print application version information.
-    Version {
-        /// Emit a machine-readable JSON object.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Internal transport used by the Omarchy frontend.
-    #[command(hide = true)]
-    Bridge {
-        #[command(subcommand)]
-        transport: BridgeTransport,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-enum BridgeTransport {
-    /// Forward bounded protocol records between standard I/O and the display socket.
-    Stdio {
-        /// Override the display socket pathname (used by integration tests).
-        #[arg(long, value_name = "PATH", hide = true)]
-        socket: Option<PathBuf>,
-    },
-    /// Observe only the exact monitor lifecycle events used by the live gate.
-    #[command(name = "hyprland-events", hide = true)]
-    HyprlandEvents {
-        /// Hyprland event socket pathname.
-        #[arg(long, value_name = "PATH", hide = true)]
-        socket: PathBuf,
-        /// Exact monitor name encoded as canonical RFC 4648 base64.
-        #[arg(long, value_name = "BASE64", hide = true)]
-        monitor_name_base64: String,
-        /// PID of the lifecycle-owning launcher process.
-        #[arg(long, value_name = "PID", hide = true)]
-        parent_pid: u32,
-        /// Inherited descriptor used to acknowledge readiness and privacy arming.
-        #[arg(long, value_name = "FD", hide = true)]
-        ready_fd: i32,
-        /// Inherited descriptor used by the launcher to authorize event reads.
-        #[arg(long, value_name = "FD", hide = true)]
-        authorization_fd: i32,
-    },
-}
-
 fn main() -> ExitCode {
-    let cli = Cli::parse();
-
-    match cli.command {
-        Some(Command::Version { json: as_json }) => {
-            if as_json {
-                println!(
-                    "{}",
-                    json!({
-                        "name": env!("CARGO_PKG_NAME"),
-                        "version": env!("CARGO_PKG_VERSION"),
-                    })
-                );
-            } else {
-                println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
-            }
-            ExitCode::SUCCESS
-        }
-        Some(Command::Bridge {
-            transport: BridgeTransport::Stdio { socket },
-        }) => match run_stdio_bridge(socket) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(_error) => {
-                eprintln!("{BRIDGE_FAILURE_MESSAGE}");
-                ExitCode::FAILURE
-            }
-        },
-        Some(Command::Bridge {
-            transport:
-                BridgeTransport::HyprlandEvents {
-                    socket,
-                    monitor_name_base64,
-                    parent_pid,
-                    ready_fd,
-                    authorization_fd,
-                },
-        }) => match hyprland_events::run(
-            socket,
-            &monitor_name_base64,
-            parent_pid,
-            ready_fd,
-            authorization_fd,
-        ) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(_error) => {
-                eprintln!("{}", hyprland_events::FAILURE_MESSAGE);
-                ExitCode::FAILURE
-            }
-        },
-        None => ExitCode::SUCCESS,
-    }
+    wiring::run(Cli::parse()).into()
 }
 
 #[derive(Debug)]
