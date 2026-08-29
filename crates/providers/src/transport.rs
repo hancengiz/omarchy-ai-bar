@@ -20,6 +20,7 @@ use crate::endpoint::{EndpointError, EndpointPolicy, ValidatedEndpoint};
 use crate::retry::{RetryClock, RetryPolicy, TokioRetryClock, parse_retry_after};
 
 const MAX_SECRET_BYTES: usize = 16 * 1024;
+const MAX_AUTHORIZATION_SCHEME_BYTES: usize = 32;
 const MAX_REQUEST_BODY_BYTES: usize = 4 * 1024 * 1024;
 const MAX_PUBLIC_REQUEST_HEADERS: usize = 32;
 const MAX_PUBLIC_HEADER_VALUE_BYTES: usize = 8 * 1024;
@@ -208,6 +209,13 @@ impl Debug for SecretValue {
 pub enum Authentication {
     /// `Authorization: Bearer ...`.
     Bearer(SecretValue),
+    /// `Authorization: <scheme> ...` for a validated non-Bearer vendor scheme.
+    AuthorizationScheme {
+        /// Public RFC token placed before the secret.
+        scheme: String,
+        /// Secret authorization credential.
+        value: SecretValue,
+    },
     /// Provider-specific secret header.
     ApiKey {
         /// Validated header name.
@@ -227,6 +235,28 @@ impl Authentication {
     /// Rejects empty, oversized, or line-breaking values.
     pub fn bearer(value: impl Into<String>) -> Result<Self, TransportError> {
         SecretValue::new(value).map(Self::Bearer)
+    }
+
+    /// Creates a vendor authorization scheme such as `Token`.
+    ///
+    /// # Errors
+    ///
+    /// Rejects invalid/oversized RFC token schemes and unsafe secret values.
+    pub fn authorization_scheme(
+        scheme: impl AsRef<str>,
+        value: impl Into<String>,
+    ) -> Result<Self, TransportError> {
+        let scheme = scheme.as_ref();
+        if scheme.is_empty()
+            || scheme.len() > MAX_AUTHORIZATION_SCHEME_BYTES
+            || !scheme.bytes().all(is_http_token_byte)
+        {
+            return Err(TransportError::InvalidConfiguration);
+        }
+        Ok(Self::AuthorizationScheme {
+            scheme: scheme.to_owned(),
+            value: SecretValue::new(value)?,
+        })
     }
 
     /// Creates a provider-specific API-key header.
@@ -267,6 +297,10 @@ impl Authentication {
                 let value = Zeroizing::new(format!("Bearer {}", secret.expose()));
                 Ok(builder.header(AUTHORIZATION, sensitive_header(&value)?))
             }
+            Self::AuthorizationScheme { scheme, value } => {
+                let value = Zeroizing::new(format!("{scheme} {}", value.expose()));
+                Ok(builder.header(AUTHORIZATION, sensitive_header(&value)?))
+            }
             Self::ApiKey { name, value } => {
                 Ok(builder.header(name, sensitive_header(value.expose())?))
             }
@@ -279,6 +313,11 @@ impl Debug for Authentication {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Bearer(_) => formatter.write_str("Authentication::Bearer(<redacted>)"),
+            Self::AuthorizationScheme { scheme, .. } => formatter
+                .debug_struct("Authentication::AuthorizationScheme")
+                .field("scheme", scheme)
+                .field("value", &"<redacted>")
+                .finish(),
             Self::ApiKey { name, .. } => formatter
                 .debug_struct("Authentication::ApiKey")
                 .field("name", name)
@@ -642,6 +681,27 @@ fn sensitive_header(value: &str) -> Result<HeaderValue, TransportError> {
         HeaderValue::from_str(value).map_err(|_| TransportError::InvalidConfiguration)?;
     value.set_sensitive(true);
     Ok(value)
+}
+
+const fn is_http_token_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric()
+        || matches!(
+            byte,
+            b'!' | b'#'
+                | b'$'
+                | b'%'
+                | b'&'
+                | b'\''
+                | b'*'
+                | b'+'
+                | b'-'
+                | b'.'
+                | b'^'
+                | b'_'
+                | b'`'
+                | b'|'
+                | b'~'
+        )
 }
 
 fn is_reserved_api_key_header(name: &HeaderName) -> bool {

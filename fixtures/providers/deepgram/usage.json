@@ -1,0 +1,21 @@
+{
+  "start": "2025-01-16",
+  "end": "2025-01-23",
+  "resolution": { "units": "day", "amount": 1 },
+  "results": [
+    {
+      "hours": 1619.7242069444444,
+      "total_hours": 1621.7395791666668,
+      "agent_hours": 41.33564388888889,
+      "tokens_in": 1200,
+      "tokens_out": 340,
+      "tts_characters": 9158866,
+      "requests": 373381
+    },
+    {
+      "hours": 2.25,
+      "total_hours": 3.5,
+      "requests": 19
+    }
+  ]
+}

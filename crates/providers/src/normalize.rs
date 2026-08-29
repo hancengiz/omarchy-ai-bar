@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use oab_domain::{
     AccountScope, BoundedText, ClassifiedError, CostSummary, CostUsageSnapshot, DataConfidence,
-    ErrorKind, IdentitySnapshot, Money, NamedRateWindow, Provenance, ProviderHealth,
+    DetailSection, ErrorKind, IdentitySnapshot, Money, NamedRateWindow, Provenance, ProviderHealth,
     ProviderStatus, RateWindow, Timestamp, UsagePercent, UsageSample, WindowUsage,
 };
 use rust_decimal::Decimal;
@@ -108,6 +108,7 @@ pub struct UsageSampleBuilder {
     balance: Option<Money>,
     cost: Option<CostSummary>,
     cost_usage: Option<CostUsageSnapshot>,
+    detail_sections: Vec<DetailSection>,
     provenance: Vec<Provenance>,
 }
 
@@ -126,6 +127,7 @@ impl UsageSampleBuilder {
             balance: None,
             cost: None,
             cost_usage: None,
+            detail_sections: Vec::new(),
             provenance: Vec::new(),
         }
     }
@@ -198,6 +200,13 @@ impl UsageSampleBuilder {
         self
     }
 
+    /// Replaces provider-defined detail sections.
+    #[must_use]
+    pub fn detail_sections(mut self, detail_sections: Vec<DetailSection>) -> Self {
+        self.detail_sections = detail_sections;
+        self
+    }
+
     /// Adds a public-safe fixed provenance pair.
     ///
     /// # Errors
@@ -253,7 +262,7 @@ impl UsageSampleBuilder {
             None,
             None,
             None,
-            Vec::new(),
+            self.detail_sections,
             Vec::new(),
             Vec::new(),
             self.provenance,

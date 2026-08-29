@@ -125,6 +125,45 @@ async fn bearer_client_uses_the_same_validation_and_scope_boundary() {
 }
 
 #[tokio::test]
+async fn vendor_authorization_scheme_is_validated_and_redacted() {
+    let server = FakeHttpServer::start([FakeHttpResponse::new(200, Vec::new())]).await;
+    let client = FixedApiClient::new_authorization_scheme(
+        scope("account-a"),
+        server.url("/v1/"),
+        EndpointClass::LoopbackDevelopment,
+        "Token",
+        ApiKeyCredential::new("fixture-token-canary").expect("credential"),
+        config(),
+    )
+    .expect("scheme client");
+    let context = ProviderContext::new(
+        scope("account-a"),
+        ProviderSource::ApiKey,
+        CancellationToken::new(),
+    );
+    client
+        .get_json(&context, client.url("projects").expect("projects URL"))
+        .await
+        .expect("scheme request");
+    assert_eq!(
+        server.requests()[0].header("authorization"),
+        Some("Token fixture-token-canary")
+    );
+    assert!(!format!("{client:?}").contains("fixture-token-canary"));
+
+    let error = FixedApiClient::new_authorization_scheme(
+        scope("account-a"),
+        server.url("/v1/"),
+        EndpointClass::LoopbackDevelopment,
+        "Token Injected",
+        ApiKeyCredential::new("fixture").expect("credential"),
+        config(),
+    )
+    .expect_err("invalid scheme");
+    assert_eq!(error.kind(), ErrorKind::Api);
+}
+
+#[tokio::test]
 async fn json_post_sets_media_type_and_preserves_bounded_body() {
     let server = FakeHttpServer::start([FakeHttpResponse::new(200, Vec::new())]).await;
     let client = FixedApiClient::new(

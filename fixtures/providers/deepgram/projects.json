@@ -1,0 +1,6 @@
+{
+  "projects": [
+    { "project_id": "project-a", "name": "Alpha" },
+    { "project_id": "project-b", "name": "Beta" }
+  ]
+}

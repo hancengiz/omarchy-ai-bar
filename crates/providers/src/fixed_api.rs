@@ -67,6 +67,11 @@ impl ApiKeyCredential {
     fn bearer_authentication(&self) -> Result<Authentication, ClassifiedError> {
         Authentication::bearer(self.value.as_str().to_owned()).map_err(|error| error.classified())
     }
+
+    fn authorization_scheme(&self, scheme: &str) -> Result<Authentication, ClassifiedError> {
+        Authentication::authorization_scheme(scheme, self.value.as_str().to_owned())
+            .map_err(|error| error.classified())
+    }
 }
 
 impl Debug for ApiKeyCredential {
@@ -86,6 +91,7 @@ pub struct FixedApiClient {
 
 enum ApiKeyAuthentication {
     Bearer,
+    AuthorizationScheme(String),
     Header(HeaderName),
 }
 
@@ -153,6 +159,38 @@ impl FixedApiClient {
             base_url,
             endpoints,
             ApiKeyAuthentication::Bearer,
+            credential,
+            config,
+        )
+    }
+
+    /// Creates an exact-origin client using a vendor authorization scheme.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable API error for malformed endpoints, an invalid scheme,
+    /// or transport configuration.
+    pub fn new_authorization_scheme(
+        scope: AccountScope,
+        base_url: Url,
+        endpoint_class: EndpointClass,
+        scheme: impl AsRef<str>,
+        credential: ApiKeyCredential,
+        config: TransportConfig,
+    ) -> Result<Self, ClassifiedError> {
+        let origin = base_url.origin().ascii_serialization();
+        let endpoints = EndpointPolicy::new([(origin, endpoint_class)])
+            .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        endpoints
+            .validate(&base_url)
+            .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        let scheme = scheme.as_ref();
+        credential.authorization_scheme(scheme)?;
+        Self::build(
+            scope,
+            base_url,
+            endpoints,
+            ApiKeyAuthentication::AuthorizationScheme(scheme.to_owned()),
             credential,
             config,
         )
@@ -232,6 +270,9 @@ impl FixedApiClient {
         }
         let authentication = match &self.authentication {
             ApiKeyAuthentication::Bearer => self.credential.bearer_authentication()?,
+            ApiKeyAuthentication::AuthorizationScheme(scheme) => {
+                self.credential.authorization_scheme(scheme)?
+            }
             ApiKeyAuthentication::Header(header) => self.credential.authentication(header)?,
         };
         let request = HttpRequest::get(url).authentication(authentication);
@@ -272,6 +313,9 @@ impl FixedApiClient {
         }
         let authentication = match &self.authentication {
             ApiKeyAuthentication::Bearer => self.credential.bearer_authentication()?,
+            ApiKeyAuthentication::AuthorizationScheme(scheme) => {
+                self.credential.authorization_scheme(scheme)?
+            }
             ApiKeyAuthentication::Header(header) => self.credential.authentication(header)?,
         };
         let request = HttpRequest::get_json(url).authentication(authentication);
@@ -333,6 +377,9 @@ impl FixedApiClient {
         }
         let authentication = match &self.authentication {
             ApiKeyAuthentication::Bearer => self.credential.bearer_authentication()?,
+            ApiKeyAuthentication::AuthorizationScheme(scheme) => {
+                self.credential.authorization_scheme(scheme)?
+            }
             ApiKeyAuthentication::Header(header) => self.credential.authentication(header)?,
         };
         let request = request.authentication(authentication);
@@ -355,6 +402,7 @@ impl Debug for FixedApiClient {
                 "authentication",
                 &match &self.authentication {
                     ApiKeyAuthentication::Bearer => "bearer",
+                    ApiKeyAuthentication::AuthorizationScheme(_) => "authorization-scheme",
                     ApiKeyAuthentication::Header(_) => "api-key-header",
                 },
             )
