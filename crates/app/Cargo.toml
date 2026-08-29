@@ -8,11 +8,11 @@ license.workspace = true
 [dependencies]
 clap.workspace = true
 nix.workspace = true
-oab-cli = { path = "../cli" }
-oab-domain = { path = "../domain" }
-oab-ipc = { path = "../ipc" }
-oab-runtime = { path = "../runtime" }
-oab-storage = { path = "../storage" }
+oab-cli = { path = "../cli", version = "=0.1.0" }
+oab-domain = { path = "../domain", version = "=0.1.0" }
+oab-ipc = { path = "../ipc", version = "=0.1.0" }
+oab-runtime = { path = "../runtime", version = "=0.1.0" }
+oab-storage = { path = "../storage", version = "=0.1.0" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

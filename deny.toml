@@ -1,3 +1,6 @@
+[graph]
+targets = ["x86_64-unknown-linux-gnu"]
+
 [advisories]
 version = 2
 yanked = "deny"
@@ -5,6 +8,7 @@ yanked = "deny"
 [licenses]
 version = 2
 confidence-threshold = 0.93
+unused-allowed-license = "allow"
 allow = [
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
@@ -13,14 +17,24 @@ allow = [
     "ISC",
     "MIT",
     "Unicode-3.0",
+    "Unlicense",
     "Zlib",
 ]
 
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+deny = [
+    { name = "async-io", reason = "Tokio is the sole asynchronous runtime" },
+    { name = "async-std", reason = "Tokio is the sole asynchronous runtime" },
+    { name = "smol", reason = "Tokio is the sole asynchronous runtime" },
+    { name = "glommio", reason = "Tokio is the sole asynchronous runtime" },
+]
+skip = [
+    { crate = "getrandom@0.2.17", reason = "Workspace secure-name generation uses the pinned 0.2 API while oo7 uses 0.4" },
+    { crate = "syn@2.0.119", reason = "zbus 5 has moved to syn 3 while the remaining macro ecosystem uses syn 2" },
+]
 
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-

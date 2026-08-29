@@ -3,6 +3,19 @@ set -euo pipefail
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "$script_dir/.." && pwd)
+cargo_bin=${CARGO:-cargo}
+
+if ! command -v "$cargo_bin" >/dev/null 2>&1; then
+  cargo_install_root=${CARGO_HOME:-"$HOME/.cargo"}
+  if [[ -x $cargo_install_root/bin/cargo ]]; then
+    cargo_bin="$cargo_install_root/bin/cargo"
+  fi
+fi
+
+if ! command -v "$cargo_bin" >/dev/null 2>&1; then
+  echo "parity gate: Cargo is unavailable" >&2
+  exit 2
+fi
 
 case "${1:-}" in
   "")
@@ -37,5 +50,5 @@ if [[ -z "${OAB_BASELINE_DIR:-}" && -d "$repo_root/../CodexBar" ]]; then
 fi
 
 cd -- "$repo_root"
-cargo test -p oab-domain --test provider_registry --locked
-cargo test -p oab-providers --test ledger --locked
+"$cargo_bin" test -p oab-domain --test provider_registry --locked
+"$cargo_bin" test -p oab-providers --test ledger --locked

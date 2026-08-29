@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-oab-domain = { path = "../domain" }
+oab-domain = { path = "../domain", version = "=0.1.0" }
 
 [dev-dependencies]
 serde_json.workspace = true
