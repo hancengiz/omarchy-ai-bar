@@ -1,10 +1,9 @@
 use oab_domain::ProviderId;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ProviderMetadata {
-    pub id: ProviderId,
-    pub display_name: &'static str,
-}
+use crate::descriptor::ProviderDescriptor;
+
+/// Compatibility name retained while callers migrate from metadata-only entries.
+pub type ProviderMetadata = ProviderDescriptor;
 
 pub const PROVIDERS: [ProviderMetadata; 69] = [
     ProviderMetadata {
@@ -284,3 +283,20 @@ pub const PROVIDERS: [ProviderMetadata; 69] = [
         display_name: "IBM Bob",
     },
 ];
+
+/// Returns the closed descriptor for `id`.
+///
+/// The array order is pinned to [`ProviderId::ALL`], so lookup is exhaustive
+/// without allowing dynamic or unknown first-party identifiers.
+///
+/// # Panics
+///
+/// Panics only if the compile-time closed registry no longer covers every
+/// [`ProviderId`], which is guarded by the provider contract tests.
+#[must_use]
+pub fn descriptor_for(id: ProviderId) -> &'static ProviderDescriptor {
+    PROVIDERS
+        .iter()
+        .find(|descriptor| descriptor.id == id)
+        .expect("closed provider registry covers every ProviderId")
+}

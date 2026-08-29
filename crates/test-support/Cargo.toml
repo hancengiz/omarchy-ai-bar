@@ -12,3 +12,4 @@ workspace = true
 oab-domain = { path = "../domain", version = "=0.1.0" }
 tokio.workspace = true
 tokio-util.workspace = true
+url.workspace = true

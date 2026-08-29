@@ -3,3 +3,4 @@
 pub mod clock;
 pub mod fake_provider;
 pub mod fake_transport;
+pub mod http;
