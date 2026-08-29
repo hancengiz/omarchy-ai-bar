@@ -1,0 +1,8 @@
+{
+  "info": {
+    "key_name": "team-service-key",
+    "spend": 25.0,
+    "expires": "2026-12-01T00:00:00Z",
+    "team_id": "team-456"
+  }
+}

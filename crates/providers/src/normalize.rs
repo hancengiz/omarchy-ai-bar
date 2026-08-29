@@ -103,12 +103,14 @@ pub struct UsageSampleBuilder {
     primary: Option<RateWindow>,
     secondary: Option<RateWindow>,
     extra_windows: Vec<NamedRateWindow>,
+    email: Option<BoundedText<256>>,
     organization: Option<BoundedText<256>>,
     login_method: Option<BoundedText<256>>,
     balance: Option<Money>,
     cost: Option<CostSummary>,
     cost_usage: Option<CostUsageSnapshot>,
     subscription_renews_at: Option<Timestamp>,
+    subscription_expires_at: Option<Timestamp>,
     detail_sections: Vec<DetailSection>,
     provenance: Vec<Provenance>,
     confidence: DataConfidence,
@@ -124,12 +126,14 @@ impl UsageSampleBuilder {
             primary: None,
             secondary: None,
             extra_windows: Vec::new(),
+            email: None,
             organization: None,
             login_method: None,
             balance: None,
             cost: None,
             cost_usage: None,
             subscription_renews_at: None,
+            subscription_expires_at: None,
             detail_sections: Vec::new(),
             provenance: Vec::new(),
             confidence: DataConfidence::Exact,
@@ -155,6 +159,19 @@ impl UsageSampleBuilder {
     pub fn extra_windows(mut self, extra_windows: Vec<NamedRateWindow>) -> Self {
         self.extra_windows = extra_windows;
         self
+    }
+
+    /// Adds a bounded provider-reported account email.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable parse error when provider text violates domain bounds.
+    pub fn email(mut self, value: Option<String>) -> Result<Self, ClassifiedError> {
+        self.email = value
+            .map(BoundedText::new)
+            .transpose()
+            .map_err(|_| ClassifiedError::new(ErrorKind::Parse))?;
+        Ok(self)
     }
 
     /// Adds a bounded provider organization/project label.
@@ -225,6 +242,13 @@ impl UsageSampleBuilder {
         self
     }
 
+    /// Sets a provider-reported subscription or credential expiry timestamp.
+    #[must_use]
+    pub fn subscription_expires_at(mut self, value: Option<Timestamp>) -> Self {
+        self.subscription_expires_at = value;
+        self
+    }
+
     /// Adds a public-safe fixed provenance pair.
     ///
     /// # Errors
@@ -252,7 +276,7 @@ impl UsageSampleBuilder {
         let identity = IdentitySnapshot::new(
             self.scope.clone(),
             None,
-            None,
+            self.email,
             self.organization,
             None,
             None,
@@ -278,7 +302,7 @@ impl UsageSampleBuilder {
             self.balance,
             self.cost,
             self.subscription_renews_at,
-            None,
+            self.subscription_expires_at,
             None,
             self.detail_sections,
             Vec::new(),

@@ -8,6 +8,7 @@ pub mod deepinfra;
 pub mod elevenlabs;
 pub mod fireworks;
 pub mod ibmbob;
+pub mod litellm;
 pub mod neuralwatt;
 pub mod openai;
 pub mod warp;

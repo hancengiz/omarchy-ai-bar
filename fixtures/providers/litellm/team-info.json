@@ -1,0 +1,11 @@
+{
+  "team_id": "team-456",
+  "team_info": {
+    "team_id": "team-456",
+    "team_alias": "platform",
+    "max_budget": 100.0,
+    "spend": 25.0,
+    "budget_duration": "30d",
+    "budget_reset_at": "2026-07-01T00:00:00Z"
+  }
+}
