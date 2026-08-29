@@ -102,6 +102,7 @@ pub struct UsageSampleBuilder {
     fetched_at: Timestamp,
     primary: Option<RateWindow>,
     secondary: Option<RateWindow>,
+    tertiary: Option<RateWindow>,
     extra_windows: Vec<NamedRateWindow>,
     email: Option<BoundedText<256>>,
     organization: Option<BoundedText<256>>,
@@ -125,6 +126,7 @@ impl UsageSampleBuilder {
             fetched_at,
             primary: None,
             secondary: None,
+            tertiary: None,
             extra_windows: Vec::new(),
             email: None,
             organization: None,
@@ -151,6 +153,13 @@ impl UsageSampleBuilder {
     #[must_use]
     pub fn secondary(mut self, secondary: RateWindow) -> Self {
         self.secondary = Some(secondary);
+        self
+    }
+
+    /// Sets the provider's tertiary quota lane.
+    #[must_use]
+    pub fn tertiary(mut self, tertiary: RateWindow) -> Self {
+        self.tertiary = Some(tertiary);
         self
     }
 
@@ -296,7 +305,7 @@ impl UsageSampleBuilder {
             self.fetched_at,
             self.primary,
             self.secondary,
-            None,
+            self.tertiary,
             self.extra_windows,
             None,
             self.balance,
