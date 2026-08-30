@@ -22,6 +22,7 @@ const MAX_JSON_DEPTH: usize = 16;
 const MAX_JSON_NODES: usize = 4096;
 const MAX_SECRET_BYTES: usize = 64 * 1024;
 const MAX_ACCOUNT_ID_BYTES: usize = 1024;
+const MAX_IDENTITY_BYTES: usize = 256;
 const NATIVE_REFRESH_SKEW_SECONDS: i64 = 5 * 60;
 const EXTERNAL_REFRESH_SKEW_SECONDS: i64 = 60;
 const LAST_REFRESH_MAX_AGE_SECONDS: i64 = 8 * 24 * 60 * 60;
@@ -145,6 +146,43 @@ impl CodexBearerCredentials {
         self.kind
     }
 
+    /// Bounded email and plan hints decoded locally from the optional ID token.
+    ///
+    /// Invalid, oversized, or missing claims are omitted independently and
+    /// never make otherwise usable bearer credentials fail.
+    #[must_use]
+    pub fn identity_hints(&self) -> CodexBearerIdentityHints {
+        self.id_token
+            .as_deref()
+            .and_then(|token| bounded_jwt_object(token, false))
+            .map_or_else(CodexBearerIdentityHints::default, |payload| {
+                let profile = payload
+                    .get("https://api.openai.com/profile")
+                    .and_then(Value::as_object);
+                let auth = payload
+                    .get("https://api.openai.com/auth")
+                    .and_then(Value::as_object);
+                CodexBearerIdentityHints {
+                    email: [
+                        payload.get("email"),
+                        profile.and_then(|value| value.get("email")),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .find_map(bounded_identity_text),
+                    plan: [
+                        auth.and_then(|value| value.get("chatgpt_plan_type")),
+                        payload.get("chatgpt_plan_type"),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .find_map(bounded_identity_text),
+                }
+            })
+    }
+
     /// Whether the owning application must rotate this credential at `now`.
     #[must_use]
     pub fn needs_refresh_at(&self, now: Timestamp) -> bool {
@@ -168,6 +206,37 @@ impl CodexBearerCredentials {
         now.unix_timestamp()
             .saturating_sub(last_refresh.unix_timestamp())
             > LAST_REFRESH_MAX_AGE_SECONDS
+    }
+}
+
+/// Optional identity hints recovered from a bounded local ID-token payload.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct CodexBearerIdentityHints {
+    email: Option<String>,
+    plan: Option<String>,
+}
+
+impl CodexBearerIdentityHints {
+    /// Account email claim, when safely decoded.
+    #[must_use]
+    pub fn email(&self) -> Option<&str> {
+        self.email.as_deref()
+    }
+
+    /// `ChatGPT` plan claim, when safely decoded.
+    #[must_use]
+    pub fn plan(&self) -> Option<&str> {
+        self.plan.as_deref()
+    }
+}
+
+impl Debug for CodexBearerIdentityHints {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CodexBearerIdentityHints")
+            .field("has_email", &self.email.is_some())
+            .field("has_plan", &self.plan.is_some())
+            .finish()
     }
 }
 
@@ -741,8 +810,7 @@ fn account_id_from_jwts(id_token: Option<&str>, access_token: Option<&str>) -> O
 }
 
 fn account_id_from_jwt(token: &str) -> Option<String> {
-    let payload = decode_jwt_payload(token, false)?;
-    let object = payload.as_object()?;
+    let object = bounded_jwt_object(token, false)?;
     object
         .get("chatgpt_account_id")
         .and_then(Value::as_str)
@@ -769,6 +837,19 @@ fn account_id_from_jwt(token: &str) -> Option<String> {
                     })
                 })
         })
+}
+
+fn bounded_jwt_object(token: &str, require_nonempty_parts: bool) -> Option<Map<String, Value>> {
+    let payload = decode_jwt_payload_bytes(token, require_nonempty_parts)?;
+    let value: Value = serde_json::from_slice(&payload).ok()?;
+    let mut nodes = 0_usize;
+    validate_json(&value, 0, &mut nodes).ok()?;
+    value.as_object().cloned()
+}
+
+fn bounded_identity_text(value: &str) -> Option<String> {
+    let value = clean_text(value)?;
+    (value.len() <= MAX_IDENTITY_BYTES && !value.contains(['\r', '\n'])).then(|| value.to_owned())
 }
 
 fn expiration_from_jwt(token: &str) -> Option<Timestamp> {
@@ -824,11 +905,6 @@ impl<'de> Deserialize<'de> for IntegerExpirationClaim {
 
         deserializer.deserialize_map(ClaimVisitor)
     }
-}
-
-fn decode_jwt_payload(token: &str, require_nonempty_parts: bool) -> Option<Value> {
-    let payload = decode_jwt_payload_bytes(token, require_nonempty_parts)?;
-    serde_json::from_slice(&payload).ok()
 }
 
 fn decode_jwt_payload_bytes(token: &str, require_nonempty_parts: bool) -> Option<Vec<u8>> {

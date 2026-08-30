@@ -130,6 +130,104 @@ fn jwt_account_claim_precedence_skips_blank_candidates() {
 }
 
 #[test]
+fn id_token_identity_hints_follow_bounded_claim_precedence() {
+    let id_token = jwt(&json!({
+        "email": "top-level@example.test",
+        "chatgpt_plan_type": "top-level-plan",
+        "https://api.openai.com/profile": {
+            "email": "profile@example.test"
+        },
+        "https://api.openai.com/auth": {
+            "chatgpt_plan_type": "auth-plan"
+        }
+    }));
+    let encoded = serde_json::to_vec(&json!({
+        "tokens": {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "id_token": id_token
+        }
+    }))
+    .expect("identity fixture");
+    let bearer = parse_codex_bearer(&encoded, CodexCredentialSource::Native)
+        .expect("bearer with identity hints");
+    let hints = bearer.identity_hints();
+
+    assert_eq!(hints.email(), Some("top-level@example.test"));
+    assert_eq!(hints.plan(), Some("auth-plan"));
+}
+
+#[test]
+fn id_token_identity_hints_skip_invalid_high_priority_claims() {
+    let id_token = jwt(&json!({
+        "email": "x".repeat(257),
+        "chatgpt_plan_type": "top-level-plan",
+        "https://api.openai.com/profile": {
+            "email": "profile@example.test"
+        },
+        "https://api.openai.com/auth": {
+            "chatgpt_plan_type": "  "
+        }
+    }));
+    let encoded = serde_json::to_vec(&json!({
+        "tokens": {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "id_token": id_token
+        }
+    }))
+    .expect("fallback identity fixture");
+    let bearer = parse_codex_bearer(&encoded, CodexCredentialSource::Native)
+        .expect("bearer with fallback identity hints");
+    let hints = bearer.identity_hints();
+
+    assert_eq!(hints.email(), Some("profile@example.test"));
+    assert_eq!(hints.plan(), Some("top-level-plan"));
+}
+
+#[test]
+fn malformed_id_token_keeps_credentials_usable_and_hints_redacted() {
+    let encoded = serde_json::to_vec(&json!({
+        "tokens": {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "id_token": "not-a-jwt-canary"
+        }
+    }))
+    .expect("malformed identity fixture");
+    let bearer = parse_codex_bearer(&encoded, CodexCredentialSource::Native)
+        .expect("malformed identity hint must not suppress bearer");
+    let hints = bearer.identity_hints();
+
+    assert_eq!(bearer.access_token(), "access");
+    assert_eq!(hints.email(), None);
+    assert_eq!(hints.plan(), None);
+    assert!(!format!("{hints:?}").contains("not-a-jwt-canary"));
+
+    let secret_id_token = jwt(&json!({
+        "email": "identity-email-canary@example.test",
+        "https://api.openai.com/auth": {
+            "chatgpt_plan_type": "identity-plan-canary"
+        }
+    }));
+    let encoded = serde_json::to_vec(&json!({
+        "tokens": {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "id_token": secret_id_token
+        }
+    }))
+    .expect("redaction identity fixture");
+    let bearer = parse_codex_bearer(&encoded, CodexCredentialSource::Native)
+        .expect("bearer with redactable identity hints");
+    let diagnostics = format!("{:?}", bearer.identity_hints());
+    assert!(!diagnostics.contains("identity-email-canary"));
+    assert!(!diagnostics.contains("identity-plan-canary"));
+    assert!(diagnostics.contains("has_email: true"));
+    assert!(diagnostics.contains("has_plan: true"));
+}
+
+#[test]
 fn native_expiry_and_age_hints_are_deterministic_and_source_owned() {
     let native_token = jwt(&json!({"exp": 1_800_000_000}));
     let bearer = parse_codex_bearer(
