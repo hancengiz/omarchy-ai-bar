@@ -28,6 +28,7 @@ pub mod neuralwatt;
 pub mod openai;
 pub mod opencode;
 pub mod openrouter;
+pub mod perplexity;
 pub mod poe;
 pub mod qwencloud;
 pub mod sakana;
