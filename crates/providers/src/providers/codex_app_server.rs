@@ -11,9 +11,9 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use oab_domain::{
-    AccountScope, BoundedText, CreditLimitSnapshot, CreditsSnapshot, DataConfidence,
-    DisplayPercent, ExactDecimal, IdentitySnapshot, ProviderId, RateWindow, Timestamp,
-    UsagePercent, UsageSample, WindowDuration, WindowUsage,
+    AccountScope, BoundedText, ClassifiedError, CreditLimitSnapshot, CreditsSnapshot,
+    DataConfidence, DisplayPercent, ErrorKind, ExactDecimal, IdentitySnapshot, ProviderId,
+    RateWindow, Timestamp, UsagePercent, UsageSample, WindowDuration, WindowUsage,
 };
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
@@ -21,6 +21,7 @@ use serde_json::{Map, Value, json};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 
+use super::codex::CodexAttemptFailure;
 use crate::executable::ExecutablePath;
 use crate::json_rpc_child::{JsonRpcChild, JsonRpcChildError, JsonRpcChildRequest, JsonRpcVersion};
 use crate::normalize::UsageSampleBuilder;
@@ -130,6 +131,34 @@ pub enum CodexAppServerError {
     /// The authoritative rate response contained no usable limits, credits, or identity.
     #[error("Codex app-server returned no rate limits")]
     NoRateLimits,
+}
+
+impl CodexAppServerError {
+    /// Failure class consumed by the closed Codex source planner.
+    #[must_use]
+    pub const fn attempt_failure(self) -> CodexAttemptFailure {
+        match self {
+            Self::Start => CodexAttemptFailure::Unavailable,
+            Self::Timeout { .. } | Self::Transport => CodexAttemptFailure::Network,
+            Self::ResponseTooLarge | Self::Protocol | Self::NoRateLimits => {
+                CodexAttemptFailure::InvalidResponse
+            }
+            Self::Remote { .. } => CodexAttemptFailure::Server,
+            Self::InvalidConfiguration | Self::Cancelled => CodexAttemptFailure::Other,
+        }
+    }
+
+    /// Public-safe domain projection.
+    #[must_use]
+    pub fn classified(self) -> ClassifiedError {
+        let kind = match self {
+            Self::Start | Self::Remote { .. } => ErrorKind::ProviderUnavailable,
+            Self::Cancelled | Self::Timeout { .. } | Self::Transport => ErrorKind::Network,
+            Self::ResponseTooLarge | Self::Protocol | Self::NoRateLimits => ErrorKind::Parse,
+            Self::InvalidConfiguration => ErrorKind::Api,
+        };
+        ClassifiedError::new(kind)
+    }
 }
 
 /// One authoritative app-server result.

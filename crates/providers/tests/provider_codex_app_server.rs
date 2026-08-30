@@ -6,9 +6,10 @@ use std::time::Duration;
 
 use nix::fcntl::{Flock, FlockArg};
 use oab_domain::{
-    AccountKey, AccountScope, DataConfidence, ProviderId, ProviderInstanceId, Timestamp,
+    AccountKey, AccountScope, DataConfidence, ErrorKind, ProviderId, ProviderInstanceId, Timestamp,
 };
 use oab_providers::executable::{ExecutablePath, resolve_executable};
+use oab_providers::providers::codex::CodexAttemptFailure;
 use oab_providers::providers::codex_app_server::{
     CodexAppServerClient, CodexAppServerError, CodexAppServerStage,
 };
@@ -1257,4 +1258,81 @@ async fn foreign_provider_scope_is_rejected_before_process_launch() {
         .expect_err("foreign scope");
     assert_eq!(error, CodexAppServerError::InvalidConfiguration);
     assert!(!fixture.pid.exists(), "foreign scope must not launch child");
+}
+
+#[test]
+fn error_attempt_and_public_classifications_are_exhaustive() {
+    let cases = [
+        (
+            CodexAppServerError::InvalidConfiguration,
+            CodexAttemptFailure::Other,
+            ErrorKind::Api,
+        ),
+        (
+            CodexAppServerError::Start,
+            CodexAttemptFailure::Unavailable,
+            ErrorKind::ProviderUnavailable,
+        ),
+        (
+            CodexAppServerError::Cancelled,
+            CodexAttemptFailure::Other,
+            ErrorKind::Network,
+        ),
+        (
+            CodexAppServerError::Timeout {
+                stage: CodexAppServerStage::Initialize,
+            },
+            CodexAttemptFailure::Network,
+            ErrorKind::Network,
+        ),
+        (
+            CodexAppServerError::Timeout {
+                stage: CodexAppServerStage::RateLimits,
+            },
+            CodexAttemptFailure::Network,
+            ErrorKind::Network,
+        ),
+        (
+            CodexAppServerError::Timeout {
+                stage: CodexAppServerStage::Account,
+            },
+            CodexAttemptFailure::Network,
+            ErrorKind::Network,
+        ),
+        (
+            CodexAppServerError::Transport,
+            CodexAttemptFailure::Network,
+            ErrorKind::Network,
+        ),
+        (
+            CodexAppServerError::ResponseTooLarge,
+            CodexAttemptFailure::InvalidResponse,
+            ErrorKind::Parse,
+        ),
+        (
+            CodexAppServerError::Protocol,
+            CodexAttemptFailure::InvalidResponse,
+            ErrorKind::Parse,
+        ),
+        (
+            CodexAppServerError::Remote { code: Some(17) },
+            CodexAttemptFailure::Server,
+            ErrorKind::ProviderUnavailable,
+        ),
+        (
+            CodexAppServerError::Remote { code: None },
+            CodexAttemptFailure::Server,
+            ErrorKind::ProviderUnavailable,
+        ),
+        (
+            CodexAppServerError::NoRateLimits,
+            CodexAttemptFailure::InvalidResponse,
+            ErrorKind::Parse,
+        ),
+    ];
+
+    for (error, expected_attempt, expected_kind) in cases {
+        assert_eq!(error.attempt_failure(), expected_attempt, "{error:?}");
+        assert_eq!(error.classified().kind(), expected_kind, "{error:?}");
+    }
 }
