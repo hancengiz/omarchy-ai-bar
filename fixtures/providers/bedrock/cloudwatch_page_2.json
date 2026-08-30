@@ -1,0 +1,7 @@
+{
+  "MetricDataResults": [
+    {"Id": "inputTokens", "StatusCode": "Complete", "Values": [3.5]},
+    {"Id": "outputTokens", "StatusCode": "Complete", "Values": []},
+    {"Id": "requests", "StatusCode": "Complete", "Values": []}
+  ]
+}

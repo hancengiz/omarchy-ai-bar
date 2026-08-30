@@ -1,0 +1,8 @@
+{
+  "NextToken": "cloud-page-2",
+  "MetricDataResults": [
+    {"Id": "inputTokens", "StatusCode": "Complete", "Values": [1000, 2500]},
+    {"Id": "outputTokens", "StatusCode": "Complete", "Values": [400, 600]},
+    {"Id": "requests", "StatusCode": "Complete", "Values": [7, 8]}
+  ]
+}

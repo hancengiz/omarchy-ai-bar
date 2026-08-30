@@ -1,0 +1,21 @@
+{
+  "timeSeries": [
+    {
+      "metric": {
+        "type": "serviceruntime.googleapis.com/quota/allocation/usage",
+        "labels": {
+          "limit_name": "GenerateContentRequestsPerMinutePerProjectPerBaseModel",
+          "quota_metric": "aiplatform.googleapis.com/generate_content_requests"
+        }
+      },
+      "resource": {
+        "type": "consumer_quota",
+        "labels": { "location": "global" }
+      },
+      "points": [
+        { "value": { "int64Value": "5" } },
+        { "value": { "doubleValue": 25.0 } }
+      ]
+    }
+  ]
+}

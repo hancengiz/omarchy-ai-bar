@@ -113,6 +113,45 @@ fn bedrock_advertises_cost_history_without_credit_inventory() {
 }
 
 #[test]
+fn signed_cloud_provider_sources_are_exact_and_actionable() {
+    assert_eq!(
+        descriptor_for(ProviderId::Bedrock)
+            .sources()
+            .iter()
+            .collect::<Vec<_>>(),
+        [ProviderSource::CloudCredentials]
+    );
+    assert_eq!(
+        descriptor_for(ProviderId::Doubao)
+            .sources()
+            .iter()
+            .collect::<Vec<_>>(),
+        [
+            ProviderSource::ApiKey,
+            ProviderSource::Cli,
+            ProviderSource::CloudCredentials
+        ]
+    );
+    assert_eq!(
+        descriptor_for(ProviderId::VertexAi)
+            .sources()
+            .iter()
+            .collect::<Vec<_>>(),
+        [ProviderSource::CloudCredentials]
+    );
+    assert!(
+        descriptor_for(ProviderId::Doubao)
+            .capabilities()
+            .contains(ProviderCapability::LoginAction)
+    );
+    assert!(
+        descriptor_for(ProviderId::VertexAi)
+            .capabilities()
+            .contains(ProviderCapability::LoginAction)
+    );
+}
+
+#[test]
 fn first_run_behavior_is_explicit_and_nonprobing_by_default() {
     assert_eq!(
         descriptor_for(ProviderId::Codex).default_behavior(),

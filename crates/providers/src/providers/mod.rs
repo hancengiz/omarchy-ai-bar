@@ -2,6 +2,7 @@
 
 pub mod aiand;
 pub mod azureopenai;
+pub mod bedrock;
 pub mod chutes;
 pub mod clawrouter;
 pub mod clinepass;
@@ -9,6 +10,7 @@ pub mod copilot;
 pub mod crof;
 pub mod deepgram;
 pub mod deepinfra;
+pub mod doubao;
 pub mod elevenlabs;
 pub mod fireworks;
 pub mod ibmbob;
@@ -22,6 +24,7 @@ pub mod poe;
 pub mod sub2api;
 pub mod synthetic;
 pub mod venice;
+pub mod vertexai;
 pub mod warp;
 pub mod wayfinder;
 pub mod xai;

@@ -587,6 +587,9 @@ bounded `gcloud` token acquisition.
 - Canonical signed requests have golden fixtures.
 - AWS environment/profile/session/SSO precedence is fixture-driven.
 - No token reaches cache, logs, CLI JSON, or QML.
+- Vertex AI projects its validated Cloud Monitoring quota percentage into the primary 24-hour window. This deliberately
+  corrects the pinned descriptor's loss of the already-fetched value; genuine no-data responses remain identity-only.
+- Copilot's optional browser-cookie budget enrichment remains assigned to Task 18's shared Linux browser boundary.
 
 ### Task 17: Batch 4 — bounded CLI and Linux local readers (5)
 

@@ -1,0 +1,49 @@
+{
+  "viewer": {
+    "auth_method": "sso",
+    "profile": "personal"
+  },
+  "items": [
+    {
+      "product": "coding-plan",
+      "subscribed": true,
+      "periods": [
+        {"label": "session", "percent": 7.48, "reset_at": "2026-07-16T19:12:07+08:00"},
+        {"label": "weekly", "percent": 2.71, "reset_at": 1784534400000},
+        {"label": "monthly", "percent": 1.36, "reset_at": -1}
+      ],
+      "updated_at": 1784191193000
+    },
+    {
+      "product": "agent-plan",
+      "subscribed": true,
+      "periods": [
+        {"label": "5h", "percent": 5},
+        {"label": "weekly", "percent": 15},
+        {"label": "monthly", "percent": 25}
+      ],
+      "updated_at": 1784191293
+    },
+    {
+      "product": "coding-plan-team",
+      "subscribed": true,
+      "periods": [
+        {"label": "session", "percent": 17},
+        {"label": "monthly", "percent": 27}
+      ]
+    },
+    {
+      "product": "agent-plan-team",
+      "subscribed": true,
+      "periods": [
+        {"label": "5h", "percent": 35},
+        {"label": "weekly", "percent": 45}
+      ]
+    },
+    {
+      "product": "future-plan",
+      "subscribed": true,
+      "error": "ignored future product"
+    }
+  ]
+}

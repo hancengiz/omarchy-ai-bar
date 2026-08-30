@@ -1,0 +1,17 @@
+{
+  "ResponseMetadata": {
+    "Action": "GetCodingPlanUsage",
+    "Version": "2024-01-01",
+    "Service": "ark",
+    "Region": "cn-beijing"
+  },
+  "Result": {
+    "Status": "Running",
+    "UpdateTimestamp": 1782226444,
+    "QuotaUsage": [
+      {"Level": "session", "Percent": 12.5, "ResetTimestamp": 1782226478},
+      {"Level": "weekly", "Percent": 25, "ResetTimestamp": 1782662400},
+      {"Level": "monthly", "Percent": 50, "ResetTimestamp": 1782403199}
+    ]
+  }
+}

@@ -145,7 +145,10 @@ const fn capabilities_for(id: ProviderId) -> CapabilitySet {
     {
         capabilities = capabilities.with(ProviderCapability::BrowserAuth);
     }
-    if sources.contains(ProviderSource::OAuth) || sources.contains(ProviderSource::Cli) {
+    if sources.contains(ProviderSource::OAuth)
+        || sources.contains(ProviderSource::Cli)
+        || matches!(id, ProviderId::VertexAi)
+    {
         capabilities = capabilities.with(ProviderCapability::LoginAction);
     }
     if sources.contains(ProviderSource::LocalData) {
@@ -212,9 +215,10 @@ const fn sources_for(id: ProviderId) -> SourceSet {
         | Id::Sub2Api => SourceSet::one(Source::ConfigurableEndpoint).with(Source::ApiKey),
         Id::Wayfinder => SourceSet::one(Source::ConfigurableEndpoint),
         Id::Copilot => SourceSet::one(Source::OAuth),
-        Id::Bedrock => SourceSet::one(Source::CloudCredentials),
-        Id::Doubao => SourceSet::one(Source::CloudCredentials).with(Source::ApiKey),
-        Id::VertexAi => SourceSet::one(Source::CloudCredentials).with(Source::Cli),
+        Id::Bedrock | Id::VertexAi => SourceSet::one(Source::CloudCredentials),
+        Id::Doubao => SourceSet::one(Source::CloudCredentials)
+            .with(Source::ApiKey)
+            .with(Source::Cli),
         Id::Amp | Id::Kilo | Id::Kiro | Id::JetBrains | Id::Codebuff => {
             SourceSet::one(Source::Cli).with(Source::LocalData)
         }

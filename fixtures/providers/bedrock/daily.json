@@ -1,0 +1,39 @@
+{
+  "ResultsByTime": [
+    {
+      "TimePeriod": {"Start": "2026-08-28", "End": "2026-08-29"},
+      "Groups": [
+        {
+          "Keys": ["Amazon Bedrock"],
+          "Metrics": {"UnblendedCost": {"Amount": "2.50", "Unit": "USD"}}
+        },
+        {
+          "Keys": ["Amazon Bedrock"],
+          "Metrics": {"UnblendedCost": {"Amount": "1.00", "Unit": "USD"}}
+        }
+      ]
+    },
+    {
+      "TimePeriod": {"Start": "2026-08-29", "End": "2026-08-30"},
+      "Groups": [
+        {
+          "Keys": ["Claude Opus (Bedrock Edition)"],
+          "Metrics": {"UnblendedCost": {"Amount": "4.00", "Unit": "USD"}}
+        },
+        {
+          "Keys": ["Amazon S3"],
+          "Metrics": {"UnblendedCost": {"Amount": "88.00", "Unit": "USD"}}
+        }
+      ]
+    },
+    {
+      "TimePeriod": {"Start": "2026-02-30", "End": "2026-03-01"},
+      "Groups": [
+        {
+          "Keys": ["Amazon Bedrock"],
+          "Metrics": {"UnblendedCost": {"Amount": "500.00", "Unit": "USD"}}
+        }
+      ]
+    }
+  ]
+}

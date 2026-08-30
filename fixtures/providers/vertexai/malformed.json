@@ -1,0 +1,9 @@
+{
+  "timeSeries": [
+    {
+      "metric": { "labels": { "quota_metric": "unsafe" } },
+      "resource": { "labels": { "location": "global" } },
+      "points": [{ "value": { "int64Value": -1 } }]
+    }
+  ]
+}

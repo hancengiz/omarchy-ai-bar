@@ -10,6 +10,19 @@ omarchy-ai-bar bridge install
 systemctl --user enable --now omarchy-ai-bar.service
 ```
 
+Most provider modes need no extra executable. Install optional helpers only for
+the credential flow you use:
+
+- `aws-cli-v2` enables AWS profiles, SSO, assume-role, and
+  `credential_process` authentication for Bedrock. Static AWS credentials do
+  not require it.
+- `google-cloud-cli` enables Vertex AI service-account token acquisition and
+  `gcloud auth application-default login`. User ADC refresh tokens are handled
+  natively.
+- Doubao supports native API-key and Volcengine AK/SK modes. Ark CLI is also
+  supported when installed separately, but no maintained Arch/AUR package was
+  available when this release was prepared.
+
 `bridge install` copies the packaged QML plugin from the application's own
 `/usr/share/omarchy-ai-bar` directory, validates it with Omarchy, atomically
 places it under the user's Omarchy plugin directory, rescans, and enables it.

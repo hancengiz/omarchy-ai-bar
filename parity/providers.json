@@ -530,18 +530,26 @@
         "Sources/CodexBarCore/Providers/ProviderManifest.swift"
       ],
       "cells": {
-        "authentication": "planned",
-        "usage_resets": "planned",
+        "authentication": "passing",
+        "usage_resets": "passing",
         "costs_history": "planned",
-        "sessions": "planned",
-        "browser": "planned",
-        "status_errors": "planned",
-        "refresh": "planned",
-        "cli_server": "planned",
+        "sessions": "not-applicable",
+        "browser": "not-applicable",
+        "status_errors": "passing",
+        "refresh": "passing",
+        "cli_server": "in-progress",
         "qml_ui": "planned"
       },
-      "status": "planned",
-      "tests": []
+      "status": "in-progress",
+      "tests": [
+        "crates/providers/tests/http_transport.rs",
+        "crates/providers/tests/provider_vertexai.rs",
+        "crates/providers/tests/subprocess.rs"
+      ],
+      "not_applicable_reasons": {
+        "sessions": "The pinned baseline exposes Vertex quota and local token-cost data, not local agent-session history.",
+        "browser": "The pinned baseline uses Google Application Default Credentials rather than browser-cookie authentication."
+      }
     },
     {
       "id": "augment",
@@ -873,18 +881,27 @@
         "Sources/CodexBarCore/Providers/ProviderManifest.swift"
       ],
       "cells": {
-        "authentication": "planned",
-        "usage_resets": "planned",
-        "costs_history": "planned",
-        "sessions": "planned",
-        "browser": "planned",
-        "status_errors": "planned",
-        "refresh": "planned",
-        "cli_server": "planned",
+        "authentication": "passing",
+        "usage_resets": "passing",
+        "costs_history": "not-applicable",
+        "sessions": "not-applicable",
+        "browser": "not-applicable",
+        "status_errors": "passing",
+        "refresh": "passing",
+        "cli_server": "in-progress",
         "qml_ui": "planned"
       },
-      "status": "planned",
-      "tests": []
+      "status": "in-progress",
+      "tests": [
+        "crates/providers/tests/cloud_signing.rs",
+        "crates/providers/tests/provider_doubao.rs",
+        "crates/providers/tests/subprocess.rs"
+      ],
+      "not_applicable_reasons": {
+        "costs_history": "The pinned baseline explicitly reports Doubao cost summaries as unavailable.",
+        "sessions": "The pinned baseline's five-hour plan window is quota usage, not local agent-session history.",
+        "browser": "The pinned baseline uses signed cloud credentials, API keys, or Ark CLI rather than browser-cookie authentication."
+      }
     },
     {
       "id": "sakana",
@@ -1142,18 +1159,26 @@
         "Sources/CodexBarCore/Providers/ProviderManifest.swift"
       ],
       "cells": {
-        "authentication": "planned",
-        "usage_resets": "planned",
-        "costs_history": "planned",
-        "sessions": "planned",
-        "browser": "planned",
-        "status_errors": "planned",
-        "refresh": "planned",
-        "cli_server": "planned",
+        "authentication": "passing",
+        "usage_resets": "passing",
+        "costs_history": "passing",
+        "sessions": "not-applicable",
+        "browser": "not-applicable",
+        "status_errors": "passing",
+        "refresh": "passing",
+        "cli_server": "in-progress",
         "qml_ui": "planned"
       },
-      "status": "planned",
-      "tests": []
+      "status": "in-progress",
+      "tests": [
+        "crates/providers/tests/cloud_signing.rs",
+        "crates/providers/tests/provider_bedrock.rs",
+        "crates/providers/tests/subprocess.rs"
+      ],
+      "not_applicable_reasons": {
+        "sessions": "The pinned baseline exposes AWS spend and invocation activity, not local agent-session history.",
+        "browser": "The pinned baseline uses AWS credentials and profiles rather than browser-cookie authentication."
+      }
     },
     {
       "id": "grok",

@@ -1,0 +1,17 @@
+{
+  "ResultsByTime": [
+    {
+      "TimePeriod": {"Start": "2026-08-01", "End": "2026-08-31"},
+      "Groups": [
+        {
+          "Keys": ["Claude Sonnet (BEDROCK Edition)"],
+          "Metrics": {"UnblendedCost": {"Amount": "7.75", "Unit": "USD"}}
+        },
+        {
+          "Keys": ["Amazon Bedrock"],
+          "Metrics": {"UnblendedCost": {"Amount": "0", "Unit": "USD"}}
+        }
+      ]
+    }
+  ]
+}

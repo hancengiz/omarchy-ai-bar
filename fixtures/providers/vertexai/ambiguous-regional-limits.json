@@ -1,0 +1,24 @@
+{
+  "timeSeries": [
+    {
+      "metric": {
+        "labels": {
+          "limit_name": "ReasoningEngineEntitiesPerProjectPerRegion",
+          "quota_metric": "aiplatform.googleapis.com/reasoning_engine_service_entities"
+        }
+      },
+      "resource": { "labels": { "location": "us-west1" } },
+      "points": [{ "value": { "int64Value": "100" } }]
+    },
+    {
+      "metric": {
+        "labels": {
+          "limit_name": "ReasoningEngineEntitiesAlternatePerProjectPerRegion",
+          "quota_metric": "aiplatform.googleapis.com/reasoning_engine_service_entities"
+        }
+      },
+      "resource": { "labels": { "location": "us-west1" } },
+      "points": [{ "value": { "int64Value": "200" } }]
+    }
+  ]
+}
