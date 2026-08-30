@@ -1500,12 +1500,14 @@ dependencies = [
  "oab-cli",
  "oab-domain",
  "oab-ipc",
+ "oab-providers",
  "oab-runtime",
  "oab-storage",
  "serde",
  "serde_json",
  "thiserror",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

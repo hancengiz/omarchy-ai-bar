@@ -11,12 +11,14 @@ nix.workspace = true
 oab-cli = { path = "../cli", version = "=0.1.0" }
 oab-domain = { path = "../domain", version = "=0.1.0" }
 oab-ipc = { path = "../ipc", version = "=0.1.0" }
+oab-providers = { path = "../providers", version = "=0.1.0" }
 oab-runtime = { path = "../runtime", version = "=0.1.0" }
 oab-storage = { path = "../storage", version = "=0.1.0" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 
 [[bin]]
 name = "omarchy-ai-bar"
