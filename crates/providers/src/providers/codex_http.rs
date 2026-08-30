@@ -409,6 +409,7 @@ impl Debug for CodexAdditionalRateLimit {
 pub struct CodexUsageResponse {
     account_id: Option<String>,
     plan_type: Option<CodexPlanType>,
+    identity_metadata_truncated: bool,
     rate_limit: Option<CodexRateLimitDetails>,
     credits: Option<CodexCreditDetails>,
     individual_limit: Option<CodexSpendControlLimit>,
@@ -429,6 +430,12 @@ impl CodexUsageResponse {
     #[must_use]
     pub const fn plan_type(&self) -> Option<&CodexPlanType> {
         self.plan_type.as_ref()
+    }
+
+    /// Whether an otherwise string-shaped account or plan label exceeded its parser bound.
+    #[must_use]
+    pub const fn identity_metadata_truncated(&self) -> bool {
+        self.identity_metadata_truncated
     }
 
     /// Core primary and secondary limits.
@@ -496,6 +503,10 @@ impl Debug for CodexUsageResponse {
                 &self.account_id.as_ref().map(|_| "<redacted>"),
             )
             .field("plan_type", &self.plan_type)
+            .field(
+                "identity_metadata_truncated",
+                &self.identity_metadata_truncated,
+            )
             .field("rate_limit", &self.rate_limit)
             .field("credits", &self.credits)
             .field("individual_limit", &self.individual_limit)
@@ -528,6 +539,10 @@ impl Debug for CodexUsageResponse {
 /// document-wide byte/depth/node bound violation.
 pub fn parse_codex_usage_response(data: &[u8]) -> Result<CodexUsageResponse, CodexHttpError> {
     let root = decode_bounded_object(data)?;
+    let identity_metadata_truncated = ["account_id", "accountId"]
+        .into_iter()
+        .any(|key| string_exceeds_bound(&root, key, MAX_ACCOUNT_ID_BYTES))
+        || string_exceeds_bound(&root, "plan_type", MAX_PLAN_BYTES);
     let account_id = lossy_string_alias(&root, "account_id", "accountId", MAX_ACCOUNT_ID_BYTES);
     let plan_type = root
         .get("plan_type")
@@ -547,6 +562,7 @@ pub fn parse_codex_usage_response(data: &[u8]) -> Result<CodexUsageResponse, Cod
     Ok(CodexUsageResponse {
         account_id,
         plan_type,
+        identity_metadata_truncated,
         rate_limit,
         credits,
         individual_limit,
@@ -1058,6 +1074,13 @@ fn bounded_string(value: Option<&Value>, max_bytes: usize) -> Option<String> {
         .and_then(Value::as_str)
         .filter(|value| value.len() <= max_bytes)
         .map(str::to_owned)
+}
+
+fn string_exceeds_bound(object: &Map<String, Value>, key: &str, max_bytes: usize) -> bool {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .is_some_and(|value| value.len() > max_bytes)
 }
 
 fn lossy_string_alias(
