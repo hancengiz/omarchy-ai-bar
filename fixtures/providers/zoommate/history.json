@@ -1,0 +1,57 @@
+{
+  "data": {
+    "records": [
+      {
+        "session_id": "synthetic-1",
+        "title": "Synthetic task A",
+        "cost": 5.0,
+        "time": "2026-06-30T03:26:40Z",
+        "is_running": false,
+        "is_deleted": false
+      },
+      {
+        "session_id": "synthetic-2",
+        "title": "Synthetic task B",
+        "cost": 3.0,
+        "time": "2026-06-30T04:26:40.123Z",
+        "is_running": true,
+        "is_deleted": false
+      },
+      {
+        "session_id": "synthetic-3",
+        "title": "Synthetic task C",
+        "cost": 2.0,
+        "time": "2026-06-29T02:26:40Z",
+        "is_running": false,
+        "is_deleted": false
+      },
+      {
+        "session_id": "synthetic-deleted",
+        "title": "Synthetic deleted task",
+        "cost": 100.0,
+        "time": "2026-06-30T05:26:40Z",
+        "is_running": false,
+        "is_deleted": true
+      },
+      {
+        "session_id": "synthetic-negative",
+        "title": "Synthetic invalid cost",
+        "cost": -1.0,
+        "time": "2026-06-30T05:30:00Z",
+        "is_running": false,
+        "is_deleted": false
+      },
+      {
+        "session_id": "synthetic-stale",
+        "title": "Synthetic stale task",
+        "cost": 100.0,
+        "time": "2026-05-30T00:00:00Z",
+        "is_running": false,
+        "is_deleted": false
+      }
+    ],
+    "total": 6
+  },
+  "status_code": 200,
+  "error_message": null
+}

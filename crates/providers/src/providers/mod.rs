@@ -51,3 +51,4 @@ pub mod wayfinder;
 pub mod xai;
 pub mod zai;
 pub mod zenmux;
+pub mod zoommate;

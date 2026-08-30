@@ -1,0 +1,11 @@
+{
+  "success": true,
+  "data": {
+    "nak": "eyJhbGciOiJub25lIn0.eyJleHAiOjk5OTk5OTk5OTl9.signature",
+    "user_profile": {
+      "user_id": "synthetic-user",
+      "email": "synthetic.user@example.com",
+      "display_name": "Synthetic User"
+    }
+  }
+}
