@@ -246,6 +246,7 @@ async fn optional_failure_is_ignored_but_required_failure_is_not() {
         (401, ErrorKind::AuthenticationExpired),
         (403, ErrorKind::AuthenticationExpired),
         (429, ErrorKind::RateLimited),
+        (201, ErrorKind::Api),
         (500, ErrorKind::ProviderUnavailable),
     ] {
         let server = FakeHttpServer::start([FakeHttpResponse::new(status, Vec::new())]).await;

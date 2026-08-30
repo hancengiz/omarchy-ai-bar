@@ -131,9 +131,13 @@ impl SakanaProvider {
         );
         let (required, optional) = tokio::join!(required, optional);
         let response = required.map_err(classify_required_transport)?;
+        if response.status() != 200 {
+            return Err(ClassifiedError::new(ErrorKind::Api));
+        }
         let pay_as_you_go = optional
             .ok()
             .and_then(Result::ok)
+            .filter(|response| response.status() == 200)
             .and_then(|response| parse_pay_as_you_go_html(response.body()).ok().flatten());
         parse_billing_html(
             context.scope().clone(),
@@ -165,6 +169,9 @@ impl SakanaProvider {
             .send(&request, context.cancellation())
             .await
             .map_err(classify_required_transport)?;
+        if response.status() != 200 {
+            return Err(ClassifiedError::new(ErrorKind::Api));
+        }
         parse_billing_html(context.scope().clone(), fetched_at, response.body(), None)
     }
 

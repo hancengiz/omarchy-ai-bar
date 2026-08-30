@@ -116,6 +116,22 @@ fn independently_routed_browser_jar() -> CookieJar {
             None,
         ),
         cookie_record(
+            "login_aliyunid_ticket",
+            "browser-ticket",
+            "127.0.0.1",
+            "/",
+            false,
+            None,
+        ),
+        cookie_record(
+            "login_aliyunid_pk",
+            "browser-account",
+            "127.0.0.1",
+            "/",
+            false,
+            None,
+        ),
+        cookie_record(
             "userinfo_cookie",
             USER_INFO_CANARY,
             "127.0.0.1",
@@ -642,11 +658,15 @@ async fn browser_cookie_jar_routes_dashboard_userinfo_and_rpc_independently() {
     assert_eq!(gateway_requests.len(), 2);
     assert_eq!(
         gateway_requests[0].header("cookie"),
-        Some("dashboard_cookie=dashboard-cookie-canary")
+        Some(
+            "dashboard_cookie=dashboard-cookie-canary; login_aliyunid_pk=browser-account; login_aliyunid_ticket=browser-ticket"
+        )
     );
     assert_eq!(
         gateway_requests[1].header("cookie"),
-        Some("userinfo_cookie=userinfo-cookie-canary")
+        Some(
+            "userinfo_cookie=userinfo-cookie-canary; login_aliyunid_pk=browser-account; login_aliyunid_ticket=browser-ticket"
+        )
     );
     for request in &gateway_requests {
         assert!(
@@ -694,6 +714,22 @@ async fn browser_rpc_only_cookie_never_reaches_dashboard_and_dashboard_only_neve
     let gateway = FakeHttpServer::start([FakeHttpResponse::new(500, Vec::new())]).await;
     let rpc = FakeHttpServer::start([FakeHttpResponse::new(200, QUOTA.to_vec())]).await;
     let rpc_only = cookie_jar(vec![
+        cookie_record(
+            "login_aliyunid_ticket",
+            "rpc-ticket",
+            "localhost",
+            "/data",
+            false,
+            None,
+        ),
+        cookie_record(
+            "login_aliyunid_pk",
+            "rpc-account",
+            "localhost",
+            "/data",
+            false,
+            None,
+        ),
         cookie_record("rpc_only", RPC_CANARY, "localhost", "/data", false, None),
         cookie_record(
             "sec_token",
@@ -722,19 +758,39 @@ async fn browser_rpc_only_cookie_never_reaches_dashboard_and_dashboard_only_neve
     assert!(gateway.requests().is_empty());
     assert_eq!(
         rpc.requests()[0].header("cookie"),
-        Some("rpc_only=rpc-cookie-canary; sec_token=rpc-cookie-sec")
+        Some(
+            "login_aliyunid_pk=rpc-account; login_aliyunid_ticket=rpc-ticket; rpc_only=rpc-cookie-canary; sec_token=rpc-cookie-sec"
+        )
     );
 
     let unused_gateway = FakeHttpServer::start([FakeHttpResponse::new(200, QUOTA.to_vec())]).await;
     let unused_rpc = FakeHttpServer::start([FakeHttpResponse::new(200, QUOTA.to_vec())]).await;
-    let dashboard_only = cookie_jar(vec![cookie_record(
-        "dashboard_only",
-        DASHBOARD_CANARY,
-        "127.0.0.1",
-        "/ap-southeast-1/",
-        false,
-        None,
-    )]);
+    let dashboard_only = cookie_jar(vec![
+        cookie_record(
+            "dashboard_only",
+            DASHBOARD_CANARY,
+            "127.0.0.1",
+            "/ap-southeast-1/",
+            false,
+            None,
+        ),
+        cookie_record(
+            "login_aliyunid_ticket",
+            "dashboard-ticket",
+            "127.0.0.1",
+            "/ap-southeast-1/",
+            false,
+            None,
+        ),
+        cookie_record(
+            "login_aliyunid_pk",
+            "dashboard-account",
+            "127.0.0.1",
+            "/ap-southeast-1/",
+            false,
+            None,
+        ),
+    ]);
     let provider = AlibabaProvider::from_browser_jar_routes(
         scope("a"),
         AlibabaRegion::International,
@@ -796,6 +852,14 @@ fn browser_empty_unmatched_and_expired_jars_are_classified_without_network() {
             false,
             Some(now() - time::Duration::seconds(1)),
         )]),
+        cookie_jar(vec![cookie_record(
+            "locale_only",
+            "anonymous-value",
+            "localhost",
+            "/data",
+            false,
+            None,
+        )]),
     ] {
         assert_eq!(
             AlibabaProvider::from_browser_jar_routes(
@@ -823,6 +887,7 @@ async fn status_redirect_oversize_and_cancellation_are_stable() {
             FakeHttpResponse::new(429, b"rate-body-canary".to_vec()),
             ErrorKind::RateLimited,
         ),
+        (FakeHttpResponse::new(201, QUOTA.to_vec()), ErrorKind::Api),
         (
             FakeHttpResponse::new(302, Vec::new()).header("Location", "/redirected"),
             ErrorKind::Parse,

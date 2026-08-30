@@ -56,6 +56,8 @@ const MAX_EMBEDDED_JSON_LAYERS: usize = 6;
 const MAX_SECRET_BYTES: usize = 16 * 1024;
 const MAX_SEC_TOKEN_BYTES: usize = 8 * 1024;
 const MAX_PLAN_NAME_BYTES: usize = 256;
+const AUTH_TICKET_COOKIE: &str = "login_aliyunid_ticket";
+const AUTH_ACCOUNT_COOKIES: [&str; 3] = ["login_aliyunid_pk", "login_current_pk", "login_aliyunid"];
 const API_KEY_NAMES: [&str; 3] = [
     "ALIBABA_CODING_PLAN_API_KEY",
     "ALIBABA_QWEN_API_KEY",
@@ -429,8 +431,22 @@ impl RoutedCookieHeaders {
         })
     }
 
-    fn has_any(&self) -> bool {
-        self.dashboard.is_some() || self.user_info.is_some() || self.console_rpc.is_some()
+    fn is_authenticated(&self) -> bool {
+        let headers = [
+            self.dashboard.as_deref(),
+            self.user_info.as_deref(),
+            self.console_rpc.as_deref(),
+        ];
+        let has_ticket = headers
+            .iter()
+            .flatten()
+            .any(|header| extract_cookie_value(AUTH_TICKET_COOKIE, header).is_some());
+        let has_account = headers.iter().flatten().any(|header| {
+            AUTH_ACCOUNT_COOKIES
+                .iter()
+                .any(|name| extract_cookie_value(name, header).is_some())
+        });
+        has_ticket && has_account
     }
 }
 
@@ -623,9 +639,9 @@ impl AlibabaProvider {
         };
         let has_relevant = match region {
             AlibabaRegion::International => {
-                cookies.international.has_any() || cookies.china.has_any()
+                cookies.international.is_authenticated() || cookies.china.is_authenticated()
             }
-            AlibabaRegion::ChinaMainland => cookies.china.has_any(),
+            AlibabaRegion::ChinaMainland => cookies.china.is_authenticated(),
         };
         if !has_relevant {
             return Err(ClassifiedError::new(if jar.is_empty() {
@@ -775,6 +791,9 @@ impl AlibabaProvider {
             .send(&request, context.cancellation())
             .await
             .map_err(RegionalFailure::from_completed_transport)?;
+        if response.status() != 200 {
+            return Err(RegionalFailure::new(ErrorKind::Api, false));
+        }
         parse_and_normalize(
             context.scope().clone(),
             fetched_at,
@@ -831,6 +850,9 @@ impl AlibabaProvider {
             .send(&request, context.cancellation())
             .await
             .map_err(RegionalFailure::from_completed_transport)?;
+        if response.status() != 200 {
+            return Err(RegionalFailure::new(ErrorKind::Api, false));
+        }
         parse_and_normalize(
             context.scope().clone(),
             fetched_at,
@@ -858,7 +880,7 @@ impl AlibabaProvider {
                         .map_err(|error| RegionalFailure::from_transport(error, false))?,
                 );
             match self.transport.send(&request, context.cancellation()).await {
-                Ok(response) => {
+                Ok(response) if response.status() == 200 => {
                     if let Some(token) = extract_sec_token_html(response.body()) {
                         return Ok(token);
                     }
@@ -866,7 +888,7 @@ impl AlibabaProvider {
                 Err(_) if context.cancellation().is_cancelled() => {
                     return Err(RegionalFailure::new(ErrorKind::Network, false));
                 }
-                Err(_) => {}
+                Ok(_) | Err(_) => {}
             }
         }
 
@@ -883,7 +905,7 @@ impl AlibabaProvider {
                         .map_err(|error| RegionalFailure::from_transport(error, false))?,
                 );
             match self.transport.send(&request, context.cancellation()).await {
-                Ok(response) => {
+                Ok(response) if response.status() == 200 => {
                     if let Ok(root) = parse_bounded_json(response.body())
                         && let Some(token) = find_first_string(&root, &["secToken", "sec_token"])
                             .and_then(valid_sec_token)
@@ -894,7 +916,7 @@ impl AlibabaProvider {
                 Err(_) if context.cancellation().is_cancelled() => {
                     return Err(RegionalFailure::new(ErrorKind::Network, false));
                 }
-                Err(_) => {}
+                Ok(_) | Err(_) => {}
             }
         }
 

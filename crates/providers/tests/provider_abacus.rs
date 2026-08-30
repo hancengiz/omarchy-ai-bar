@@ -424,9 +424,9 @@ fn parser_rejects_auth_missing_oversize_deep_and_extreme_inputs() {
         assert_eq!(error.kind(), ErrorKind::Parse);
     }
 
+    let nested = format!("{}0{}", "[".repeat(40), "]".repeat(40));
     let deep = format!(
-        r#"{{"success":true,"result":{{"totalComputePoints":1,"computePointsLeft":0,"deep":{} }} }}"#,
-        format!("{}0{}", "[".repeat(40), "]".repeat(40))
+        r#"{{"success":true,"result":{{"totalComputePoints":1,"computePointsLeft":0,"deep":{nested} }} }}"#
     );
     let error = parse_usage_responses(
         scope("account-a"),
