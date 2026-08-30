@@ -3,6 +3,7 @@
 pub mod abacus;
 pub mod aiand;
 pub mod alibaba;
+pub mod alibabatokenplan;
 pub mod amp;
 pub mod azureopenai;
 pub mod bedrock;
