@@ -700,6 +700,11 @@ impl CodexHttpRoutes {
     pub const fn usage_url(&self) -> &Url {
         &self.usage
     }
+
+    pub(crate) const fn is_loopback_only(&self) -> bool {
+        matches!(self.whoami_class, EndpointClass::LoopbackDevelopment)
+            && matches!(self.usage_class, EndpointClass::LoopbackDevelopment)
+    }
 }
 
 impl Debug for CodexHttpRoutes {

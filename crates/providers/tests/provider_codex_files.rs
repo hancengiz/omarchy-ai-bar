@@ -10,7 +10,8 @@ use oab_providers::providers::codex::{
 };
 use oab_providers::providers::codex_files::{
     CodexCredentialLoadError, CodexCredentialPaths, load_bearer_bundle_for_usage,
-    load_bearer_for_usage, load_native_auth_file, load_pat_bundle_for_scope, load_pat_for_scope,
+    load_bearer_for_usage, load_bearer_selection_for_usage, load_native_auth_file,
+    load_pat_bundle_for_scope, load_pat_for_scope,
 };
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
@@ -494,6 +495,32 @@ fn selected_config_fails_closed_when_non_utf8_unsafe_or_oversized() {
     fixture.write_config_bytes(".codex", &oversized);
     assert_eq!(
         load_bearer_bundle_for_usage(&paths, false, &cancellation).expect_err("oversized config"),
+        CodexCredentialLoadError::Credential(CodexCredentialError::Unreadable)
+    );
+}
+
+#[test]
+fn bearer_freshness_selection_defers_config_without_changing_authority() {
+    let fixture = Fixture::new();
+    fixture.write_auth(".codex", &native_auth("ambient-pat", "ambient-oauth"));
+    fixture.write_config_bytes(".codex", &[0xff, 0xfe]);
+    let paths = fixture.paths(None, None);
+    let cancellation = CancellationToken::new();
+
+    let credentials = load_bearer_for_usage(&paths, false, &cancellation)
+        .expect("auth-only selection ignores HTTP config");
+    assert_eq!(credentials.source(), CodexCredentialSource::Native);
+
+    let selection =
+        load_bearer_selection_for_usage(&paths, false, &cancellation).expect("freshness selection");
+    assert_eq!(
+        selection.credentials().source(),
+        CodexCredentialSource::Native
+    );
+    assert_eq!(
+        selection
+            .bind_config(&cancellation)
+            .expect_err("the pinned unsafe config still fails closed"),
         CodexCredentialLoadError::Credential(CodexCredentialError::Unreadable)
     );
 }

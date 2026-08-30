@@ -89,6 +89,7 @@ impl Debug for CodexCredentialLocation {
 
 /// Closed set of native and opt-in external Codex credential locations.
 pub struct CodexCredentialPaths {
+    home: PathBuf,
     native: CodexCredentialLocation,
     ambient: CodexCredentialLocation,
     legacy: CodexCredentialLocation,
@@ -132,6 +133,7 @@ impl CodexCredentialPaths {
             .unwrap_or_else(|| home.join(".local/share"));
 
         Ok(Self {
+            home: home.to_path_buf(),
             native: CodexCredentialLocation::new(native_root),
             ambient: CodexCredentialLocation::new(ambient_root),
             legacy: CodexCredentialLocation::new(home.join(".config/codex")),
@@ -145,12 +147,17 @@ impl CodexCredentialPaths {
     pub const fn has_explicit_codex_home(&self) -> bool {
         self.explicit_codex_home
     }
+
+    pub(crate) fn cli_environment_roots(&self) -> Option<(&str, &str)> {
+        Some((self.home.to_str()?, self.native.root.to_str()?))
+    }
 }
 
 impl Debug for CodexCredentialPaths {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("CodexCredentialPaths")
+            .field("home", &"<redacted>")
             .field("native", &self.native)
             .field("ambient", &self.ambient)
             .field("legacy", &self.legacy)
@@ -297,6 +304,52 @@ impl Debug for CodexBearerCredentialBundle {
     }
 }
 
+/// Bearer credentials pinned to the native config authority selected by the same read.
+///
+/// Freshness and ownership may be inspected before loading HTTP configuration. This
+/// preserves the Codex CLI owner's recovery path when an unrelated `config.toml` is unsafe.
+pub struct CodexBearerCredentialSelection {
+    credentials: CodexBearerCredentials,
+    config_root: Option<ProviderFileRoot>,
+}
+
+impl CodexBearerCredentialSelection {
+    /// Borrows the selected OAuth or embedded API-key credentials.
+    #[must_use]
+    pub const fn credentials(&self) -> &CodexBearerCredentials {
+        &self.credentials
+    }
+
+    /// Loads the optional config from the authority pinned during credential selection.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable configuration or cancellation failure without changing credential source.
+    pub fn bind_config(
+        self,
+        cancellation: &CancellationToken,
+    ) -> Result<CodexBearerCredentialBundle, CodexCredentialLoadError> {
+        bind_bearer_config(self.config_root.as_ref(), self.credentials, cancellation)
+    }
+
+    /// Discards config authority and transfers the selected credentials.
+    #[must_use]
+    pub fn into_credentials(self) -> CodexBearerCredentials {
+        self.credentials
+    }
+}
+
+impl Debug for CodexBearerCredentialSelection {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CodexBearerCredentialSelection")
+            .field("source", &self.credentials.source())
+            .field("kind", &self.credentials.kind())
+            .field("has_config_authority", &self.config_root.is_some())
+            .finish()
+    }
+}
+
 /// Reads the authoritative native auth file once into zeroizing memory.
 ///
 /// # Errors
@@ -362,8 +415,8 @@ pub fn load_pat_bundle_for_scope(
 ///
 /// External lookup occurs only after an absent native file and without explicit `CODEX_HOME`.
 /// Legacy precedes `OpenCode`. Each external read/parse failure is suppressed; cancellation is
-/// never suppressed, and total external failure returns the original native `NotFound`. An unsafe
-/// config at the native authority fails closed after credentials are selected.
+/// never suppressed, and total external failure returns the original native `NotFound`. This
+/// credentials-only API deliberately does not inspect HTTP configuration.
 ///
 /// # Errors
 ///
@@ -373,8 +426,8 @@ pub fn load_bearer_for_usage(
     allow_external: bool,
     cancellation: &CancellationToken,
 ) -> Result<CodexBearerCredentials, CodexCredentialLoadError> {
-    load_bearer_bundle_for_usage(paths, allow_external, cancellation)
-        .map(CodexBearerCredentialBundle::into_credentials)
+    load_bearer_selection_for_usage(paths, allow_external, cancellation)
+        .map(CodexBearerCredentialSelection::into_credentials)
 }
 
 /// Loads bearer credentials and binds them to the selected native `config.toml` authority.
@@ -392,6 +445,23 @@ pub fn load_bearer_bundle_for_usage(
     allow_external: bool,
     cancellation: &CancellationToken,
 ) -> Result<CodexBearerCredentialBundle, CodexCredentialLoadError> {
+    load_bearer_selection_for_usage(paths, allow_external, cancellation)?.bind_config(cancellation)
+}
+
+/// Selects bearer credentials and pins their native config authority without reading config.
+///
+/// Native credentials win. External credentials remain missing-only, explicitly enabled,
+/// read-only fallbacks and retain the native root observed during the same selection. Callers
+/// can inspect freshness/ownership before [`CodexBearerCredentialSelection::bind_config`].
+///
+/// # Errors
+///
+/// Returns a stable path-free credential or cancellation failure.
+pub fn load_bearer_selection_for_usage(
+    paths: &CodexCredentialPaths,
+    allow_external: bool,
+    cancellation: &CancellationToken,
+) -> Result<CodexBearerCredentialSelection, CodexCredentialLoadError> {
     let native_root = match open_location(&paths.native, cancellation) {
         Ok(root) => match read_and_parse_bearer_from_root(
             &root,
@@ -399,7 +469,10 @@ pub fn load_bearer_bundle_for_usage(
             cancellation,
         ) {
             Ok(credentials) => {
-                return bind_bearer_config(Some(&root), credentials, cancellation);
+                return Ok(CodexBearerCredentialSelection {
+                    credentials,
+                    config_root: Some(root),
+                });
             }
             Err(CodexCredentialLoadError::Cancelled) => {
                 return Err(CodexCredentialLoadError::Cancelled);
@@ -432,7 +505,10 @@ pub fn load_bearer_bundle_for_usage(
     ] {
         match open_and_parse_bearer(location, source, cancellation) {
             Ok((_external_root, credentials)) => {
-                return bind_bearer_config(native_root.as_ref(), credentials, cancellation);
+                return Ok(CodexBearerCredentialSelection {
+                    credentials,
+                    config_root: native_root,
+                });
             }
             Err(CodexCredentialLoadError::Cancelled) => {
                 return Err(CodexCredentialLoadError::Cancelled);

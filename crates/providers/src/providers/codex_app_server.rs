@@ -273,12 +273,35 @@ impl CodexAppServerClient {
         executable: ExecutablePath,
         environment: &BTreeMap<String, String>,
     ) -> Result<Self, CodexAppServerError> {
+        Self::from_environment_with_authority(executable, environment, None)
+    }
+
+    pub(crate) fn from_environment_for_authority(
+        executable: ExecutablePath,
+        environment: &BTreeMap<String, String>,
+        home: &str,
+        codex_home: &str,
+    ) -> Result<Self, CodexAppServerError> {
+        Self::from_environment_with_authority(executable, environment, Some((home, codex_home)))
+    }
+
+    fn from_environment_with_authority(
+        executable: ExecutablePath,
+        environment: &BTreeMap<String, String>,
+        authority: Option<(&str, &str)>,
+    ) -> Result<Self, CodexAppServerError> {
         let selected = CHILD_ENVIRONMENT_ALLOWLIST
             .iter()
             .filter_map(|name| {
-                environment
-                    .get(*name)
-                    .map(|value| ((*name).to_owned(), value.clone()))
+                let authority_value = match (*name, authority) {
+                    ("HOME", Some((home, _))) => Some(home),
+                    ("CODEX_HOME", Some((_, codex_home))) => Some(codex_home),
+                    _ => None,
+                };
+                authority_value
+                    .map(str::to_owned)
+                    .or_else(|| environment.get(*name).cloned())
+                    .map(|value| ((*name).to_owned(), value))
             })
             .collect();
         let client = Self {
