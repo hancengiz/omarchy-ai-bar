@@ -397,6 +397,133 @@ async fn typed_auth_is_attached_after_validation_and_cookies_are_isolated() {
 }
 
 #[tokio::test]
+async fn coupled_bearer_cookie_auth_emits_exactly_and_debug_is_redacted() {
+    assert!(Authentication::bearer_and_cookie("", "kimi-auth=valid").is_err());
+    assert!(Authentication::bearer_and_cookie("valid", "kimi-auth=bad\r\nvalue").is_err());
+    let server = FakeHttpServer::start([FakeHttpResponse::new(200, b"ok".to_vec())]).await;
+    let transport = HttpTransport::new(policy(&server), config()).expect("HTTP transport");
+    let authentication =
+        Authentication::bearer_and_cookie("dual-bearer-canary", "kimi-auth=dual-cookie-canary")
+            .expect("coupled auth");
+    let request = HttpRequest::get(server.url("/dual")).authentication(authentication);
+    let debug = format!("{request:?}");
+    assert!(!debug.contains("dual-bearer-canary"));
+    assert!(!debug.contains("dual-cookie-canary"));
+
+    transport
+        .send(&request, &CancellationToken::new())
+        .await
+        .expect("coupled request");
+
+    let captured = server.requests();
+    assert_eq!(
+        captured[0].header("authorization"),
+        Some("Bearer dual-bearer-canary")
+    );
+    assert_eq!(
+        captured[0].header("cookie"),
+        Some("kimi-auth=dual-cookie-canary")
+    );
+}
+
+#[tokio::test]
+async fn coupled_auth_stays_coupled_across_approved_redirects() {
+    let server = FakeHttpServer::start([
+        FakeHttpResponse::new(302, Vec::new()).header("Location", "/final"),
+        FakeHttpResponse::new(200, b"ok".to_vec()),
+    ])
+    .await;
+    let transport = HttpTransport::new(policy(&server), config()).expect("HTTP transport");
+    let request = HttpRequest::get(server.url("/redirect")).authentication(
+        Authentication::bearer_and_cookie(
+            "redirect-bearer-canary",
+            "session=redirect-cookie-canary",
+        )
+        .expect("coupled auth"),
+    );
+
+    transport
+        .send(&request, &CancellationToken::new())
+        .await
+        .expect("same-origin redirect");
+    let captured = server.requests();
+    assert_eq!(captured.len(), 2);
+    for request in captured {
+        assert_eq!(
+            request.header("authorization"),
+            Some("Bearer redirect-bearer-canary")
+        );
+        assert_eq!(
+            request.header("cookie"),
+            Some("session=redirect-cookie-canary")
+        );
+    }
+}
+
+#[tokio::test]
+async fn unapproved_redirect_never_receives_coupled_auth() {
+    let target = FakeHttpServer::start([FakeHttpResponse::new(200, b"target".to_vec())]).await;
+    let redirect =
+        FakeHttpServer::start([FakeHttpResponse::new(302, Vec::new())
+            .header("Location", target.url("/stolen").as_str())])
+        .await;
+    let transport = HttpTransport::new(policy(&redirect), config()).expect("HTTP transport");
+    let request = HttpRequest::get(redirect.url("/redirect")).authentication(
+        Authentication::bearer_and_cookie(
+            "cross-origin-bearer-canary",
+            "session=cross-origin-cookie-canary",
+        )
+        .expect("coupled auth"),
+    );
+
+    assert!(matches!(
+        transport.send(&request, &CancellationToken::new()).await,
+        Err(TransportError::Endpoint(_))
+    ));
+    assert!(target.requests().is_empty());
+}
+
+#[tokio::test]
+async fn coupled_credentials_do_not_mix_between_requests() {
+    let server = FakeHttpServer::start([
+        FakeHttpResponse::new(200, b"one".to_vec()),
+        FakeHttpResponse::new(200, b"two".to_vec()),
+    ])
+    .await;
+    let transport = HttpTransport::new(policy(&server), config()).expect("HTTP transport");
+    for (bearer, cookie) in [
+        ("account-a-bearer", "session=account-a-cookie"),
+        ("account-b-bearer", "session=account-b-cookie"),
+    ] {
+        let request = HttpRequest::get(server.url("/isolated")).authentication(
+            Authentication::bearer_and_cookie(bearer, cookie).expect("coupled auth"),
+        );
+        transport
+            .send(&request, &CancellationToken::new())
+            .await
+            .expect("isolated request");
+    }
+
+    let captured = server.requests();
+    assert_eq!(
+        captured[0].header("authorization"),
+        Some("Bearer account-a-bearer")
+    );
+    assert_eq!(
+        captured[0].header("cookie"),
+        Some("session=account-a-cookie")
+    );
+    assert_eq!(
+        captured[1].header("authorization"),
+        Some("Bearer account-b-bearer")
+    );
+    assert_eq!(
+        captured[1].header("cookie"),
+        Some("session=account-b-cookie")
+    );
+}
+
+#[tokio::test]
 async fn unapproved_redirect_is_rejected_before_auth_reaches_the_target() {
     let target = FakeHttpServer::start([FakeHttpResponse::new(200, b"target".to_vec())]).await;
     let redirect =

@@ -5,6 +5,8 @@
 //! profile discovery, source ordering, key retrieval, and provider requests
 //! remain explicit responsibilities of the caller.
 
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fmt::{self, Debug, Formatter};
 
 use rusqlite::types::ValueRef;
@@ -18,7 +20,7 @@ use zeroize::Zeroizing;
 use crate::browser_profile::{BrowserKind, BrowserProfile};
 use crate::cookie::{
     CookieDomainKind, CookieError, CookieImport, CookieRecord, CookieRecordSpec, CookieSourceId,
-    MAX_COOKIES_PER_IMPORT,
+    MAX_COOKIE_JAR_BYTES, MAX_COOKIES_PER_IMPORT,
 };
 use crate::sqlite_snapshot::{ReadOnlySqliteSnapshot, SqliteSnapshotError};
 
@@ -38,6 +40,9 @@ const MICROSECONDS_PER_SECOND: i64 = 1_000_000;
 
 /// Maximum rows one profile import may inspect.
 pub const MAX_BROWSER_COOKIE_ROWS: usize = MAX_COOKIES_PER_IMPORT;
+
+/// Maximum aggregate SQLite field bytes an opt-in multi-store import may inspect.
+pub const MAX_BROWSER_COOKIE_BYTES: usize = MAX_COOKIE_JAR_BYTES;
 
 /// Host selection policy for one provider-owned allowlist entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -211,6 +216,9 @@ pub enum BrowserCookieImportError {
     /// The fixed query returned more rows than one import may retain.
     #[error("browser cookie database row limit exceeded")]
     TooManyRows,
+    /// Selected rows across an opt-in multi-store import exceeded the aggregate byte ceiling.
+    #[error("browser cookie database byte limit exceeded")]
+    TooManyBytes,
     /// Relevant encrypted rows existed but no usable cookie could be read
     /// without a configured Chromium key backend.
     #[error("encrypted Chromium cookies are unavailable")]
@@ -270,6 +278,40 @@ pub fn import_browser_cookies_with_decryptor(
     }
 }
 
+/// Imports one profile while opting Chromium into safe modern/primary store merging.
+///
+/// Firefox and Zen retain the ordinary single-store behavior. Chromium-family
+/// profiles read every present `Network/Cookies` and root `Cookies` store. A
+/// missing store is ignored, but any unsafe, malformed, or unsupported present
+/// store fails the whole import closed. Selected rows share the same aggregate
+/// record and byte ceilings as one ordinary cookie import.
+///
+/// Records are merged by name, canonical domain semantics, and path. A later
+/// persistent expiry wins; the modern Network store wins equal expiries and
+/// ties between two session cookies.
+///
+/// # Errors
+///
+/// Returns a stable redacted snapshot, schema, data, size, encryption, or
+/// shared-cookie validation error.
+pub fn import_browser_cookies_merging_chromium_stores_with_decryptor(
+    profile: &BrowserProfile,
+    source: CookieSourceId,
+    allowlist: &BrowserCookieDomainAllowlist,
+    decryptor: &dyn ChromiumCookieDecryptor,
+) -> Result<CookieImport, BrowserCookieImportError> {
+    match profile.browser() {
+        BrowserKind::Firefox | BrowserKind::Zen => import_gecko(profile, source, allowlist),
+        BrowserKind::Chromium
+        | BrowserKind::GoogleChrome
+        | BrowserKind::Brave
+        | BrowserKind::BraveOrigin
+        | BrowserKind::MicrosoftEdge => {
+            import_merged_chromium(profile, source, allowlist, decryptor)
+        }
+    }
+}
+
 struct CanonicalDomainRule {
     domain: Zeroizing<String>,
     policy: BrowserCookieDomainPolicy,
@@ -297,6 +339,7 @@ fn import_gecko(
         snapshot.connection(),
         &query,
         allowlist,
+        None,
         |row, _raw_host, domain| {
             let name = bounded_text(row, 1, MAX_COOKIE_NAME_BYTES)?;
             let path = bounded_text(row, 2, MAX_COOKIE_PATH_BYTES)?;
@@ -323,18 +366,106 @@ fn import_chromium(
         }
         Err(error) => return Err(BrowserCookieImportError::Snapshot(error)),
     };
+    let store = read_chromium_snapshot(
+        profile.browser(),
+        snapshot.connection(),
+        allowlist,
+        decryptor,
+        None,
+    )?;
+    if store.records.is_empty() && store.saw_unavailable_encryption {
+        return Err(BrowserCookieImportError::EncryptedCookiesUnavailable);
+    }
+    CookieImport::new(
+        source,
+        store
+            .records
+            .into_iter()
+            .map(|record| record.record)
+            .collect(),
+    )
+    .map_err(BrowserCookieImportError::Cookie)
+}
+
+fn import_merged_chromium(
+    profile: &BrowserProfile,
+    source: CookieSourceId,
+    allowlist: &BrowserCookieDomainAllowlist,
+    decryptor: &dyn ChromiumCookieDecryptor,
+) -> Result<CookieImport, BrowserCookieImportError> {
+    let mut budget = QueryBudget::default();
+    let network = read_chromium_store(
+        profile,
+        "Network/Cookies",
+        allowlist,
+        decryptor,
+        &mut budget,
+    )?;
+    let primary = read_chromium_store(profile, "Cookies", allowlist, decryptor, &mut budget)?;
+    if network.is_none() && primary.is_none() {
+        return Err(BrowserCookieImportError::Snapshot(
+            SqliteSnapshotError::Missing,
+        ));
+    }
+
+    let saw_unavailable_encryption = network
+        .as_ref()
+        .is_some_and(|store| store.saw_unavailable_encryption)
+        || primary
+            .as_ref()
+            .is_some_and(|store| store.saw_unavailable_encryption);
+    let records = merge_chromium_records(
+        network.map_or_else(Vec::new, |store| store.records),
+        primary.map_or_else(Vec::new, |store| store.records),
+    );
+    if records.is_empty() && saw_unavailable_encryption {
+        return Err(BrowserCookieImportError::EncryptedCookiesUnavailable);
+    }
+    CookieImport::new(source, records).map_err(BrowserCookieImportError::Cookie)
+}
+
+fn read_chromium_store(
+    profile: &BrowserProfile,
+    relative: &'static str,
+    allowlist: &BrowserCookieDomainAllowlist,
+    decryptor: &dyn ChromiumCookieDecryptor,
+    budget: &mut QueryBudget,
+) -> Result<Option<ChromiumStoreRecords>, BrowserCookieImportError> {
+    let snapshot = match ReadOnlySqliteSnapshot::open(profile.path(), relative) {
+        Ok(snapshot) => snapshot,
+        Err(SqliteSnapshotError::Missing) => return Ok(None),
+        Err(error) => return Err(BrowserCookieImportError::Snapshot(error)),
+    };
+    read_chromium_snapshot(
+        profile.browser(),
+        snapshot.connection(),
+        allowlist,
+        decryptor,
+        Some(budget),
+    )
+    .map(Some)
+}
+
+fn read_chromium_snapshot(
+    browser: BrowserKind,
+    connection: &Connection,
+    allowlist: &BrowserCookieDomainAllowlist,
+    decryptor: &dyn ChromiumCookieDecryptor,
+    budget: Option<&mut QueryBudget>,
+) -> Result<ChromiumStoreRecords, BrowserCookieImportError> {
     let query = build_query(
         "host_key, name, path, expires_utc, is_secure, value, encrypted_value",
         "cookies",
         "host_key",
         allowlist,
     );
-    let database_version = chromium_database_version(snapshot.connection())?;
+    let database_version = chromium_database_version(connection)?;
     let mut saw_unavailable_encryption = false;
     let records = query_records(
-        snapshot.connection(),
+        connection,
         &query,
         allowlist,
+        budget,
         |row, raw_host, domain| {
             let name = bounded_text(row, 1, MAX_COOKIE_NAME_BYTES)?;
             let path = bounded_text(row, 2, MAX_COOKIE_PATH_BYTES)?;
@@ -346,43 +477,114 @@ fn import_chromium(
             if !plaintext.is_empty() && !encrypted.is_empty() {
                 return Err(BrowserCookieImportError::MalformedData);
             }
-            if encrypted.is_empty() {
-                return cookie_record(name, plaintext, domain, path, secure, expires_at).map(Some);
-            }
-
-            match decryptor.decrypt(profile.browser(), encrypted) {
-                Ok(value) => {
-                    let value = chromium_decrypted_value(raw_host, database_version, &value)?;
-                    cookie_record(name, value.as_str(), domain, path, secure, expires_at).map(Some)
+            let record = if encrypted.is_empty() {
+                cookie_record(name, plaintext, domain, path, secure, expires_at)?
+            } else {
+                match decryptor.decrypt(browser, encrypted) {
+                    Ok(value) => {
+                        let value = chromium_decrypted_value(raw_host, database_version, &value)?;
+                        cookie_record(name, value.as_str(), domain, path, secure, expires_at)?
+                    }
+                    Err(ChromiumCookieDecryptionError::Unavailable) => {
+                        saw_unavailable_encryption = true;
+                        return Ok(None);
+                    }
+                    Err(ChromiumCookieDecryptionError::Failed) => {
+                        return Err(BrowserCookieImportError::DecryptionFailed);
+                    }
                 }
-                Err(ChromiumCookieDecryptionError::Unavailable) => {
-                    saw_unavailable_encryption = true;
-                    Ok(None)
-                }
-                Err(ChromiumCookieDecryptionError::Failed) => {
-                    Err(BrowserCookieImportError::DecryptionFailed)
-                }
-            }
+            };
+            Ok(Some(ChromiumCookieRecord {
+                key: ChromiumCookieKey {
+                    name: name.to_owned(),
+                    domain: domain.domain.as_str().to_owned(),
+                    domain_kind: domain.kind,
+                    path: path.to_owned(),
+                },
+                expires_at,
+                record,
+            }))
         },
     )?;
-    if records.is_empty() && saw_unavailable_encryption {
-        return Err(BrowserCookieImportError::EncryptedCookiesUnavailable);
-    }
-    CookieImport::new(source, records).map_err(BrowserCookieImportError::Cookie)
+    Ok(ChromiumStoreRecords {
+        records,
+        saw_unavailable_encryption,
+    })
 }
 
-fn query_records<F>(
+fn merge_chromium_records(
+    network: Vec<ChromiumCookieRecord>,
+    primary: Vec<ChromiumCookieRecord>,
+) -> Vec<CookieRecord> {
+    let mut indexes = HashMap::<ChromiumCookieKey, usize>::new();
+    let mut retained = Vec::<RetainedChromiumCookie>::new();
+    for candidate in network.into_iter().chain(primary) {
+        match indexes.entry(candidate.key) {
+            Entry::Occupied(entry) => {
+                let slot = &mut retained[*entry.get()];
+                if should_replace_cookie(slot.expires_at, candidate.expires_at) {
+                    *slot = RetainedChromiumCookie {
+                        expires_at: candidate.expires_at,
+                        record: candidate.record,
+                    };
+                }
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(retained.len());
+                retained.push(RetainedChromiumCookie {
+                    expires_at: candidate.expires_at,
+                    record: candidate.record,
+                });
+            }
+        }
+    }
+    retained.into_iter().map(|record| record.record).collect()
+}
+
+fn should_replace_cookie(
+    existing: Option<OffsetDateTime>,
+    candidate: Option<OffsetDateTime>,
+) -> bool {
+    match (existing, candidate) {
+        (Some(existing), Some(candidate)) => candidate > existing,
+        (None, Some(_)) => true,
+        (Some(_) | None, None) => false,
+    }
+}
+
+struct ChromiumStoreRecords {
+    records: Vec<ChromiumCookieRecord>,
+    saw_unavailable_encryption: bool,
+}
+
+struct ChromiumCookieRecord {
+    key: ChromiumCookieKey,
+    expires_at: Option<OffsetDateTime>,
+    record: CookieRecord,
+}
+
+#[derive(PartialEq, Eq, Hash)]
+struct ChromiumCookieKey {
+    name: String,
+    domain: String,
+    domain_kind: CookieDomainKind,
+    path: String,
+}
+
+struct RetainedChromiumCookie {
+    expires_at: Option<OffsetDateTime>,
+    record: CookieRecord,
+}
+
+fn query_records<T, F>(
     connection: &Connection,
     query: &BoundedQuery,
     allowlist: &BrowserCookieDomainAllowlist,
+    mut budget: Option<&mut QueryBudget>,
     mut decode: F,
-) -> Result<Vec<CookieRecord>, BrowserCookieImportError>
+) -> Result<Vec<T>, BrowserCookieImportError>
 where
-    F: FnMut(
-        &Row<'_>,
-        &str,
-        &StoredCookieDomain,
-    ) -> Result<Option<CookieRecord>, BrowserCookieImportError>,
+    F: FnMut(&Row<'_>, &str, &StoredCookieDomain) -> Result<Option<T>, BrowserCookieImportError>,
 {
     let mut statement = connection
         .prepare(&query.sql)
@@ -411,6 +613,9 @@ where
         if row_count > MAX_BROWSER_COOKIE_ROWS {
             return Err(BrowserCookieImportError::TooManyRows);
         }
+        if let Some(budget) = budget.as_deref_mut() {
+            budget.inspect(row)?;
+        }
         let raw_host = bounded_text(row, 0, MAX_COOKIE_HOST_BYTES)?;
         let domain = canonical_stored_cookie_domain(raw_host)?;
         if !allowlist.matches(domain.domain.as_str()) {
@@ -421,6 +626,44 @@ where
         }
     }
     Ok(records)
+}
+
+#[derive(Default)]
+struct QueryBudget {
+    rows: usize,
+    bytes: usize,
+}
+
+impl QueryBudget {
+    fn inspect(&mut self, row: &Row<'_>) -> Result<(), BrowserCookieImportError> {
+        self.rows = self
+            .rows
+            .checked_add(1)
+            .ok_or(BrowserCookieImportError::TooManyRows)?;
+        if self.rows > MAX_BROWSER_COOKIE_ROWS {
+            return Err(BrowserCookieImportError::TooManyRows);
+        }
+
+        let row_bytes = (0..row.as_ref().column_count()).try_fold(0_usize, |total, index| {
+            let value = row
+                .get_ref(index)
+                .map_err(|_| BrowserCookieImportError::MalformedData)?;
+            let bytes = match value {
+                ValueRef::Null => 0,
+                ValueRef::Integer(_) | ValueRef::Real(_) => size_of::<i64>(),
+                ValueRef::Text(bytes) | ValueRef::Blob(bytes) => bytes.len(),
+            };
+            total
+                .checked_add(bytes)
+                .ok_or(BrowserCookieImportError::TooManyBytes)
+        })?;
+        self.bytes = self
+            .bytes
+            .checked_add(row_bytes)
+            .filter(|bytes| *bytes <= MAX_BROWSER_COOKIE_BYTES)
+            .ok_or(BrowserCookieImportError::TooManyBytes)?;
+        Ok(())
+    }
 }
 
 struct BoundedQuery {

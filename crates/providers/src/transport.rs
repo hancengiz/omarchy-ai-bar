@@ -293,6 +293,16 @@ impl Debug for SecretValue {
 pub enum Authentication {
     /// `Authorization: Bearer ...`.
     Bearer(SecretValue),
+    /// A provider-required Bearer credential mirrored into one explicit Cookie header.
+    ///
+    /// Both values remain one endpoint-policy-bound authentication object and
+    /// cannot be supplied through public metadata headers.
+    BearerAndCookie {
+        /// Secret placed after the `Bearer` authorization scheme.
+        bearer: SecretValue,
+        /// Complete secret Cookie field value.
+        cookie: SecretValue,
+    },
     /// `Authorization: <scheme> ...` for a validated non-Bearer vendor scheme.
     AuthorizationScheme {
         /// Public RFC token placed before the secret.
@@ -331,6 +341,25 @@ impl Authentication {
     /// Rejects empty, oversized, or line-breaking values.
     pub fn bearer(value: impl Into<String>) -> Result<Self, TransportError> {
         SecretValue::new(value).map(Self::Bearer)
+    }
+
+    /// Creates a coupled Bearer and Cookie authentication pair.
+    ///
+    /// This narrow form exists for provider web APIs that require the same
+    /// account session in both credential classes. The two headers are applied
+    /// only after the complete request or redirect URL passes endpoint policy.
+    ///
+    /// # Errors
+    ///
+    /// Rejects empty, oversized, or line-breaking values in either secret.
+    pub fn bearer_and_cookie(
+        bearer: impl Into<String>,
+        cookie: impl Into<String>,
+    ) -> Result<Self, TransportError> {
+        Ok(Self::BearerAndCookie {
+            bearer: SecretValue::new(bearer)?,
+            cookie: SecretValue::new(cookie)?,
+        })
     }
 
     /// Creates a vendor authorization scheme such as `Token`.
@@ -424,6 +453,12 @@ impl Authentication {
                 let value = Zeroizing::new(format!("Bearer {}", secret.expose()));
                 Ok(builder.header(AUTHORIZATION, sensitive_header(&value)?))
             }
+            Self::BearerAndCookie { bearer, cookie } => {
+                let authorization = Zeroizing::new(format!("Bearer {}", bearer.expose()));
+                Ok(builder
+                    .header(AUTHORIZATION, sensitive_header(&authorization)?)
+                    .header(COOKIE, sensitive_header(cookie.expose())?))
+            }
             Self::AuthorizationScheme { scheme, value } => {
                 let value = Zeroizing::new(format!("{scheme} {}", value.expose()));
                 Ok(builder.header(AUTHORIZATION, sensitive_header(&value)?))
@@ -460,6 +495,7 @@ impl Authentication {
             .map(Some)
             .map_err(|_| TransportError::InvalidConfiguration),
             Self::Bearer(_)
+            | Self::BearerAndCookie { .. }
             | Self::AuthorizationScheme { .. }
             | Self::ApiKey { .. }
             | Self::Cookie(_) => Ok(None),
@@ -471,6 +507,9 @@ impl Debug for Authentication {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Bearer(_) => formatter.write_str("Authentication::Bearer(<redacted>)"),
+            Self::BearerAndCookie { .. } => {
+                formatter.write_str("Authentication::BearerAndCookie(<redacted>)")
+            }
             Self::AuthorizationScheme { scheme, .. } => formatter
                 .debug_struct("Authentication::AuthorizationScheme")
                 .field("scheme", scheme)

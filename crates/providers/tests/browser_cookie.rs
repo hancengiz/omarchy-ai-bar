@@ -5,7 +5,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use oab_providers::browser_cookie::{
     BrowserCookieDomainAllowlist, BrowserCookieDomainPolicy, BrowserCookieDomainRule,
     BrowserCookieImportError, ChromiumCookieDecryptionError, ChromiumCookieDecryptor,
-    MAX_BROWSER_COOKIE_ROWS, import_browser_cookies, import_browser_cookies_with_decryptor,
+    DisabledChromiumCookieDecryptor, MAX_BROWSER_COOKIE_BYTES, MAX_BROWSER_COOKIE_ROWS,
+    import_browser_cookies, import_browser_cookies_merging_chromium_stores_with_decryptor,
+    import_browser_cookies_with_decryptor,
 };
 use oab_providers::browser_profile::{
     BrowserKind, BrowserProfile, BrowserProfileDiscovery, BrowserProfileRoots,
@@ -247,6 +249,25 @@ fn insert_chromium(
         .expect("insert Chromium cookie");
 }
 
+fn insert_repeated_chromium(connection: &mut Connection, count: usize, name: &str, value: &str) {
+    let transaction = connection.transaction().expect("repeated row transaction");
+    {
+        let mut statement = transaction
+            .prepare(
+                "INSERT INTO cookies(
+                    host_key, name, path, expires_utc, is_secure, value, encrypted_value
+                 ) VALUES ('example.com', ?1, '/', 0, 1, ?2, X'')",
+            )
+            .expect("repeated row statement");
+        for _ in 0..count {
+            statement
+                .execute(params![name, value])
+                .expect("insert repeated Chromium row");
+        }
+    }
+    transaction.commit().expect("commit repeated rows");
+}
+
 fn insert_firefox(
     connection: &Connection,
     host: &str,
@@ -268,6 +289,18 @@ fn insert_firefox(
 fn jar(import: CookieImport) -> CookieJar {
     let order = CookieImportOrder::new([SOURCE]).expect("source order");
     CookieJar::from_imports(&order, [import]).expect("cookie jar")
+}
+
+fn import_merged_chromium(
+    profile: &BrowserProfile,
+    allowlist: &BrowserCookieDomainAllowlist,
+) -> Result<CookieImport, BrowserCookieImportError> {
+    import_browser_cookies_merging_chromium_stores_with_decryptor(
+        profile,
+        SOURCE,
+        allowlist,
+        &DisabledChromiumCookieDecryptor,
+    )
 }
 
 fn https(raw: &str) -> ValidatedCookieUrl {
@@ -499,6 +532,102 @@ fn chromium_prefers_modern_live_wal_and_falls_back_only_when_modern_is_missing()
         header(&jar(imported), &https("https://example.com/"), now()),
         Some("legacy=legacy-value".to_owned())
     );
+}
+
+#[test]
+fn opt_in_chromium_merge_finds_primary_cookie_when_modern_store_lacks_it() {
+    let fixture = TestDirectory::new();
+    let profile = discovered_profile(&fixture, BrowserKind::Chromium);
+    let modern = chromium_database(&profile, "Network/Cookies", false);
+    insert_chromium(
+        &modern,
+        "example.com",
+        "unrelated",
+        "/",
+        0,
+        1,
+        "modern-value",
+        &[],
+    );
+    let primary = chromium_database(&profile, "Cookies", false);
+    insert_chromium(
+        &primary,
+        "example.com",
+        "kimi-auth",
+        "/",
+        0,
+        1,
+        "primary-token",
+        &[],
+    );
+    drop((modern, primary));
+
+    let ordinary = import_browser_cookies(&profile, SOURCE, &exact("example.com"))
+        .expect("ordinary modern-preferred import");
+    assert_eq!(
+        header(&jar(ordinary), &https("https://example.com/"), now()),
+        Some("unrelated=modern-value".to_owned())
+    );
+
+    let merged = import_merged_chromium(&profile, &exact("example.com"))
+        .expect("opt-in merged Chromium import");
+    let merged_header =
+        header(&jar(merged), &https("https://example.com/"), now()).expect("merged cookies");
+    assert!(merged_header.contains("kimi-auth=primary-token"));
+    assert!(merged_header.contains("unrelated=modern-value"));
+}
+
+#[test]
+fn opt_in_chromium_merge_prefers_later_expiry_and_network_on_ties() {
+    let fixture = TestDirectory::new();
+    let profile = discovered_profile(&fixture, BrowserKind::Chromium);
+    let modern = chromium_database(&profile, "Network/Cookies", false);
+    let primary = chromium_database(&profile, "Cookies", false);
+    let first_expiry = chromium_timestamp(now() + Duration::HOUR);
+    let later_expiry = chromium_timestamp(now() + Duration::hours(2));
+    let equal_expiry = chromium_timestamp(now() + Duration::hours(3));
+
+    for (name, expiry, value) in [
+        ("later", first_expiry, "network-earlier"),
+        ("equal", equal_expiry, "network-equal"),
+        ("session", 0, "network-session"),
+        ("network_persistent", first_expiry, "network-persistent"),
+        ("primary_persistent", 0, "network-session-loses"),
+    ] {
+        insert_chromium(&modern, "example.com", name, "/", expiry, 1, value, &[]);
+    }
+    for (name, expiry, value) in [
+        ("later", later_expiry, "primary-later"),
+        ("equal", equal_expiry, "primary-equal-loses"),
+        ("session", 0, "primary-session-loses"),
+        ("network_persistent", 0, "primary-session-loses"),
+        ("primary_persistent", first_expiry, "primary-persistent"),
+    ] {
+        insert_chromium(&primary, "example.com", name, "/", expiry, 1, value, &[]);
+    }
+    drop((modern, primary));
+
+    let merged = import_merged_chromium(&profile, &exact("example.com"))
+        .expect("precedence-aware merged import");
+    let merged_header =
+        header(&jar(merged), &https("https://example.com/"), now()).expect("merged cookies");
+    for selected in [
+        "later=primary-later",
+        "equal=network-equal",
+        "session=network-session",
+        "network_persistent=network-persistent",
+        "primary_persistent=primary-persistent",
+    ] {
+        assert!(merged_header.contains(selected), "missing {selected}");
+    }
+    for rejected in [
+        "network-earlier",
+        "primary-equal-loses",
+        "primary-session-loses",
+        "network-session-loses",
+    ] {
+        assert!(!merged_header.contains(rejected), "retained {rejected}");
+    }
 }
 
 #[test]
@@ -1029,6 +1158,119 @@ fn query_row_limit_is_enforced_with_limit_plus_one() {
         import_browser_cookies(&profile, SOURCE, &exact("example.com")).expect_err("row limit"),
         BrowserCookieImportError::TooManyRows
     );
+}
+
+#[test]
+fn opt_in_chromium_merge_enforces_aggregate_row_and_byte_limits() {
+    {
+        let fixture = TestDirectory::new();
+        let profile = discovered_profile(&fixture, BrowserKind::Chromium);
+        let mut modern = chromium_database(&profile, "Network/Cookies", false);
+        let mut primary = chromium_database(&profile, "Cookies", false);
+        let modern_rows = MAX_BROWSER_COOKIE_ROWS / 2;
+        insert_repeated_chromium(&mut modern, modern_rows, "duplicate", "value");
+        insert_repeated_chromium(
+            &mut primary,
+            MAX_BROWSER_COOKIE_ROWS - modern_rows + 1,
+            "duplicate",
+            "value",
+        );
+        drop((modern, primary));
+
+        assert_eq!(
+            import_merged_chromium(&profile, &exact("example.com"))
+                .expect_err("aggregate row limit"),
+            BrowserCookieImportError::TooManyRows
+        );
+    }
+
+    {
+        let fixture = TestDirectory::new();
+        let profile = discovered_profile(&fixture, BrowserKind::Chromium);
+        let mut modern = chromium_database(&profile, "Network/Cookies", false);
+        let mut primary = chromium_database(&profile, "Cookies", false);
+        let value = "x".repeat(16 * 1024);
+        let rows = MAX_BROWSER_COOKIE_BYTES / value.len() + 1;
+        let modern_rows = rows / 2;
+        insert_repeated_chromium(&mut modern, modern_rows, "duplicate", &value);
+        insert_repeated_chromium(&mut primary, rows - modern_rows, "duplicate", &value);
+        drop((modern, primary));
+
+        assert_eq!(
+            import_merged_chromium(&profile, &exact("example.com"))
+                .expect_err("aggregate byte limit"),
+            BrowserCookieImportError::TooManyBytes
+        );
+    }
+}
+
+#[test]
+fn opt_in_chromium_merge_fails_closed_on_unsafe_or_malformed_present_store() {
+    {
+        let fixture = TestDirectory::new();
+        let profile = discovered_profile(&fixture, BrowserKind::Chromium);
+        let modern = chromium_database(&profile, "Network/Cookies", false);
+        insert_chromium(
+            &modern,
+            "example.com",
+            "modern",
+            "/",
+            0,
+            1,
+            "modern-value",
+            &[],
+        );
+        drop(modern);
+        let outside = fixture.path().join("private-primary-canary.sqlite");
+        let outside_database = Connection::open(&outside).expect("outside primary database");
+        chromium_schema(&outside_database, 23);
+        drop(outside_database);
+        std::os::unix::fs::symlink(&outside, profile.path().join("Cookies"))
+            .expect("unsafe primary symlink");
+
+        let error = import_merged_chromium(&profile, &exact("example.com"))
+            .expect_err("unsafe present primary store");
+        assert_eq!(
+            error,
+            BrowserCookieImportError::Snapshot(SqliteSnapshotError::UnsafeFile)
+        );
+        let rendered = format!("{error:?} {error} {profile:?}");
+        assert!(!rendered.contains("private-primary-canary"));
+        assert!(!rendered.contains(fixture.path().to_string_lossy().as_ref()));
+    }
+
+    {
+        let fixture = TestDirectory::new();
+        let profile = discovered_profile(&fixture, BrowserKind::Chromium);
+        let modern = chromium_database(&profile, "Network/Cookies", false);
+        insert_chromium(
+            &modern,
+            "example.com",
+            "modern",
+            "/",
+            0,
+            1,
+            "modern-value",
+            &[],
+        );
+        drop(modern);
+        let malformed =
+            Connection::open(profile.path().join("Cookies")).expect("malformed primary database");
+        malformed
+            .execute_batch(
+                "CREATE TABLE cookies(host_key TEXT);
+                 CREATE TABLE meta(key TEXT NOT NULL, value);
+                 INSERT INTO meta(key, value) VALUES ('version', 23);",
+            )
+            .expect("malformed primary schema");
+        drop(malformed);
+
+        assert_eq!(
+            import_merged_chromium(&profile, &exact("example.com"))
+                .expect_err("malformed present primary store"),
+            BrowserCookieImportError::MalformedSchema
+        );
+    }
 }
 
 #[test]

@@ -23,6 +23,7 @@ pub mod fireworks;
 pub mod ibmbob;
 pub mod jetbrains;
 pub mod kilo;
+pub mod kimi;
 pub mod kiro;
 pub mod litellm;
 pub mod llmproxy;
