@@ -29,6 +29,7 @@ const MAX_STDERR_CLASSIFIER_RULES: usize = 16;
 const MAX_STDERR_NEEDLE_BYTES: usize = 256;
 const MAX_TOTAL_STDERR_NEEDLE_BYTES: usize = 2 * 1024;
 const MAX_TIMEOUT: Duration = Duration::from_mins(5);
+const TERMINATION_GRACE: Duration = Duration::from_millis(250);
 const REAP_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Safe subprocess construction and execution failures.
@@ -630,11 +631,16 @@ impl ProcessGroupGuard {
         }
     }
 
-    fn terminate(&self) {
-        #[cfg(unix)]
+    #[cfg(unix)]
+    fn signal(&self, signal: Signal) {
         if let Some(process_group) = self.process_group {
-            let _ = killpg(process_group, Signal::SIGKILL);
+            let _ = killpg(process_group, signal);
         }
+    }
+
+    fn kill(&self) {
+        #[cfg(unix)]
+        self.signal(Signal::SIGKILL);
     }
 
     fn disarm(&mut self) {
@@ -647,12 +653,15 @@ impl ProcessGroupGuard {
 
 impl Drop for ProcessGroupGuard {
     fn drop(&mut self) {
-        self.terminate();
+        self.kill();
     }
 }
 
 async fn terminate(child: &mut Child, group: &mut ProcessGroupGuard) {
-    group.terminate();
+    #[cfg(unix)]
+    group.signal(Signal::SIGTERM);
+    let _ = tokio::time::timeout(TERMINATION_GRACE, child.wait()).await;
+    group.kill();
     let _ = child.start_kill();
     let _ = tokio::time::timeout(REAP_TIMEOUT, child.wait()).await;
     group.disarm();

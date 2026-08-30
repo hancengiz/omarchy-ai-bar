@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -241,6 +242,38 @@ async fn cancellation_terminates_the_process_promptly() {
     );
     cancel_task.await.expect("cancellation task");
     assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn cancellation_offers_term_cleanup_before_enforcing_group_kill() {
+    let marker = unique_temp_path();
+    let invocation = request(
+        "/bin/sh",
+        [
+            std::ffi::OsString::from("-c"),
+            std::ffi::OsString::from(
+                "trap 'printf term > \"$1\"; exit 0' TERM; while :; do sleep 0.01; done",
+            ),
+            std::ffi::OsString::from("subprocess-test"),
+            marker.as_os_str().to_os_string(),
+        ],
+        Duration::from_secs(10),
+    );
+    let cancellation = CancellationToken::new();
+    let trigger = cancellation.clone();
+    let cancel_task = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        trigger.cancel();
+    });
+
+    assert_eq!(
+        invocation.run(&cancellation).await,
+        Err(SubprocessError::Cancelled)
+    );
+    cancel_task.await.expect("cancellation task");
+    assert_eq!(fs::read(&marker).expect("TERM marker"), b"term");
+    fs::remove_file(marker).expect("remove TERM marker");
 }
 
 #[cfg(target_os = "linux")]
