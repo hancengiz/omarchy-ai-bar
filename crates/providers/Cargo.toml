@@ -11,7 +11,7 @@ cbc.workspace = true
 futures-util.workspace = true
 hmac.workspace = true
 httpdate.workspace = true
-nix.workspace = true
+nix = { workspace = true, features = ["dir"] }
 oab-domain = { path = "../domain", version = "=0.1.0" }
 pbkdf2.workspace = true
 reqwest.workspace = true

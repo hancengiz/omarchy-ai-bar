@@ -4,6 +4,7 @@ pub mod browser_cookie;
 pub mod browser_profile;
 pub mod capability;
 pub mod chromium_crypto;
+pub mod chromium_leveldb;
 pub mod cloud_signing;
 pub mod configured_endpoint;
 pub mod context;
