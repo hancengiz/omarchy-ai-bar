@@ -5,6 +5,7 @@ pub mod azureopenai;
 pub mod chutes;
 pub mod clawrouter;
 pub mod clinepass;
+pub mod copilot;
 pub mod crof;
 pub mod deepgram;
 pub mod deepinfra;

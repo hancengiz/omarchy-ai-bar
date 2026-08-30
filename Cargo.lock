@@ -1384,13 +1384,16 @@ name = "oab-providers"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "hmac",
  "httpdate",
+ "nix",
  "oab-domain",
  "oab-test-support",
  "reqwest",
  "rust_decimal",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
  "time",
  "tokio",

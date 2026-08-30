@@ -99,6 +99,63 @@ async fn fixed_client_keeps_scope_source_and_authentication_isolated() {
 }
 
 #[tokio::test]
+async fn client_can_bind_one_descriptor_supported_non_key_source() {
+    let server = FakeHttpServer::start([FakeHttpResponse::new(200, b"ok".to_vec())]).await;
+    let client = FixedApiClient::new(
+        scope("account-a"),
+        server.url("/v1/"),
+        EndpointClass::LoopbackDevelopment,
+        "x-api-key",
+        ApiKeyCredential::new("fixture-key-canary").expect("credential"),
+        config(),
+    )
+    .expect("fixed API client")
+    .with_source(ProviderSource::ConfigurableEndpoint)
+    .expect("ElevenLabs supports endpoint overrides");
+    let configured = ProviderContext::new(
+        scope("account-a"),
+        ProviderSource::ConfigurableEndpoint,
+        CancellationToken::new(),
+    );
+    assert_eq!(
+        client
+            .get(&configured, client.url("usage").expect("usage URL"))
+            .await
+            .expect("configured source")
+            .body(),
+        b"ok"
+    );
+
+    let api_key = ProviderContext::new(
+        scope("account-a"),
+        ProviderSource::ApiKey,
+        CancellationToken::new(),
+    );
+    assert_eq!(
+        client
+            .get(&api_key, client.url("usage").expect("usage URL"))
+            .await
+            .expect_err("source binding remains exact")
+            .kind(),
+        ErrorKind::Api
+    );
+    assert_eq!(server.requests().len(), 1);
+
+    let unsupported = FixedApiClient::new(
+        scope("account-a"),
+        server.url("/v1/"),
+        EndpointClass::LoopbackDevelopment,
+        "x-api-key",
+        ApiKeyCredential::new("fixture-key-canary").expect("credential"),
+        config(),
+    )
+    .expect("fixed API client")
+    .with_source(ProviderSource::Cli)
+    .expect_err("ElevenLabs has no CLI source");
+    assert_eq!(unsupported.kind(), ErrorKind::Api);
+}
+
+#[tokio::test]
 async fn bearer_client_uses_the_same_validation_and_scope_boundary() {
     let server = FakeHttpServer::start([FakeHttpResponse::new(200, Vec::new())]).await;
     let client = FixedApiClient::new_bearer(

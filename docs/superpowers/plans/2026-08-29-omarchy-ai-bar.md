@@ -606,6 +606,9 @@ and JSON readers.
 **Shared adapter first:** Cookie/Authorization/cURL normalization, per-provider cookie jars, Chromium and Firefox DB+WAL
 snapshots, Secret Service decryption, LevelDB/local-storage readers, global browser/keyring disable.
 
+Complete Copilot's optional budget enrichment in this batch using manual cookie capture and Linux Chromium/Firefox
+profile discovery; the macOS-only automatic cookie import is replaced by the shared Linux browser infrastructure.
+
 **Provider order:** `t3chat`, `alibaba`, `opencode`, `qwencloud`, `devin`, `manus`, `mimo`, `sakana`, `mistral`,
 `commandcode`, `qoder`, `stepfun`, `longcat`, `zoommate`, `notion`, `alibabatokenplan`, `minimax`, `kimi`, `perplexity`.
 

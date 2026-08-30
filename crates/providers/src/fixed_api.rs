@@ -11,6 +11,7 @@ use zeroize::Zeroizing;
 use crate::context::ProviderContext;
 use crate::descriptor::ProviderSource;
 use crate::endpoint::{EndpointClass, EndpointPolicy};
+use crate::registry::descriptor_for;
 use crate::transport::{Authentication, HttpRequest, HttpResponse, HttpTransport, TransportConfig};
 
 const MAX_API_KEY_BYTES: usize = 16 * 1024;
@@ -92,6 +93,7 @@ impl Debug for ApiKeyCredential {
 /// One exact provider/account client with no shared cookie state.
 pub struct FixedApiClient {
     scope: AccountScope,
+    source: ProviderSource,
     base_url: Url,
     authentication: ApiKeyAuthentication,
     credential: ApiKeyCredential,
@@ -232,6 +234,7 @@ impl FixedApiClient {
             HttpTransport::new(endpoints, config).map_err(|error| error.classified())?;
         Ok(Self {
             scope,
+            source: ProviderSource::ApiKey,
             base_url,
             authentication,
             credential,
@@ -244,6 +247,33 @@ impl FixedApiClient {
     #[must_use]
     pub const fn scope(&self) -> &AccountScope {
         &self.scope
+    }
+
+    /// Account-source mechanism bound to this exact client.
+    #[must_use]
+    pub const fn source(&self) -> ProviderSource {
+        self.source
+    }
+
+    /// Binds this client to one descriptor-supported account source.
+    ///
+    /// This allows the same exact-origin authenticated transport to serve
+    /// OAuth tokens, provider-owned credential files, and configured endpoint
+    /// accounts without weakening account/source isolation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable API error when the provider does not advertise the
+    /// requested source.
+    pub fn with_source(mut self, source: ProviderSource) -> Result<Self, ClassifiedError> {
+        if !descriptor_for(self.scope.provider())
+            .sources()
+            .contains(source)
+        {
+            return Err(ClassifiedError::new(ErrorKind::Api));
+        }
+        self.source = source;
+        Ok(self)
     }
 
     /// Validated provider base URL used to build fixed paths.
@@ -276,6 +306,10 @@ impl FixedApiClient {
             self.credential.clone(),
             self.config,
         )
+        .map(|mut client| {
+            client.source = self.source;
+            client
+        })
     }
 
     /// Resolves a provider-owned relative path under the validated base URL.
@@ -316,7 +350,7 @@ impl FixedApiClient {
         context: &ProviderContext,
         url: Url,
     ) -> Result<HttpResponse, ClassifiedError> {
-        if context.scope() != &self.scope || context.source() != ProviderSource::ApiKey {
+        if !self.matches_context(context) {
             return Err(ClassifiedError::new(ErrorKind::Api));
         }
         let authentication = match &self.authentication {
@@ -375,7 +409,7 @@ impl FixedApiClient {
         context: &ProviderContext,
         url: Url,
     ) -> Result<HttpResponse, OptionalRequestError> {
-        if context.scope() != &self.scope || context.source() != ProviderSource::ApiKey {
+        if !self.matches_context(context) {
             return Err(OptionalRequestError::Other(ErrorKind::Api));
         }
         let authentication = match &self.authentication {
@@ -463,7 +497,7 @@ impl FixedApiClient {
         context: &ProviderContext,
         url: Url,
     ) -> Result<Option<HttpResponse>, ClassifiedError> {
-        if context.scope() != &self.scope || context.source() != ProviderSource::ApiKey {
+        if !self.matches_context(context) {
             return Err(ClassifiedError::new(ErrorKind::Api));
         }
         let authentication = match &self.authentication {
@@ -536,7 +570,7 @@ impl FixedApiClient {
         request: HttpRequest,
         status_map: impl Fn(u16) -> Option<ErrorKind>,
     ) -> Result<HttpResponse, ClassifiedError> {
-        if context.scope() != &self.scope || context.source() != ProviderSource::ApiKey {
+        if !self.matches_context(context) {
             return Err(ClassifiedError::new(ErrorKind::Api));
         }
         let authentication = match &self.authentication {
@@ -557,6 +591,10 @@ impl FixedApiClient {
                     .map_or_else(|| error.classified(), |kind| error.classified_as(kind))
             })
     }
+
+    fn matches_context(&self, context: &ProviderContext) -> bool {
+        context.scope() == &self.scope && context.source() == self.source
+    }
 }
 
 impl Debug for FixedApiClient {
@@ -564,6 +602,7 @@ impl Debug for FixedApiClient {
         formatter
             .debug_struct("FixedApiClient")
             .field("scope", &self.scope)
+            .field("source", &self.source)
             .field("scheme", &self.base_url.scheme())
             .field("host", &self.base_url.host_str())
             .field("path", &"<redacted>")

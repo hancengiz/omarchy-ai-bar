@@ -1,0 +1,23 @@
+{
+  "copilot_plan": "business",
+  "token_based_billing": true,
+  "quota_reset_date": "2026-09-01",
+  "quota_snapshots": {
+    "premium_interactions": {
+      "unlimited": true,
+      "entitlement": 0,
+      "remaining": 0,
+      "percent_remaining": 100,
+      "quota_id": "premium_interactions",
+      "credits_used": 31
+    },
+    "chat": {
+      "unlimited": true,
+      "entitlement": 0,
+      "remaining": 0,
+      "percent_remaining": 100,
+      "quota_id": "chat",
+      "credits_used": 0
+    }
+  }
+}

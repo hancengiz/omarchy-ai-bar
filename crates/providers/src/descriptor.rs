@@ -156,11 +156,13 @@ const fn capabilities_for(id: ProviderId) -> CapabilitySet {
         | ProviderId::OpenAi
         | ProviderId::Claude
         | ProviderId::Gemini
-        | ProviderId::OpenRouter
-        | ProviderId::Bedrock => {
+        | ProviderId::OpenRouter => {
             capabilities = capabilities
                 .with(ProviderCapability::Credits)
                 .with(ProviderCapability::CostHistory);
+        }
+        ProviderId::Bedrock => {
+            capabilities = capabilities.with(ProviderCapability::CostHistory);
         }
         _ => {}
     }

@@ -104,6 +104,15 @@ fn completed_api_provider_sources_match_the_pinned_baseline() {
 }
 
 #[test]
+fn bedrock_advertises_cost_history_without_credit_inventory() {
+    let capabilities = descriptor_for(ProviderId::Bedrock).capabilities();
+
+    assert!(capabilities.contains(ProviderCapability::Usage));
+    assert!(capabilities.contains(ProviderCapability::CostHistory));
+    assert!(!capabilities.contains(ProviderCapability::Credits));
+}
+
+#[test]
 fn first_run_behavior_is_explicit_and_nonprobing_by_default() {
     assert_eq!(
         descriptor_for(ProviderId::Codex).default_behavior(),

@@ -1,7 +1,7 @@
 //! Bounded cookie-less HTTP transport with validation-before-auth ordering.
 
 use std::fmt::{self, Debug, Formatter};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures_util::StreamExt;
 use oab_domain::{ClassifiedError, ErrorKind, WindowDuration};
@@ -12,10 +12,15 @@ use reqwest::header::{
 use reqwest::{Client, Method, StatusCode};
 use serde::de::DeserializeOwned;
 use thiserror::Error;
+use time::OffsetDateTime;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 use zeroize::Zeroizing;
 
+use crate::cloud_signing::{
+    AwsCredentials, AwsSigV4Signer, SignedHeader, SignedRequest, SigningRequest,
+    VolcengineCredentials, VolcengineV4Signer,
+};
 use crate::endpoint::{EndpointError, EndpointPolicy, ValidatedEndpoint};
 use crate::retry::{RetryClock, RetryPolicy, TokioRetryClock, parse_retry_after};
 
@@ -24,8 +29,56 @@ const MAX_AUTHORIZATION_SCHEME_BYTES: usize = 32;
 const MAX_REQUEST_BODY_BYTES: usize = 4 * 1024 * 1024;
 const MAX_PUBLIC_REQUEST_HEADERS: usize = 32;
 const MAX_PUBLIC_HEADER_VALUE_BYTES: usize = 8 * 1024;
+const MAX_ACCEPTED_STATUSES: usize = 16;
+const MAX_RESPONSE_HEADERS: usize = 32;
+const MAX_RESPONSE_HEADER_VALUE_BYTES: usize = 8 * 1024;
 const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_REDIRECTS: u8 = 10;
+
+/// Typed values permitted in the request `Accept` header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestAccept {
+    /// `application/json`.
+    Json,
+    /// Browser-compatible HTML and XHTML.
+    Html,
+}
+
+impl RequestAccept {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Json => "application/json",
+            Self::Html => "text/html,application/xhtml+xml",
+        }
+    }
+}
+
+/// Typed values permitted in the request `Content-Type` header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestContentType {
+    /// `application/json`.
+    Json,
+    /// OAuth-compatible URL-encoded form data.
+    FormUrlEncoded,
+    /// Volcengine-compatible URL-encoded form data with an explicit UTF-8 charset.
+    FormUrlEncodedUtf8,
+    /// AWS JSON protocol version 1.0.
+    AwsJson10,
+    /// AWS JSON protocol version 1.1.
+    AwsJson11,
+}
+
+impl RequestContentType {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Json => "application/json",
+            Self::FormUrlEncoded => "application/x-www-form-urlencoded",
+            Self::FormUrlEncodedUtf8 => "application/x-www-form-urlencoded; charset=utf-8",
+            Self::AwsJson10 => "application/x-amz-json-1.0",
+            Self::AwsJson11 => "application/x-amz-json-1.1",
+        }
+    }
+}
 
 /// Safe transport construction and execution failures.
 #[derive(Debug, Error)]
@@ -250,6 +303,18 @@ pub enum Authentication {
     },
     /// Explicit manual Cookie header; never a shared cookie jar.
     Cookie(SecretValue),
+    /// AWS Signature Version 4, regenerated after endpoint validation for each attempt.
+    AwsSigV4 {
+        /// Fixed region/service signer configuration.
+        signer: AwsSigV4Signer,
+        /// Redacted, zeroizing AWS credentials.
+        credentials: AwsCredentials,
+    },
+    /// Volcengine V4 signing, regenerated after endpoint validation for each attempt.
+    VolcengineV4 {
+        /// Redacted, zeroizing Volcengine credentials and region.
+        credentials: VolcengineCredentials,
+    },
 }
 
 impl Authentication {
@@ -313,6 +378,37 @@ impl Authentication {
         SecretValue::new(value).map(Self::Cookie)
     }
 
+    /// Creates AWS Signature Version 4 authentication for one region/service scope.
+    ///
+    /// The signature timestamp comes from the transport's injected retry clock and
+    /// is sampled again for every retry and validated redirect.
+    ///
+    /// # Errors
+    ///
+    /// Rejects malformed or oversized region/service scope components.
+    pub fn aws_sig_v4(
+        credentials: AwsCredentials,
+        region: impl Into<String>,
+        service: impl Into<String>,
+    ) -> Result<Self, TransportError> {
+        let signer = AwsSigV4Signer::new(region, service)
+            .map_err(|_| TransportError::InvalidConfiguration)?;
+        Ok(Self::AwsSigV4 {
+            signer,
+            credentials,
+        })
+    }
+
+    /// Creates Volcengine V4 authentication for credentials containing the scope region.
+    #[must_use]
+    pub const fn volcengine_v4(credentials: VolcengineCredentials) -> Self {
+        Self::VolcengineV4 { credentials }
+    }
+
+    const fn uses_cloud_signing(&self) -> bool {
+        matches!(self, Self::AwsSigV4 { .. } | Self::VolcengineV4 { .. })
+    }
+
     fn apply(
         &self,
         builder: reqwest::RequestBuilder,
@@ -330,6 +426,37 @@ impl Authentication {
                 Ok(builder.header(name, sensitive_header(value.expose())?))
             }
             Self::Cookie(secret) => Ok(builder.header(COOKIE, sensitive_header(secret.expose())?)),
+            Self::AwsSigV4 { .. } | Self::VolcengineV4 { .. } => {
+                Err(TransportError::InvalidConfiguration)
+            }
+        }
+    }
+
+    fn sign_cloud_request(
+        &self,
+        request: &HttpRequest,
+        endpoint: &ValidatedEndpoint,
+        timestamp: OffsetDateTime,
+    ) -> Result<Option<SignedRequest>, TransportError> {
+        match self {
+            Self::AwsSigV4 {
+                signer,
+                credentials,
+            } => signer
+                .sign(signing_request(request, endpoint)?, credentials, timestamp)
+                .map(Some)
+                .map_err(|_| TransportError::InvalidConfiguration),
+            Self::VolcengineV4 { credentials } => VolcengineV4Signer::sign(
+                signing_request(request, endpoint)?,
+                credentials,
+                timestamp,
+            )
+            .map(Some)
+            .map_err(|_| TransportError::InvalidConfiguration),
+            Self::Bearer(_)
+            | Self::AuthorizationScheme { .. }
+            | Self::ApiKey { .. }
+            | Self::Cookie(_) => Ok(None),
         }
     }
 }
@@ -349,6 +476,15 @@ impl Debug for Authentication {
                 .field("value", &"<redacted>")
                 .finish(),
             Self::Cookie(_) => formatter.write_str("Authentication::Cookie(<redacted>)"),
+            Self::AwsSigV4 { signer, .. } => formatter
+                .debug_struct("Authentication::AwsSigV4")
+                .field("signer", signer)
+                .field("credentials", &"<redacted>")
+                .finish(),
+            Self::VolcengineV4 { .. } => formatter
+                .debug_struct("Authentication::VolcengineV4")
+                .field("credentials", &"<redacted>")
+                .finish(),
         }
     }
 }
@@ -359,9 +495,11 @@ pub struct HttpRequest {
     url: Url,
     authentication: Option<Authentication>,
     public_headers: Vec<(HeaderName, HeaderValue)>,
+    accepted_statuses: Vec<StatusCode>,
+    response_headers: Vec<HeaderName>,
     body: Vec<u8>,
-    json: bool,
-    empty_json_content_type: bool,
+    accept: Option<RequestAccept>,
+    content_type: Option<RequestContentType>,
 }
 
 impl HttpRequest {
@@ -373,9 +511,11 @@ impl HttpRequest {
             url,
             authentication: None,
             public_headers: Vec::new(),
+            accepted_statuses: Vec::new(),
+            response_headers: Vec::new(),
             body: Vec::new(),
-            json: false,
-            empty_json_content_type: false,
+            accept: None,
+            content_type: None,
         }
     }
 
@@ -383,7 +523,7 @@ impl HttpRequest {
     #[must_use]
     pub fn get_json(url: Url) -> Self {
         let mut request = Self::get(url);
-        request.json = true;
+        request.accept = Some(RequestAccept::Json);
         request
     }
 
@@ -401,9 +541,11 @@ impl HttpRequest {
             url,
             authentication: None,
             public_headers: Vec::new(),
+            accepted_statuses: Vec::new(),
+            response_headers: Vec::new(),
             body,
-            json: false,
-            empty_json_content_type: false,
+            accept: None,
+            content_type: None,
         })
     }
 
@@ -413,8 +555,12 @@ impl HttpRequest {
     ///
     /// Returns an error when the body exceeds the request ceiling.
     pub fn post_json(url: Url, body: Vec<u8>) -> Result<Self, TransportError> {
+        let has_body = !body.is_empty();
         let mut request = Self::post(url, body)?;
-        request.json = true;
+        request.accept = Some(RequestAccept::Json);
+        if has_body {
+            request.content_type = Some(RequestContentType::Json);
+        }
         Ok(request)
     }
 
@@ -425,13 +571,81 @@ impl HttpRequest {
         self
     }
 
+    /// Sets a transport-owned, typed `Accept` value.
+    #[must_use]
+    pub fn accept(mut self, accept: RequestAccept) -> Self {
+        self.accept = Some(accept);
+        self
+    }
+
+    /// Sets a transport-owned, typed `Content-Type` value.
+    #[must_use]
+    pub fn content_type(mut self, content_type: RequestContentType) -> Self {
+        self.content_type = Some(content_type);
+        self
+    }
+
     /// Requests an explicit JSON content type for a body-free request.
     ///
     /// Some provider APIs require the same media-type headers on GET and POST.
     #[must_use]
     pub fn empty_json_content_type(mut self) -> Self {
-        self.empty_json_content_type = true;
+        self.content_type = Some(RequestContentType::Json);
         self
+    }
+
+    /// Allows a bounded set of error statuses to return as normal responses.
+    ///
+    /// Success statuses are always accepted. Redirect and informational
+    /// statuses remain transport-owned and cannot be accepted here.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for more than 16 entries, duplicate entries, invalid
+    /// status numbers, or any non-error status.
+    pub fn accepted_statuses(mut self, statuses: &[u16]) -> Result<Self, TransportError> {
+        if statuses.len() > MAX_ACCEPTED_STATUSES {
+            return Err(TransportError::InvalidConfiguration);
+        }
+        let mut accepted = Vec::with_capacity(statuses.len());
+        for status in statuses {
+            let status =
+                StatusCode::from_u16(*status).map_err(|_| TransportError::InvalidConfiguration)?;
+            if (!status.is_client_error() && !status.is_server_error())
+                || accepted.contains(&status)
+            {
+                return Err(TransportError::InvalidConfiguration);
+            }
+            accepted.push(status);
+        }
+        self.accepted_statuses = accepted;
+        Ok(self)
+    }
+
+    /// Selects the only response headers retained by the transport.
+    ///
+    /// Names are matched case-insensitively. Sensitive authentication,
+    /// cookie, redirect, and hop-by-hop headers cannot be retained.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for more than 32 entries, duplicate/invalid names, or
+    /// a reserved response header.
+    pub fn response_headers(mut self, names: &[&str]) -> Result<Self, TransportError> {
+        if names.len() > MAX_RESPONSE_HEADERS {
+            return Err(TransportError::InvalidConfiguration);
+        }
+        let mut selected = Vec::with_capacity(names.len());
+        for name in names {
+            let name = HeaderName::from_bytes(name.as_bytes())
+                .map_err(|_| TransportError::InvalidConfiguration)?;
+            if is_reserved_response_header(&name) || selected.contains(&name) {
+                return Err(TransportError::InvalidConfiguration);
+            }
+            selected.push(name);
+        }
+        self.response_headers = selected;
+        Ok(self)
     }
 
     /// Attaches one bounded, explicitly non-secret provider metadata header.
@@ -476,8 +690,10 @@ impl Debug for HttpRequest {
             .field("query", &"<redacted>")
             .field("authentication", &self.authentication)
             .field("public_header_count", &self.public_headers.len())
-            .field("json", &self.json)
-            .field("empty_json_content_type", &self.empty_json_content_type)
+            .field("accepted_status_count", &self.accepted_statuses.len())
+            .field("response_header_count", &self.response_headers.len())
+            .field("accept", &self.accept)
+            .field("content_type", &self.content_type)
             .field("body_bytes", &self.body.len())
             .finish()
     }
@@ -487,6 +703,7 @@ impl Debug for HttpRequest {
 pub struct HttpResponse {
     status: u16,
     body: Vec<u8>,
+    headers: Vec<(HeaderName, String)>,
     endpoint: ValidatedEndpoint,
 }
 
@@ -501,6 +718,19 @@ impl HttpResponse {
     #[must_use]
     pub fn body(&self) -> &[u8] {
         &self.body
+    }
+
+    /// Returns one explicitly selected response header.
+    ///
+    /// Lookup is ASCII case-insensitive. Unselected headers are never retained
+    /// and therefore always return `None`.
+    #[must_use]
+    pub fn header(&self, name: &str) -> Option<&str> {
+        let name = HeaderName::from_bytes(name.as_bytes()).ok()?;
+        self.headers
+            .iter()
+            .find(|(candidate, _)| candidate == name)
+            .map(|(_, value)| value.as_str())
     }
 
     /// Parses JSON without including raw body text in errors.
@@ -519,6 +749,7 @@ impl Debug for HttpResponse {
             .debug_struct("HttpResponse")
             .field("status", &self.status)
             .field("body_bytes", &self.body.len())
+            .field("header_count", &self.headers.len())
             .field("endpoint", &self.endpoint)
             .finish()
     }
@@ -620,24 +851,47 @@ impl<C: RetryClock> HttpTransport<C> {
         let mut redirect_count = 0_u8;
         loop {
             let endpoint = self.endpoints.validate(&current)?;
-            let mut builder = self
-                .client
-                .request(request.method.clone(), endpoint.url().clone());
-            if request.json {
-                builder = builder.header(ACCEPT, "application/json");
-                if !request.body.is_empty() || request.empty_json_content_type {
-                    builder = builder.header(CONTENT_TYPE, "application/json");
+            let signed = match request.authentication.as_ref() {
+                Some(authentication) if authentication.uses_cloud_signing() => authentication
+                    .sign_cloud_request(
+                        request,
+                        &endpoint,
+                        system_time_utc(self.clock.wall_now())?,
+                    )?,
+                Some(_) | None => None,
+            };
+            let builder = if let Some(signed) = &signed {
+                let mut builder = self
+                    .client
+                    .request(signed.method().clone(), signed.url().clone());
+                for header in signed.headers() {
+                    builder = builder.header(header.name(), transport_signed_header_value(header));
                 }
-            }
-            if !request.body.is_empty() {
-                builder = builder.body(request.body.clone());
-            }
-            for (name, value) in &request.public_headers {
-                builder = builder.header(name, value);
-            }
-            if let Some(authentication) = &request.authentication {
-                builder = authentication.apply(builder)?;
-            }
+                if !signed.body().is_empty() {
+                    builder = builder.body(signed.body().to_vec());
+                }
+                builder
+            } else {
+                let mut builder = self
+                    .client
+                    .request(request.method.clone(), endpoint.url().clone());
+                if let Some(accept) = request.accept {
+                    builder = builder.header(ACCEPT, accept.as_str());
+                }
+                if let Some(content_type) = request.content_type {
+                    builder = builder.header(CONTENT_TYPE, content_type.as_str());
+                }
+                if !request.body.is_empty() {
+                    builder = builder.body(request.body.clone());
+                }
+                for (name, value) in &request.public_headers {
+                    builder = builder.header(name, value);
+                }
+                if let Some(authentication) = &request.authentication {
+                    builder = authentication.apply(builder)?;
+                }
+                builder
+            };
             let response = builder.send().await.map_err(|_| TransportError::Network)?;
             if response.status().is_redirection() {
                 if request.method != Method::GET && request.method != Method::HEAD {
@@ -653,9 +907,10 @@ impl<C: RetryClock> HttpTransport<C> {
             }
 
             let status = response.status();
-            if !status.is_success() {
+            if !status.is_success() && !request.accepted_statuses.contains(&status) {
                 return Err(self.status_error(status, response.headers()));
             }
+            let selected_headers = select_response_headers(response.headers(), request)?;
             if response
                 .content_length()
                 .is_some_and(|length| length > self.config.max_response_bytes as u64)
@@ -678,6 +933,7 @@ impl<C: RetryClock> HttpTransport<C> {
             return Ok(HttpResponse {
                 status: status.as_u16(),
                 body,
+                headers: selected_headers,
                 endpoint,
             });
         }
@@ -721,6 +977,62 @@ fn sensitive_header(value: &str) -> Result<HeaderValue, TransportError> {
     Ok(value)
 }
 
+fn signing_request(
+    request: &HttpRequest,
+    endpoint: &ValidatedEndpoint,
+) -> Result<SigningRequest, TransportError> {
+    let mut signing = SigningRequest::for_validated_endpoint(
+        request.method.clone(),
+        endpoint,
+        request.body.clone(),
+    )
+    .map_err(|_| TransportError::InvalidConfiguration)?;
+    if let Some(accept) = request.accept {
+        signing = signing
+            .with_header(ACCEPT.as_str(), accept.as_str())
+            .map_err(|_| TransportError::InvalidConfiguration)?;
+    }
+    if let Some(content_type) = request.content_type {
+        signing = signing
+            .with_header(CONTENT_TYPE.as_str(), content_type.as_str())
+            .map_err(|_| TransportError::InvalidConfiguration)?;
+    }
+    for (name, value) in &request.public_headers {
+        signing = signing
+            .with_header(
+                name.as_str(),
+                value
+                    .to_str()
+                    .map_err(|_| TransportError::InvalidConfiguration)?,
+            )
+            .map_err(|_| TransportError::InvalidConfiguration)?;
+    }
+    Ok(signing)
+}
+
+fn transport_signed_header_value(header: &SignedHeader) -> HeaderValue {
+    let mut value = header.to_header_value();
+    if header.name() == AUTHORIZATION || header.name().as_str() == "x-amz-security-token" {
+        value.set_sensitive(true);
+    }
+    value
+}
+
+fn system_time_utc(value: SystemTime) -> Result<OffsetDateTime, TransportError> {
+    let nanos = match value.duration_since(UNIX_EPOCH) {
+        Ok(duration) => i128::from(duration.as_secs())
+            .checked_mul(1_000_000_000)
+            .and_then(|nanos| nanos.checked_add(i128::from(duration.subsec_nanos()))),
+        Err(error) => i128::from(error.duration().as_secs())
+            .checked_mul(1_000_000_000)
+            .and_then(|nanos| nanos.checked_add(i128::from(error.duration().subsec_nanos())))
+            .and_then(i128::checked_neg),
+    }
+    .ok_or(TransportError::InvalidConfiguration)?;
+    OffsetDateTime::from_unix_timestamp_nanos(nanos)
+        .map_err(|_| TransportError::InvalidConfiguration)
+}
+
 const fn is_http_token_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric()
         || matches!(
@@ -761,4 +1073,180 @@ fn is_reserved_api_key_header(name: &HeaderName) -> bool {
 
 fn is_reserved_public_header(name: &HeaderName) -> bool {
     is_reserved_api_key_header(name) || matches!(name, &ACCEPT | &CONTENT_TYPE)
+}
+
+fn is_reserved_response_header(name: &HeaderName) -> bool {
+    matches!(name, &AUTHORIZATION | &COOKIE | &CONTENT_LENGTH | &LOCATION)
+        || matches!(
+            name.as_str(),
+            "connection"
+                | "host"
+                | "proxy-authenticate"
+                | "proxy-authorization"
+                | "set-cookie"
+                | "te"
+                | "trailer"
+                | "transfer-encoding"
+                | "upgrade"
+                | "www-authenticate"
+        )
+}
+
+fn select_response_headers(
+    headers: &HeaderMap,
+    request: &HttpRequest,
+) -> Result<Vec<(HeaderName, String)>, TransportError> {
+    let mut selected = Vec::with_capacity(request.response_headers.len());
+    for name in &request.response_headers {
+        let Some(value) = headers.get(name) else {
+            continue;
+        };
+        if value.as_bytes().len() > MAX_RESPONSE_HEADER_VALUE_BYTES {
+            return Err(TransportError::ResponseTooLarge);
+        }
+        let value = value
+            .to_str()
+            .map_err(|_| TransportError::MalformedResponse)?;
+        selected.push((name.clone(), value.to_owned()));
+    }
+    Ok(selected)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::endpoint::EndpointClass;
+
+    fn signing_endpoint(url: &Url) -> ValidatedEndpoint {
+        EndpointPolicy::new([("https://example.com:8443", EndpointClass::PublicHttps)])
+            .expect("signing endpoint policy")
+            .validate(url)
+            .expect("validated signing endpoint")
+    }
+
+    fn fixed_timestamp() -> OffsetDateTime {
+        OffsetDateTime::from_unix_timestamp(1_440_938_160).expect("fixture timestamp")
+    }
+
+    fn signed_header<'a>(signed: &'a SignedRequest, name: &str) -> &'a SignedHeader {
+        signed
+            .headers()
+            .iter()
+            .find(|header| header.name().as_str() == name)
+            .expect("signed header")
+    }
+
+    #[test]
+    fn aws_auth_signs_the_final_typed_request_and_redacts_credentials() {
+        const ACCESS_KEY: &str = "aws-access-key-canary";
+        const SECRET_KEY: &str = "aws-secret-key-canary";
+        const SESSION_TOKEN: &str = "aws-session-token-canary";
+        let credentials = AwsCredentials::new(ACCESS_KEY, SECRET_KEY, Some(SESSION_TOKEN))
+            .expect("AWS credentials");
+        let authentication = Authentication::aws_sig_v4(credentials, "us-east-1", "bedrock")
+            .expect("AWS authentication");
+        let url = Url::parse("https://example.com:8443/models/a%20b?z=2&a=1").expect("fixture URL");
+        let request = HttpRequest::post(url.clone(), b"exact-body".to_vec())
+            .expect("request")
+            .accept(RequestAccept::Json)
+            .content_type(RequestContentType::AwsJson11)
+            .public_header("x-amz-target", "Bedrock.List")
+            .expect("public target header");
+        let signed = authentication
+            .sign_cloud_request(&request, &signing_endpoint(&url), fixed_timestamp())
+            .expect("signed request")
+            .expect("cloud authentication");
+
+        assert_eq!(signed.method(), &Method::POST);
+        assert_eq!(signed.url(), &url);
+        assert_eq!(signed.body(), b"exact-body");
+        assert_eq!(signed.header("accept"), Some("application/json"));
+        assert_eq!(
+            signed.header("content-type"),
+            Some("application/x-amz-json-1.1")
+        );
+        assert_eq!(signed.header("x-amz-target"), Some("Bedrock.List"));
+        assert_eq!(signed.header("host"), Some("example.com:8443"));
+        assert!(
+            signed
+                .header("authorization")
+                .is_some_and(|value| value.contains("SignedHeaders=accept;content-type;host;x-amz-content-sha256;x-amz-date;x-amz-security-token;x-amz-target"))
+        );
+        assert!(
+            transport_signed_header_value(signed_header(&signed, "authorization")).is_sensitive()
+        );
+        assert!(
+            transport_signed_header_value(signed_header(&signed, "x-amz-security-token"))
+                .is_sensitive()
+        );
+        assert!(
+            transport_signed_header_value(signed_header(&signed, "content-type")).is_sensitive()
+        );
+
+        let debug = format!("{authentication:?} {request:?} {signed:?}");
+        for canary in [ACCESS_KEY, SECRET_KEY, SESSION_TOKEN, "exact-body", "a%20b"] {
+            assert!(!debug.contains(canary), "debug leaked {canary}: {debug}");
+        }
+    }
+
+    #[test]
+    fn volcengine_auth_preserves_the_exact_utf8_form_media_type() {
+        let credentials = VolcengineCredentials::new(
+            "volc-access-key-canary",
+            "volc-secret-key-canary",
+            "cn-beijing",
+        )
+        .expect("Volcengine credentials");
+        let authentication = Authentication::volcengine_v4(credentials);
+        let url = Url::parse("https://example.com:8443/api/v3/billing/usage").expect("fixture URL");
+        let request = HttpRequest::post(url.clone(), b"Action=Usage".to_vec())
+            .expect("request")
+            .accept(RequestAccept::Json)
+            .content_type(RequestContentType::FormUrlEncodedUtf8)
+            .public_header("x-provider-action", "Usage")
+            .expect("public action header");
+        let signed = authentication
+            .sign_cloud_request(&request, &signing_endpoint(&url), fixed_timestamp())
+            .expect("signed request")
+            .expect("cloud authentication");
+
+        assert_eq!(signed.method(), &Method::POST);
+        assert_eq!(signed.url(), &url);
+        assert_eq!(signed.body(), b"Action=Usage");
+        assert_eq!(
+            signed.header("content-type"),
+            Some("application/x-www-form-urlencoded; charset=utf-8")
+        );
+        assert_eq!(signed.header("accept"), Some("application/json"));
+        assert_eq!(signed.header("x-provider-action"), Some("Usage"));
+        assert!(
+            transport_signed_header_value(signed_header(&signed, "authorization")).is_sensitive()
+        );
+
+        let debug = format!("{authentication:?} {request:?} {signed:?}");
+        for canary in [
+            "volc-access-key-canary",
+            "volc-secret-key-canary",
+            "Action=Usage",
+        ] {
+            assert!(!debug.contains(canary), "debug leaked {canary}: {debug}");
+        }
+    }
+
+    #[test]
+    fn system_time_conversion_preserves_both_sides_of_the_epoch() {
+        assert_eq!(
+            system_time_utc(UNIX_EPOCH).expect("epoch").unix_timestamp(),
+            0
+        );
+        let before_epoch = UNIX_EPOCH
+            .checked_sub(Duration::from_nanos(1))
+            .expect("pre-epoch time");
+        assert_eq!(
+            system_time_utc(before_epoch)
+                .expect("pre-epoch")
+                .unix_timestamp_nanos(),
+            -1
+        );
+    }
 }
