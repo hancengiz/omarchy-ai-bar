@@ -1,0 +1,36 @@
+{
+  "total_cnt": 4,
+  "charge_records": [
+    {
+      "created_at": 1781481600,
+      "consume_token": 1200,
+      "consume_cash_after_voucher": "1.25",
+      "method": "chat",
+      "model": "MiniMax-M1",
+      "status": "SUCCESS"
+    },
+    {
+      "created_at": 1781481600,
+      "consume_token": "800",
+      "consume_cash_after_voucher": "0.75",
+      "method": "chat",
+      "model": "MiniMax-M1"
+    },
+    {
+      "created_at": 1781395200,
+      "consume_token": 500,
+      "consume_cash_after_voucher": "0.50",
+      "method": "completion",
+      "model": "MiniMax-Text-01",
+      "status": "SUCCESS"
+    },
+    {
+      "created_at": 1781395200,
+      "consume_token": 999999,
+      "consume_cash_after_voucher": "999",
+      "method": "failed",
+      "model": "private-failure",
+      "status": "FAILED"
+    }
+  ]
+}

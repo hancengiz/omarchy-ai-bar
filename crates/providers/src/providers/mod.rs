@@ -30,6 +30,7 @@ pub mod llmproxy;
 pub mod longcat;
 pub mod manus;
 pub mod mimo;
+pub mod minimax;
 pub mod mistral;
 pub mod moonshot;
 pub mod neuralwatt;

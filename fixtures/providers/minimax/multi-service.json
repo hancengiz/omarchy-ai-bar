@@ -1,0 +1,37 @@
+{
+  "data": {
+    "services": [
+      {
+        "service_type": "text_generation_pro",
+        "window_type": "Today",
+        "time_range": "2026/06/15 00:00 - 2026/06/16 00:00",
+        "usage": 2,
+        "limit": 10,
+        "percent": 20
+      },
+      {
+        "service_type": "text_to_speech",
+        "window_type": "5 hours",
+        "time_range": "00:00-05:00(UTC+8)",
+        "usage": 25,
+        "limit": 100
+      },
+      {
+        "service_type": "image_generation",
+        "window_type": "Weekly",
+        "time_range": "06/09 00:00 - 06/16 00:00(UTC+8)",
+        "usage": 7,
+        "limit": 20,
+        "percent": 35
+      },
+      {
+        "service_type": "music_generation",
+        "window_type": "Today",
+        "time_range": "2026/06/15 00:00 - 2026/06/16 00:00",
+        "usage": 1,
+        "limit": 5,
+        "percent": 20
+      }
+    ]
+  }
+}

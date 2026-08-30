@@ -164,7 +164,7 @@ const fn capabilities_for(id: ProviderId) -> CapabilitySet {
                 .with(ProviderCapability::Credits)
                 .with(ProviderCapability::CostHistory);
         }
-        ProviderId::Bedrock | ProviderId::Mistral => {
+        ProviderId::Bedrock | ProviderId::Mistral | ProviderId::MiniMax => {
             capabilities = capabilities.with(ProviderCapability::CostHistory);
         }
         _ => {}
