@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -49,15 +50,25 @@ struct AppServerFixture {
     executable: ExecutablePath,
     capture: PathBuf,
     arguments: PathBuf,
+    environment: PathBuf,
     pid: PathBuf,
 }
 
 impl AppServerFixture {
     fn replies(rate: &str, account: &str) -> Self {
+        Self::replies_after("", rate, account)
+    }
+
+    fn environment_replies(rate: &str, account: &str) -> Self {
+        Self::replies_after(CAPTURE_ENVIRONMENT, rate, account)
+    }
+
+    fn replies_after(setup: &str, rate: &str, account: &str) -> Self {
         let rate = shell_quote(rate);
         let account = shell_quote(account);
         Self::script(&format!(
             r#"
+{setup}
 IFS= read -r initialize
 printf '%s\n' "$initialize" >> "$capture"
 printf '%s\n' '{{"id":1,"result":{{}}}}'
@@ -70,7 +81,7 @@ IFS= read -r account
 printf '%s\n' "$account" >> "$capture"
 printf '%s\n' {account}
 while IFS= read -r ignored; do :; done
-"#
+"#,
         ))
     }
 
@@ -122,12 +133,14 @@ sleep 30
         let script = directory.path().join("codex-fixture");
         let capture = directory.path().join("frames.jsonl");
         let arguments = directory.path().join("arguments.txt");
+        let environment = directory.path().join("environment.txt");
         let pid = directory.path().join("pid.txt");
         let source = format!(
             r#"#!/bin/sh
 set -eu
 capture={capture}
 arguments={arguments}
+environment_file={environment}
 pid_file={pid}
 printf '%s\n' "$$" > "$pid_file"
 printf '%s\n' "$#" "$@" > "$arguments"
@@ -141,6 +154,7 @@ printf '%s\n' "$#" "$@" > "$arguments"
 "#,
             capture = shell_quote_path(&capture),
             arguments = shell_quote_path(&arguments),
+            environment = shell_quote_path(&environment),
             pid = shell_quote_path(&pid),
         );
         fs::write(&script, source).expect("write fixture executable");
@@ -155,6 +169,7 @@ printf '%s\n' "$#" "$@" > "$arguments"
             executable,
             capture,
             arguments,
+            environment,
             pid,
         }
     }
@@ -179,6 +194,17 @@ printf '%s\n' "$#" "$@" > "$arguments"
             .collect()
     }
 
+    fn environment(&self) -> BTreeMap<String, String> {
+        fs::read_to_string(&self.environment)
+            .expect("captured environment")
+            .lines()
+            .map(|line| {
+                let (name, value) = line.split_once('=').expect("environment entry");
+                (name.to_owned(), value.to_owned())
+            })
+            .collect()
+    }
+
     fn pid(&self) -> u32 {
         fs::read_to_string(&self.pid)
             .expect("captured pid")
@@ -186,6 +212,86 @@ printf '%s\n' "$#" "$@" > "$arguments"
             .parse()
             .expect("numeric pid")
     }
+}
+
+const CAPTURE_ENVIRONMENT: &str = r#"
+/usr/bin/env > "$environment_file"
+"#;
+
+const ALLOWED_CHILD_ENVIRONMENT: &[&str] = &[
+    "HOME",
+    "PATH",
+    "CODEX_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_DATA_HOME",
+    "XDG_STATE_HOME",
+    "XDG_RUNTIME_DIR",
+    "LANG",
+    "LANGUAGE",
+    "LC_ALL",
+    "LC_ADDRESS",
+    "LC_COLLATE",
+    "LC_CTYPE",
+    "LC_IDENTIFICATION",
+    "LC_MEASUREMENT",
+    "LC_MESSAGES",
+    "LC_MONETARY",
+    "LC_NAME",
+    "LC_NUMERIC",
+    "LC_PAPER",
+    "LC_TELEPHONE",
+    "LC_TIME",
+    "HTTP_PROXY",
+    "http_proxy",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "ALL_PROXY",
+    "all_proxy",
+    "NO_PROXY",
+    "no_proxy",
+    "TMPDIR",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "CURL_CA_BUNDLE",
+    "REQUESTS_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
+    "NIX_SSL_CERT_FILE",
+    "AWS_CA_BUNDLE",
+    "GIT_SSL_CAINFO",
+    "GRPC_DEFAULT_SSL_ROOTS_FILE_PATH",
+];
+
+const FORBIDDEN_CHILD_ENVIRONMENT: &[(&str, &str)] = &[
+    ("OPENAI_API_KEY", "openai-secret-canary"),
+    ("ANTHROPIC_API_KEY", "anthropic-secret-canary"),
+    ("OMARCHY_AI_BAR_SECRET", "application-secret-canary"),
+    ("LD_LIBRARY_PATH", "/tmp/loader-injection-canary"),
+    ("LD_PRELOAD", ""),
+    ("RUST_LOG", "trace"),
+    ("USER", "arbitrary-user-canary"),
+];
+
+fn injected_child_environment() -> (BTreeMap<String, String>, BTreeMap<String, String>) {
+    let mut injected = BTreeMap::new();
+    let mut expected = BTreeMap::new();
+    for (index, name) in ALLOWED_CHILD_ENVIRONMENT.iter().enumerate() {
+        let value = match *name {
+            "HOME" => "/tmp/oab-allowed-home-canary".to_owned(),
+            "PATH" => "/usr/bin:/bin".to_owned(),
+            "LANG" | "LANGUAGE" | "LC_ALL" | "LC_ADDRESS" | "LC_COLLATE" | "LC_CTYPE"
+            | "LC_IDENTIFICATION" | "LC_MEASUREMENT" | "LC_MESSAGES" | "LC_MONETARY"
+            | "LC_NAME" | "LC_NUMERIC" | "LC_PAPER" | "LC_TELEPHONE" | "LC_TIME" => "C".to_owned(),
+            "HTTP_PROXY" => "http://proxy-secret-canary@example.test:8080".to_owned(),
+            _ => format!("/tmp/oab-allowed-{index}"),
+        };
+        injected.insert((*name).to_owned(), value.clone());
+        expected.insert((*name).to_owned(), value);
+    }
+    for (name, value) in FORBIDDEN_CHILD_ENVIRONMENT {
+        injected.insert((*name).to_owned(), (*value).to_owned());
+    }
+    (injected, expected)
 }
 
 fn shell_quote(value: &str) -> String {
@@ -265,6 +371,97 @@ fn rich_account_envelope() -> String {
             "requiresOpenaiAuth": false
         }),
     )
+}
+
+#[tokio::test]
+async fn empty_environment_constructor_does_not_inherit_ambient_values() {
+    let fixture = AppServerFixture::environment_replies(
+        &envelope(2, json!({"rateLimits": {"planType": "plus"}})),
+        &envelope(3, json!({"account": null})),
+    );
+    fixture
+        .client()
+        .fetch(
+            scope("empty-environment"),
+            timestamp(FETCHED_AT),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("app-server result");
+
+    let child_environment = fixture.environment();
+    let mut checked_ambient_values = 0_usize;
+    for name in ["HOME", "USER", "LANG"] {
+        if std::env::var_os(name).is_some() {
+            checked_ambient_values += 1;
+            assert!(
+                !child_environment.contains_key(name),
+                "ambient {name} reached the child"
+            );
+        }
+    }
+    assert!(
+        checked_ambient_values > 0,
+        "fixture requires one conventional ambient variable"
+    );
+    assert_process_gone(fixture.pid()).await;
+}
+
+#[tokio::test]
+async fn injected_environment_passes_only_the_closed_linux_allowlist() {
+    let (injected, expected) = injected_child_environment();
+
+    let fixture = AppServerFixture::environment_replies(
+        &envelope(2, json!({"rateLimits": {"planType": "plus"}})),
+        &envelope(3, json!({"account": null})),
+    );
+    let client = CodexAppServerClient::from_environment(fixture.executable.clone(), &injected)
+        .expect("valid allowlisted environment");
+    let rendered = format!("{client:?}");
+    assert!(!rendered.contains("oab-allowed-home-canary"));
+    assert!(!rendered.contains("proxy-secret-canary"));
+    assert!(!rendered.contains("openai-secret-canary"));
+    assert!(!rendered.contains(fixture.executable.as_path().to_string_lossy().as_ref()));
+
+    client
+        .fetch(
+            scope("selected-environment"),
+            timestamp(FETCHED_AT),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("app-server result");
+    let child_environment = fixture.environment();
+    for (name, expected_value) in expected {
+        assert_eq!(
+            child_environment.get(&name),
+            Some(&expected_value),
+            "allowed environment variable {name}"
+        );
+    }
+    for (name, _) in FORBIDDEN_CHILD_ENVIRONMENT {
+        assert!(
+            !child_environment.contains_key(*name),
+            "forbidden environment variable {name} reached the child"
+        );
+    }
+    assert_process_gone(fixture.pid()).await;
+}
+
+#[test]
+fn invalid_allowed_environment_is_rejected_before_process_launch() {
+    let fixture = AppServerFixture::environment_replies(
+        &envelope(2, json!({"rateLimits": {"planType": "plus"}})),
+        &envelope(3, json!({"account": null})),
+    );
+    for invalid in ["invalid\0value".to_owned(), "x".repeat(64 * 1024 + 1)] {
+        let environment = BTreeMap::from([("HOME".to_owned(), invalid)]);
+        let error =
+            CodexAppServerClient::from_environment(fixture.executable.clone(), &environment)
+                .expect_err("invalid selected value");
+        assert_eq!(error, CodexAppServerError::InvalidConfiguration);
+        assert!(!fixture.pid.exists(), "invalid value must not launch child");
+    }
 }
 
 #[tokio::test]

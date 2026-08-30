@@ -4,6 +4,7 @@
 //! this module. The adapter owns only the fixed, read-only app-server
 //! invocation, its bounded JSON-RPC lifecycle, and response normalization.
 
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fmt::{self, Debug, Formatter};
 use std::str::FromStr;
@@ -35,6 +36,52 @@ const MAX_RECOVERY_JSON_DEPTH: usize = 32;
 const MAX_RECOVERY_JSON_NODES: usize = 8 * 1024;
 const MAX_RECOVERY_STRING_BYTES: usize = 64 * 1024;
 const MAX_NUMERIC_TEXT_BYTES: usize = 128;
+
+// Keep this list closed and explicit. In particular, credentials and dynamic
+// loader controls must never cross from the bar into a provider-owned child.
+const CHILD_ENVIRONMENT_ALLOWLIST: &[&str] = &[
+    "HOME",
+    "PATH",
+    "CODEX_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_DATA_HOME",
+    "XDG_STATE_HOME",
+    "XDG_RUNTIME_DIR",
+    "LANG",
+    "LANGUAGE",
+    "LC_ALL",
+    "LC_ADDRESS",
+    "LC_COLLATE",
+    "LC_CTYPE",
+    "LC_IDENTIFICATION",
+    "LC_MEASUREMENT",
+    "LC_MESSAGES",
+    "LC_MONETARY",
+    "LC_NAME",
+    "LC_NUMERIC",
+    "LC_PAPER",
+    "LC_TELEPHONE",
+    "LC_TIME",
+    "HTTP_PROXY",
+    "http_proxy",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "ALL_PROXY",
+    "all_proxy",
+    "NO_PROXY",
+    "no_proxy",
+    "TMPDIR",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "CURL_CA_BUNDLE",
+    "REQUESTS_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
+    "NIX_SSL_CERT_FILE",
+    "AWS_CA_BUNDLE",
+    "GIT_SSL_CAINFO",
+    "GRPC_DEFAULT_SSL_ROOTS_FILE_PATH",
+];
 
 /// The protocol operation whose deadline elapsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,13 +178,49 @@ impl Debug for CodexAppServerSnapshot {
 /// A client for one already-resolved Codex executable.
 pub struct CodexAppServerClient {
     executable: ExecutablePath,
+    environment: Vec<(String, String)>,
 }
 
 impl CodexAppServerClient {
-    /// Creates the protocol adapter without performing executable discovery.
+    /// Creates the protocol adapter with an empty child environment.
+    ///
+    /// Executable discovery and any environment selection remain caller-owned.
     #[must_use]
     pub const fn new(executable: ExecutablePath) -> Self {
-        Self { executable }
+        Self {
+            executable,
+            environment: Vec::new(),
+        }
+    }
+
+    /// Creates the protocol adapter from a deterministic, closed environment allowlist.
+    ///
+    /// The selected values are validated using the same hard bounds as the
+    /// child transport. API keys, unrelated application settings, dynamic
+    /// loader variables, and arbitrary names are ignored.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CodexAppServerError::InvalidConfiguration`] when an allowed
+    /// value violates the child transport's fixed bounds.
+    pub fn from_environment(
+        executable: ExecutablePath,
+        environment: &BTreeMap<String, String>,
+    ) -> Result<Self, CodexAppServerError> {
+        let selected = CHILD_ENVIRONMENT_ALLOWLIST
+            .iter()
+            .filter_map(|name| {
+                environment
+                    .get(*name)
+                    .map(|value| ((*name).to_owned(), value.clone()))
+            })
+            .collect();
+        let client = Self {
+            executable,
+            environment: selected,
+        };
+        client.child_request()?;
+        Ok(client)
     }
 
     /// Fetches one account-scoped app-server snapshot.
@@ -158,14 +241,7 @@ impl CodexAppServerClient {
         if scope.provider() != ProviderId::Codex {
             return Err(CodexAppServerError::InvalidConfiguration);
         }
-        let request = JsonRpcChildRequest::new(
-            self.executable.clone(),
-            fixed_arguments(),
-            JsonRpcVersion::Omitted,
-            MAX_FRAME_BYTES,
-            MAX_STDERR_BYTES,
-        )
-        .map_err(|error| map_child_error(error, CodexAppServerStage::Initialize))?;
+        let request = self.child_request()?;
         let mut child = request
             .spawn(cancellation)
             .await
@@ -174,6 +250,24 @@ impl CodexAppServerClient {
         child.shutdown().await;
         result
     }
+
+    fn child_request(&self) -> Result<JsonRpcChildRequest, CodexAppServerError> {
+        let mut request = JsonRpcChildRequest::new(
+            self.executable.clone(),
+            fixed_arguments(),
+            JsonRpcVersion::Omitted,
+            MAX_FRAME_BYTES,
+            MAX_STDERR_BYTES,
+        )
+        .map_err(|_| CodexAppServerError::InvalidConfiguration)?
+        .with_cleared_environment();
+        for (name, value) in &self.environment {
+            request = request
+                .with_environment(name.as_str(), value.as_str())
+                .map_err(|_| CodexAppServerError::InvalidConfiguration)?;
+        }
+        Ok(request)
+    }
 }
 
 impl Debug for CodexAppServerClient {
@@ -181,6 +275,7 @@ impl Debug for CodexAppServerClient {
         formatter
             .debug_struct("CodexAppServerClient")
             .field("executable", &"<redacted>")
+            .field("environment_entry_count", &self.environment.len())
             .finish()
     }
 }
