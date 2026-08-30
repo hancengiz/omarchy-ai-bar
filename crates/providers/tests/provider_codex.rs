@@ -337,6 +337,18 @@ fn malformed_missing_and_bounded_documents_fail_closed() {
             .expect_err("wrong OpenCode type"),
         CodexCredentialError::MissingTokens
     );
+
+    let extreme_expiry = br#"{
+        "openai": {
+            "type": "oauth",
+            "access": "access",
+            "refresh": "refresh",
+            "expires": 79228162514264337593543950335
+        }
+    }"#;
+    let bearer = parse_opencode_oauth(extreme_expiry)
+        .expect("an overflowing optional expiry must not suppress valid credentials");
+    assert_eq!(bearer.expires_at(), None);
 }
 
 #[test]

@@ -854,7 +854,8 @@ fn parse_epoch_milliseconds(value: Option<&Value>) -> Option<Timestamp> {
     if milliseconds.is_sign_negative() {
         return None;
     }
-    let nanoseconds = (milliseconds * Decimal::from(1_000_000_u64))
+    let nanoseconds = milliseconds
+        .checked_mul(Decimal::from(1_000_000_u64))?
         .trunc()
         .to_i128()?;
     let instant = OffsetDateTime::from_unix_timestamp_nanos(nanoseconds).ok()?;
