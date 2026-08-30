@@ -257,7 +257,11 @@ const fn sources_for(id: ProviderId) -> SourceSet {
         Id::AlibabaTokenPlan => SourceSet::one(Source::ManualCookie)
             .with(Source::BrowserSession)
             .with(Source::Cli),
-        Id::Mimo | Id::Grok => SourceSet::one(Source::ManualCookie)
+        Id::Mimo => SourceSet::one(Source::ManualCookie)
+            .with(Source::BrowserSession)
+            .with(Source::LocalData),
+        Id::Grok => SourceSet::one(Source::Cli)
+            .with(Source::ManualCookie)
             .with(Source::BrowserSession)
             .with(Source::LocalData),
         Id::Sakana | Id::StepFun => SourceSet::one(Source::ManualCookie),

@@ -5,14 +5,26 @@ use std::net::Shutdown;
 use std::path::Path;
 use std::sync::Arc;
 
+use oab_domain::{AccountScope, SurfaceSnapshotEnvelope};
+use oab_ipc::codec::{JsonLineDecoder, encode_json_line};
+use oab_ipc::protocol::{
+    AcceptedClientFrame, ActionProgressState, Capability, CapabilitySet, ClientMessage,
+    RuntimeAction, Sequence, ServerHandshakeContext, ServerMessage,
+};
 use oab_ipc::socket::{DisplaySocket, DisplaySocketError, VerifiedDisplayStream};
-use oab_runtime::actor::{RuntimeActor, RuntimeBuildError, RuntimeConfig, RuntimeJoinError};
+use oab_runtime::actor::{
+    RuntimeActor, RuntimeBuildError, RuntimeConfig, RuntimeHandle, RuntimeJoinError,
+};
+use oab_runtime::command::RefreshTrigger;
 use oab_runtime::scheduler::{Clock, SystemClock};
 use thiserror::Error;
 use tokio::io::unix::AsyncFd;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::UnixStream;
 use tokio::runtime::Builder;
 use tokio::signal::unix::{SignalKind, signal};
 
+use crate::provider_bootstrap::ProductionProviders;
 use crate::single_instance::{
     ControlAction, ControlRequest, ControlResponse, SingleInstanceError, configure_stream,
     read_frame, write_frame,
@@ -35,29 +47,47 @@ pub(crate) enum DaemonError {
     StateJoin(#[source] RuntimeJoinError),
     #[error("the application state actor stopped after an internal fault")]
     StateFault,
+    #[error("could not initialize the display protocol")]
+    DisplayProtocol,
 }
 
 /// Runs the primary daemon until SIGTERM or SIGINT.
 pub(crate) fn run(
     control_socket: DisplaySocket,
     display_socket_path: &Path,
+    providers: ProductionProviders,
 ) -> Result<(), DaemonError> {
     let display_socket = DisplaySocket::bind(display_socket_path).map_err(DaemonError::Listener)?;
     let runtime = Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(DaemonError::Runtime)?;
-    runtime.block_on(run_loop(control_socket, display_socket))
+    runtime.block_on(run_loop(control_socket, display_socket, providers))
 }
 
 async fn run_loop(
     control_socket: DisplaySocket,
     display_socket: DisplaySocket,
+    providers: ProductionProviders,
 ) -> Result<(), DaemonError> {
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
-    let (actor, _state) =
-        RuntimeActor::new(RuntimeConfig::default(), clock, []).map_err(DaemonError::StateBuild)?;
+    let scopes = Arc::new(providers.scopes);
+    let (actor, state) =
+        RuntimeActor::new(RuntimeConfig::default(), clock, providers.registrations)
+            .map_err(DaemonError::StateBuild)?;
     let state_task = actor.spawn();
+    for scope in scopes.iter().cloned() {
+        let _admission = state.refresh(scope, RefreshTrigger::Manual).await;
+    }
+    let capabilities = CapabilitySet::new([
+        Capability::DisplaySnapshots,
+        Capability::RuntimeActions,
+        Capability::ActionProgress,
+    ])
+    .map_err(|_| DaemonError::DisplayProtocol)?;
+    let handshake = Arc::new(
+        ServerHandshakeContext::new(capabilities).map_err(|_| DaemonError::DisplayProtocol)?,
+    );
     control_socket
         .set_nonblocking(true)
         .map_err(DaemonError::Listener)?;
@@ -88,7 +118,12 @@ async fn run_loop(
             readiness = display_socket.readable() => {
                 match readiness {
                     Ok(mut readiness) => {
-                        let result = reject_unwired_display_clients(display_socket.get_ref());
+                        let result = accept_ready_display_clients(
+                            display_socket.get_ref(),
+                            &state,
+                            &handshake,
+                            &scopes,
+                        );
                         readiness.clear_ready();
                         if let Err(error) = result {
                             break Err(error);
@@ -126,11 +161,24 @@ fn accept_ready_control_clients(socket: &DisplaySocket) -> Result<(), DaemonErro
     Ok(())
 }
 
-fn reject_unwired_display_clients(socket: &DisplaySocket) -> Result<(), DaemonError> {
+fn accept_ready_display_clients(
+    socket: &DisplaySocket,
+    state: &RuntimeHandle,
+    handshake: &Arc<ServerHandshakeContext>,
+    scopes: &Arc<Vec<AccountScope>>,
+) -> Result<(), DaemonError> {
     for _ in 0..MAX_ACCEPT_BATCH {
         match socket.accept_verified() {
-            Ok(stream) => {
-                let _ignored = stream.stream().shutdown(Shutdown::Both);
+            Ok(verified) => {
+                let stream = verified.into_stream();
+                stream.set_nonblocking(true).map_err(DaemonError::Runtime)?;
+                let stream = UnixStream::from_std(stream).map_err(DaemonError::Runtime)?;
+                let state = state.clone();
+                let handshake = Arc::clone(handshake);
+                let scopes = Arc::clone(scopes);
+                tokio::spawn(async move {
+                    let _result = serve_display_client(stream, state, handshake, scopes).await;
+                });
             }
             Err(DisplaySocketError::Operation { source, .. })
                 if source.kind() == io::ErrorKind::WouldBlock =>
@@ -142,6 +190,131 @@ fn reject_unwired_display_clients(socket: &DisplaySocket) -> Result<(), DaemonEr
         }
     }
     Ok(())
+}
+
+async fn serve_display_client(
+    stream: UnixStream,
+    state: RuntimeHandle,
+    handshake: Arc<ServerHandshakeContext>,
+    scopes: Arc<Vec<AccountScope>>,
+) -> io::Result<()> {
+    let (mut reader, mut writer) = stream.into_split();
+    let mut snapshots = state.subscribe();
+    let mut guard = handshake.connection();
+    let mut decoder = JsonLineDecoder::<ClientMessage>::new();
+    let mut chunk = [0_u8; 8 * 1024];
+
+    loop {
+        tokio::select! {
+            read = reader.read(&mut chunk) => {
+                let read = read?;
+                if read == 0 {
+                    decoder.finish().map_err(invalid_wire)?;
+                    return Ok(());
+                }
+                let messages = decoder.feed(&chunk[..read]).map_err(invalid_wire)?;
+                for message in messages {
+                    match guard.accept(&message).map_err(invalid_wire)? {
+                        AcceptedClientFrame::Hello(hello) => {
+                            write_message(&mut writer, &ServerMessage::hello(hello)).await?;
+                            let publication = snapshots.borrow().clone();
+                            write_snapshot(&mut writer, publication.as_ref()).await?;
+                        }
+                        AcceptedClientFrame::Action { request_id, action, .. } => {
+                            run_action(&mut writer, &state, scopes.as_slice(), request_id, action).await?;
+                        }
+                        AcceptedClientFrame::SnapshotAck { .. } => {}
+                    }
+                }
+            }
+            changed = snapshots.changed(), if guard.is_complete() => {
+                changed.map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "runtime stopped"))?;
+                let publication = snapshots.borrow().clone();
+                write_snapshot(&mut writer, publication.as_ref()).await?;
+            }
+        }
+    }
+}
+
+async fn run_action(
+    writer: &mut tokio::net::unix::OwnedWriteHalf,
+    state: &RuntimeHandle,
+    scopes: &[AccountScope],
+    request_id: oab_ipc::protocol::RequestId,
+    action: &RuntimeAction,
+) -> io::Result<()> {
+    write_message(
+        writer,
+        &ServerMessage::ActionProgress {
+            request_id,
+            state: ActionProgressState::Running,
+        },
+    )
+    .await?;
+
+    let selected = match action {
+        RuntimeAction::RefreshAll {} => scopes.iter().collect::<Vec<_>>(),
+        RuntimeAction::RefreshProvider { provider } => scopes
+            .iter()
+            .filter(|scope| scope.provider() == *provider)
+            .collect(),
+        _ => Vec::new(),
+    };
+    let popup = match action {
+        RuntimeAction::OpenPanel {} | RuntimeAction::TogglePanel {} => Some(true),
+        RuntimeAction::ClosePanel {} => Some(false),
+        _ => None,
+    };
+    let refresh_supported = matches!(
+        action,
+        RuntimeAction::RefreshAll {} | RuntimeAction::RefreshProvider { .. }
+    );
+    let mut succeeded = refresh_supported && !selected.is_empty();
+    for scope in selected {
+        if state
+            .refresh(scope.clone(), RefreshTrigger::Manual)
+            .await
+            .is_err()
+        {
+            succeeded = false;
+        }
+    }
+    if let Some(open) = popup {
+        succeeded = state.set_popup_open(open).await.is_ok();
+    }
+    write_message(
+        writer,
+        &ServerMessage::ActionProgress {
+            request_id,
+            state: if succeeded {
+                ActionProgressState::Completed
+            } else {
+                ActionProgressState::Failed
+            },
+        },
+    )
+    .await
+}
+
+async fn write_snapshot(
+    writer: &mut tokio::net::unix::OwnedWriteHalf,
+    publication: &oab_runtime::snapshot_store::PublishedSnapshot,
+) -> io::Result<()> {
+    let sequence = Sequence::new(publication.sequence()).map_err(invalid_wire)?;
+    let snapshot = SurfaceSnapshotEnvelope::Trusted(publication.envelope().private_view());
+    write_message(writer, &ServerMessage::Snapshot { sequence, snapshot }).await
+}
+
+async fn write_message(
+    writer: &mut tokio::net::unix::OwnedWriteHalf,
+    message: &ServerMessage<'_>,
+) -> io::Result<()> {
+    let encoded = encode_json_line(message).map_err(invalid_wire)?;
+    writer.write_all(&encoded).await
+}
+
+fn invalid_wire(error: impl std::fmt::Display) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, error.to_string())
 }
 
 fn is_peer_rejection(error: &DisplaySocketError) -> bool {

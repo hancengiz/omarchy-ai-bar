@@ -24,6 +24,7 @@ use serde_json::{Number, Value};
 
 mod daemon;
 mod hyprland_events;
+mod provider_bootstrap;
 pub mod provider_refresh;
 mod single_instance;
 mod wiring;

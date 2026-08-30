@@ -39,6 +39,7 @@ Item {
     readonly property var effectiveSnapshot: hasRetainedSnapshot ? protocolState.snapshot : syntheticSnapshot
     readonly property var currentProviderSnapshot: selectProviderSnapshot(effectiveSnapshot)
     readonly property var displaySample: sampleFrom(currentProviderSnapshot)
+    readonly property var providerRows: rowsFrom(effectiveSnapshot)
     readonly property string providerId: displaySample && displaySample.scope ? String(displaySample.scope.provider || "ai") : "ai"
     readonly property string providerLabel: labelForProvider(providerId)
     readonly property real usedPercent: percentFrom(displaySample)
@@ -157,6 +158,26 @@ Item {
         return providerSnapshot && providerSnapshot.state === "ready" ? providerSnapshot.last_known_good : null;
     }
 
+    function rowsFrom(envelope) {
+        if (!envelope || !Array.isArray(envelope.snapshots))
+            return [];
+        return envelope.snapshots.map(function (snapshot) {
+            var sample = sampleFrom(snapshot);
+            var provider = snapshot && snapshot.scope ? String(snapshot.scope.provider || "ai") : (sample && sample.scope ? String(sample.scope.provider || "ai") : "ai");
+            var primary = sample && sample.primary ? sample.primary : null;
+            var errorKind = snapshot && snapshot.error && snapshot.error.kind ? String(snapshot.error.kind) : "";
+            var status = sample ? "Ready" : (errorKind === "missing_credential" ? "Sign in or configure a key" : (errorKind !== "" ? errorKind.replace(/_/g, " ") : "Loading"));
+            return {
+                provider: provider,
+                label: labelForProvider(provider),
+                percent: sample ? percentFrom(sample) : 0,
+                ready: sample !== null,
+                status: status,
+                reset: primary && primary.reset_description ? String(primary.reset_description) : ""
+            };
+        });
+    }
+
     function percentFrom(sample) {
         var usage = sample && sample.primary ? sample.primary.usage : null;
         if (!usage || usage.state !== "known" || !isFinite(Number(usage.used_percent)))
@@ -170,7 +191,9 @@ Item {
             claude: "Claude",
             gemini: "Gemini",
             copilot: "Copilot",
-            cursor: "Cursor"
+            cursor: "Cursor",
+            grok: "Grok",
+            zai: "z.ai Coding Plan"
         };
         return labels[provider] || String(provider || "AI");
     }

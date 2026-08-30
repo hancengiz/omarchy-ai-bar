@@ -192,7 +192,14 @@ fn run_daemon_or_forward() -> AppExitCode {
     match acquire_or_forward(&paths.socket_path()) {
         Ok(InstanceRole::Primary(socket)) => {
             let display_socket = paths.runtime_dir().join("display.sock");
-            match daemon::run(socket, &display_socket) {
+            let providers = match crate::provider_bootstrap::discover() {
+                Ok(providers) => providers,
+                Err(_error) => {
+                    eprintln!("{INTERNAL_MESSAGE}");
+                    return AppExitCode::Internal;
+                }
+            };
+            match daemon::run(socket, &display_socket, providers) {
                 Ok(()) => AppExitCode::Success,
                 Err(_error) => {
                     eprintln!("{INTERNAL_MESSAGE}");

@@ -24,6 +24,51 @@ pub trait BoundProviderAdapter: ProviderAdapter {
     fn bound_source(&self) -> ProviderSource;
 }
 
+/// Gives an already configured native adapter its exact runtime binding.
+///
+/// The wrapper is intentionally small: provider construction still owns all
+/// credential, endpoint, and account validation, while this type prevents the
+/// runtime scope/source from drifting afterward.
+pub struct ConfiguredProvider<A> {
+    adapter: A,
+    scope: AccountScope,
+    source: ProviderSource,
+}
+
+impl<A> ConfiguredProvider<A> {
+    #[must_use]
+    pub const fn new(adapter: A, scope: AccountScope, source: ProviderSource) -> Self {
+        Self {
+            adapter,
+            scope,
+            source,
+        }
+    }
+}
+
+impl<A: ProviderAdapter> ProviderAdapter for ConfiguredProvider<A> {
+    fn descriptor(&self) -> &'static oab_providers::descriptor::ProviderDescriptor {
+        self.adapter.descriptor()
+    }
+
+    fn fetch<'a>(
+        &'a self,
+        context: &'a ProviderContext,
+    ) -> oab_providers::context::ProviderFuture<'a> {
+        self.adapter.fetch(context)
+    }
+}
+
+impl<A: ProviderAdapter> BoundProviderAdapter for ConfiguredProvider<A> {
+    fn bound_scope(&self) -> &AccountScope {
+        &self.scope
+    }
+
+    fn bound_source(&self) -> ProviderSource {
+        self.source
+    }
+}
+
 /// Stable failure while binding one provider adapter to an exact runtime scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum ProviderRefreshBuildError {

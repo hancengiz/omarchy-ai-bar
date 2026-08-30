@@ -13,6 +13,15 @@ systemctl --user enable --now omarchy-ai-bar.service
 Most provider modes need no extra executable. Install optional helpers only for
 the credential flow you use:
 
+- Codex supports its native credential files and HTTP flow. The `codex`
+  executable enables app-server fallback.
+- Claude reads Claude Code's Linux credential file and calls the OAuth usage
+  endpoint natively; the CLI does not need to stay running.
+- Grok usage uses the `grok agent stdio` billing RPC and therefore requires the
+  Grok Build CLI plus `grok login`.
+- z.ai Coding Plan is native and uses `Z_AI_API_KEY` (or the supported
+  BigModel/GLM credential variables); no helper executable is required.
+
 - `aws-cli-v2` enables AWS profiles, SSO, assume-role, and
   `credential_process` authentication for Bedrock. Static AWS credentials do
   not require it.

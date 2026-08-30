@@ -135,54 +135,62 @@ Panel {
 
                 Column {
                     width: parent.width
-                    spacing: Style.space(8)
+                    spacing: Style.space(10)
 
-                    Row {
-                        width: parent.width
+                    Repeater {
+                        model: root.service ? root.service.providerRows : []
 
-                        Text {
-                            text: "Current window"
-                            color: root.bar ? root.bar.foreground : Color.foreground
-                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                            font.pixelSize: Style.font.body
+                        delegate: Column {
+                            required property var modelData
+                            width: parent.width
+                            spacing: Style.space(5)
+
+                            Row {
+                                width: parent.width
+
+                                Text {
+                                    width: parent.width - providerUsage.width
+                                    text: modelData.label
+                                    color: root.bar ? root.bar.foreground : Color.foreground
+                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                    font.pixelSize: Style.font.body
+                                    font.bold: true
+                                    elide: Text.ElideRight
+                                }
+
+                                Text {
+                                    id: providerUsage
+                                    text: modelData.ready ? Math.round(modelData.percent) + "% used" : modelData.status
+                                    color: modelData.ready ? (root.bar ? root.bar.foreground : Color.foreground) : Color.muted
+                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                    font.pixelSize: Style.font.bodySmall
+                                }
+                            }
+
+                            Rectangle {
+                                width: parent.width
+                                height: Style.space(7)
+                                radius: height / 2
+                                color: Style.normalFillFor(root.bar ? root.bar.foreground : Color.foreground, Color.accent)
+
+                                Rectangle {
+                                    width: parent.width * modelData.percent / 100
+                                    height: parent.height
+                                    radius: parent.radius
+                                    color: modelData.percent >= 90 ? Color.urgent : Color.accent
+                                }
+                            }
+
+                            Text {
+                                width: parent.width
+                                visible: modelData.reset !== ""
+                                text: modelData.reset
+                                color: Color.muted
+                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                font.pixelSize: Style.font.caption
+                                elide: Text.ElideRight
+                            }
                         }
-
-                        Item {
-                            width: parent.width - usageLabel.width - Style.space(120)
-                            height: 1
-                        }
-
-                        Text {
-                            id: usageLabel
-                            text: Math.round(root.usagePercent) + "% used"
-                            color: root.bar ? root.bar.foreground : Color.foreground
-                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                            font.pixelSize: Style.font.body
-                            font.bold: true
-                        }
-                    }
-
-                    Rectangle {
-                        width: parent.width
-                        height: Style.space(8)
-                        radius: height / 2
-                        color: Style.normalFillFor(root.bar ? root.bar.foreground : Color.foreground, Color.accent)
-
-                        Rectangle {
-                            width: parent.width * root.usagePercent / 100
-                            height: parent.height
-                            radius: parent.radius
-                            color: root.usagePercent >= 90 ? Color.urgent : Color.accent
-                        }
-                    }
-
-                    Text {
-                        width: parent.width
-                        text: root.resetText
-                        color: Color.muted
-                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                        font.pixelSize: Style.font.bodySmall
-                        elide: Text.ElideRight
                     }
                 }
 
