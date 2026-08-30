@@ -1,0 +1,1 @@
+;0x00000173;((self.$R=self.$R||{})["server-fn:test"]=[],($R=>$R[0]={renewAt:"2026-09-29T12:00:00Z",rollingUsage:$R[1]={status:"ok",resetInSec:5944,usagePercent:17},weeklyUsage:$R[2]={status:"ok",resetInSec:278201,usagePercent:75}})($R["server-fn:test"]))

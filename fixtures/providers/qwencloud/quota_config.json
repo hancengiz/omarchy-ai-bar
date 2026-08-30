@@ -1,0 +1,16 @@
+{
+  "data": {
+    "lite": {
+      "five_hour": 1000,
+      "weekly": 10000
+    },
+    "standard": {
+      "five_hour": 5000,
+      "weekly": 50000
+    },
+    "pro": {
+      "five_hour": 10000,
+      "weekly": 100000
+    }
+  }
+}

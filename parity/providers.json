@@ -165,18 +165,27 @@
         "Sources/CodexBarCore/Providers/ProviderManifest.swift"
       ],
       "cells": {
-        "authentication": "planned",
-        "usage_resets": "planned",
-        "costs_history": "planned",
-        "sessions": "planned",
-        "browser": "planned",
-        "status_errors": "planned",
-        "refresh": "planned",
-        "cli_server": "planned",
+        "authentication": "passing",
+        "usage_resets": "passing",
+        "costs_history": "not-applicable",
+        "sessions": "not-applicable",
+        "browser": "passing",
+        "status_errors": "passing",
+        "refresh": "passing",
+        "cli_server": "in-progress",
         "qml_ui": "planned"
       },
-      "status": "planned",
-      "tests": []
+      "status": "in-progress",
+      "tests": [
+        "crates/providers/tests/browser_cookie.rs",
+        "crates/providers/tests/cookie.rs",
+        "crates/providers/tests/manual_capture.rs",
+        "crates/providers/tests/provider_opencode.rs"
+      ],
+      "not_applicable_reasons": {
+        "costs_history": "The pinned baseline exposes current monthly OpenCode pay-as-you-go spend and balance but no historical cost series.",
+        "sessions": "The pinned baseline has no OpenCode agent-session history source."
+      }
     },
     {
       "id": "opencodego",
@@ -255,18 +264,28 @@
         "Sources/CodexBarCore/Providers/ProviderManifest.swift"
       ],
       "cells": {
-        "authentication": "planned",
-        "usage_resets": "planned",
-        "costs_history": "planned",
-        "sessions": "planned",
-        "browser": "planned",
-        "status_errors": "planned",
-        "refresh": "planned",
-        "cli_server": "planned",
+        "authentication": "passing",
+        "usage_resets": "passing",
+        "costs_history": "not-applicable",
+        "sessions": "not-applicable",
+        "browser": "passing",
+        "status_errors": "passing",
+        "refresh": "passing",
+        "cli_server": "in-progress",
         "qml_ui": "planned"
       },
-      "status": "planned",
-      "tests": []
+      "status": "in-progress",
+      "tests": [
+        "crates/providers/tests/browser_cookie.rs",
+        "crates/providers/tests/cookie.rs",
+        "crates/providers/tests/http_transport.rs",
+        "crates/providers/tests/manual_capture.rs",
+        "crates/providers/tests/provider_qwencloud.rs"
+      ],
+      "not_applicable_reasons": {
+        "costs_history": "The pinned baseline exposes current Qwen Cloud token-plan quota windows but no historical cost ledger.",
+        "sessions": "The pinned baseline has no Qwen Cloud agent-session history source."
+      }
     },
     {
       "id": "factory",

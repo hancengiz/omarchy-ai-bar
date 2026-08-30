@@ -1,0 +1,16 @@
+{
+  "requestId": "00000000-0000-4000-8000-000000000001",
+  "code": "200",
+  "data": {
+    "Data": {
+      "TotalSurplusValue": "0",
+      "TotalCount": 0,
+      "TotalValue": "0",
+      "ProductCode": "sfm_tokenplansolo_public_intl"
+    },
+    "Code": "Success",
+    "Success": true
+  },
+  "httpStatusCode": "200",
+  "successResponse": true
+}
