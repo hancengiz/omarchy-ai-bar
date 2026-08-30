@@ -12,6 +12,7 @@ pub mod clawrouter;
 pub mod clinepass;
 pub mod codebuff;
 pub mod codex;
+pub mod codex_files;
 pub mod commandcode;
 pub mod copilot;
 pub mod crof;
