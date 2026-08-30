@@ -1354,21 +1354,31 @@
       "id": "clawrouter",
       "baseline_sources": [
         "Sources/CodexBarCore/Providers/ClawRouter/",
+        "Sources/CodexBarCore/Resources/Plugins/clawrouter.js",
         "Sources/CodexBarCore/Providers/ProviderManifest.swift"
       ],
       "cells": {
-        "authentication": "planned",
-        "usage_resets": "planned",
-        "costs_history": "planned",
-        "sessions": "planned",
-        "browser": "planned",
-        "status_errors": "planned",
-        "refresh": "planned",
-        "cli_server": "planned",
+        "authentication": "passing",
+        "usage_resets": "passing",
+        "costs_history": "not-applicable",
+        "sessions": "not-applicable",
+        "browser": "not-applicable",
+        "status_errors": "passing",
+        "refresh": "passing",
+        "cli_server": "in-progress",
         "qml_ui": "planned"
       },
-      "status": "planned",
-      "tests": []
+      "status": "in-progress",
+      "tests": [
+        "crates/providers/tests/configured_endpoint.rs",
+        "crates/providers/tests/fixed_api.rs",
+        "crates/providers/tests/provider_clawrouter.rs"
+      ],
+      "not_applicable_reasons": {
+        "costs_history": "The pinned bundled plugin exposes current-month aggregate spend and routed-provider totals but no ClawRouter cost-history series.",
+        "sessions": "The pinned baseline has no ClawRouter agent-session source.",
+        "browser": "The pinned baseline uses an explicit bearer policy key and configured HTTPS endpoint only."
+      }
     },
     {
       "id": "longcat",
