@@ -5,11 +5,11 @@ use std::path::{Path, PathBuf};
 
 use oab_domain::Timestamp;
 use oab_providers::providers::codex::{
-    CodexBearerKind, CodexCredentialError, CodexCredentialSource, CodexPatHomeScope,
+    CodexBearerKind, CodexCredentialError, CodexCredentialSource, CodexPatHomeScope, CodexPatRoot,
 };
 use oab_providers::providers::codex_files::{
-    CodexCredentialLoadError, CodexCredentialPaths, load_bearer_for_usage, load_native_auth_file,
-    load_pat_for_scope,
+    CodexCredentialLoadError, CodexCredentialPaths, load_bearer_bundle_for_usage,
+    load_bearer_for_usage, load_native_auth_file, load_pat_bundle_for_scope, load_pat_for_scope,
 };
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
@@ -37,6 +37,16 @@ impl Fixture {
         let root = self.path(relative_root);
         fs::create_dir_all(&root).expect("credential root");
         fs::write(root.join("auth.json"), contents).expect("auth fixture");
+    }
+
+    fn write_config(&self, relative_root: impl AsRef<Path>, contents: &str) {
+        self.write_config_bytes(relative_root, contents.as_bytes());
+    }
+
+    fn write_config_bytes(&self, relative_root: impl AsRef<Path>, contents: &[u8]) {
+        let root = self.path(relative_root);
+        fs::create_dir_all(&root).expect("config root");
+        fs::write(root.join("config.toml"), contents).expect("config fixture");
     }
 
     fn paths(
@@ -288,6 +298,183 @@ fn pat_scope_uses_profile_only_when_usable_and_managed_scopes_stay_ambient() {
 }
 
 #[test]
+fn pat_bundle_binds_config_to_the_winning_pat_authority() {
+    let fixture = Fixture::new();
+    fixture.write_auth(".codex", &native_auth("ambient-pat", "ambient-oauth"));
+    fixture.write_config(".codex", "authority = \"ambient-config-canary\"\n");
+    fixture.write_auth(
+        "profiles/work",
+        &native_auth("profile-pat", "profile-oauth"),
+    );
+    fixture.write_config("profiles/work", "authority = \"profile-config-canary\"\n");
+    let profile_root = fixture.path("profiles/work");
+    let paths = fixture.paths(Some(profile_root.as_os_str()), None);
+    let cancellation = CancellationToken::new();
+
+    let profile = load_pat_bundle_for_scope(&paths, CodexPatHomeScope::Profile, &cancellation)
+        .expect("profile PAT bundle");
+    assert_eq!(profile.credentials().token(), "profile-pat");
+    assert_eq!(profile.root(), CodexPatRoot::Profile);
+    assert_eq!(
+        profile.config_toml(),
+        Some("authority = \"profile-config-canary\"\n")
+    );
+
+    let managed = load_pat_bundle_for_scope(&paths, CodexPatHomeScope::Managed, &cancellation)
+        .expect("managed PAT bundle");
+    assert_eq!(managed.credentials().token(), "ambient-pat");
+    assert_eq!(managed.root(), CodexPatRoot::Ambient);
+    assert_eq!(
+        managed.config_toml(),
+        Some("authority = \"ambient-config-canary\"\n")
+    );
+
+    fixture.write_auth(
+        "profiles/work",
+        r#"{"tokens":{"access_token":"oauth","refresh_token":"refresh"}}"#,
+    );
+    let fallback = load_pat_bundle_for_scope(&paths, CodexPatHomeScope::Profile, &cancellation)
+        .expect("ambient fallback bundle");
+    assert_eq!(fallback.credentials().token(), "ambient-pat");
+    assert_eq!(fallback.root(), CodexPatRoot::Ambient);
+    assert_eq!(
+        fallback.config_toml(),
+        Some("authority = \"ambient-config-canary\"\n")
+    );
+}
+
+#[test]
+fn bearer_bundle_uses_native_config_and_external_sources_never_supply_it() {
+    let fixture = Fixture::new();
+    fixture.write_auth(".codex", &native_auth("ambient-pat", "ambient-oauth"));
+    fixture.write_config(".codex", "authority = \"ambient-config-canary\"\n");
+    fixture.write_auth(
+        "profiles/work",
+        &native_auth("profile-pat", "profile-oauth"),
+    );
+    fixture.write_config("profiles/work", "authority = \"profile-config-canary\"\n");
+    let profile_root = fixture.path("profiles/work");
+    let explicit = fixture.paths(Some(profile_root.as_os_str()), None);
+    let cancellation = CancellationToken::new();
+
+    let native = load_bearer_bundle_for_usage(&explicit, true, &cancellation)
+        .expect("profile bearer bundle");
+    assert_eq!(native.credentials().access_token(), "profile-oauth");
+    assert_eq!(
+        native.config_toml(),
+        Some("authority = \"profile-config-canary\"\n")
+    );
+
+    fs::remove_file(fixture.path(".codex/auth.json")).expect("remove ambient auth");
+    fixture.write_auth(
+        ".config/codex",
+        r#"{"tokens":{"access_token":"legacy-oauth","refresh_token":"legacy-refresh"},"last_refresh":"2000-01-01T00:00:00Z"}"#,
+    );
+    fixture.write_config(
+        ".config/codex",
+        "authority = \"external-config-must-not-win\"\n",
+    );
+    let ambient = fixture.paths(None, None);
+    let external = load_bearer_bundle_for_usage(&ambient, true, &cancellation)
+        .expect("external bearer with ambient config");
+    assert_eq!(external.credentials().access_token(), "legacy-oauth");
+    assert_eq!(
+        external.credentials().source(),
+        CodexCredentialSource::Legacy
+    );
+    assert_eq!(
+        external.config_toml(),
+        Some("authority = \"ambient-config-canary\"\n")
+    );
+}
+
+#[test]
+fn missing_config_is_an_empty_optional_default_for_each_bundle() {
+    let fixture = Fixture::new();
+    fixture.write_auth(".codex", &native_auth("ambient-pat", "ambient-oauth"));
+    let paths = fixture.paths(None, None);
+    let cancellation = CancellationToken::new();
+
+    let pat = load_pat_bundle_for_scope(&paths, CodexPatHomeScope::Ambient, &cancellation)
+        .expect("PAT without config");
+    assert_eq!(pat.config_toml(), None);
+    let bearer =
+        load_bearer_bundle_for_usage(&paths, false, &cancellation).expect("bearer without config");
+    assert_eq!(bearer.config_toml(), None);
+
+    fs::remove_dir_all(fixture.path(".codex")).expect("remove native root");
+    fixture.write_auth(
+        ".config/codex",
+        r#"{"tokens":{"access_token":"legacy-oauth","refresh_token":"legacy-refresh"},"last_refresh":"2000-01-01T00:00:00Z"}"#,
+    );
+    let external = load_bearer_bundle_for_usage(&paths, true, &cancellation)
+        .expect("external bearer without native root");
+    assert_eq!(external.config_toml(), None);
+}
+
+#[test]
+fn selected_config_fails_closed_when_non_utf8_unsafe_or_oversized() {
+    let fixture = Fixture::new();
+    fixture.write_auth(".codex", &native_auth("ambient-pat", "ambient-oauth"));
+    let paths = fixture.paths(None, None);
+    let cancellation = CancellationToken::new();
+
+    fixture.write_config_bytes(".codex", &[0xff, 0xfe]);
+    let invalid_utf8 = load_pat_bundle_for_scope(&paths, CodexPatHomeScope::Ambient, &cancellation)
+        .expect_err("non-UTF-8 config");
+    assert_eq!(
+        invalid_utf8,
+        CodexCredentialLoadError::Credential(CodexCredentialError::Unreadable)
+    );
+    let diagnostics = format!("{paths:?} {invalid_utf8:?}");
+    assert!(!diagnostics.contains(fixture.home().to_string_lossy().as_ref()));
+    assert!(!diagnostics.contains("config.toml"));
+
+    fs::remove_file(fixture.path(".codex/config.toml")).expect("remove invalid config");
+    fixture.write_config("outside", "secret = \"outside-config-canary\"\n");
+    symlink(
+        fixture.path("outside/config.toml"),
+        fixture.path(".codex/config.toml"),
+    )
+    .expect("config symlink");
+    assert_eq!(
+        load_bearer_bundle_for_usage(&paths, false, &cancellation)
+            .expect_err("unsafe config symlink"),
+        CodexCredentialLoadError::Credential(CodexCredentialError::Unreadable)
+    );
+
+    fs::remove_file(fixture.path(".codex/config.toml")).expect("remove config symlink");
+    let oversized = vec![b'x'; 256 * 1024 + 1];
+    fixture.write_config_bytes(".codex", &oversized);
+    assert_eq!(
+        load_bearer_bundle_for_usage(&paths, false, &cancellation).expect_err("oversized config"),
+        CodexCredentialLoadError::Credential(CodexCredentialError::Unreadable)
+    );
+}
+
+#[test]
+fn bundle_cancellation_is_never_suppressed_by_fallback() {
+    let fixture = Fixture::new();
+    fixture.write_auth(".codex", &native_auth("ambient-pat", "ambient-oauth"));
+    fixture.write_config(".codex", "authority = \"ambient\"\n");
+    fixture.write_auth(".config/codex", &native_auth("legacy-pat", "legacy-oauth"));
+    let paths = fixture.paths(None, None);
+    let cancellation = CancellationToken::new();
+    cancellation.cancel();
+
+    assert_eq!(
+        load_pat_bundle_for_scope(&paths, CodexPatHomeScope::Profile, &cancellation)
+            .expect_err("cancelled PAT bundle"),
+        CodexCredentialLoadError::Cancelled
+    );
+    assert_eq!(
+        load_bearer_bundle_for_usage(&paths, true, &cancellation)
+            .expect_err("cancelled bearer bundle"),
+        CodexCredentialLoadError::Cancelled
+    );
+}
+
+#[test]
 fn unsafe_layout_and_cancellation_never_trigger_external_substitution() {
     let fixture = Fixture::new();
     fixture.write_auth("outside", &native_auth("outside-pat", "outside-oauth"));
@@ -313,15 +500,18 @@ fn unsafe_layout_and_cancellation_never_trigger_external_substitution() {
 fn successful_source_kind_and_all_diagnostics_are_bounded_and_redacted() {
     let fixture = Fixture::new();
     fixture.write_auth(".codex", r#"{"OPENAI_API_KEY":"api-key-canary"}"#);
+    fixture.write_config(".codex", "marker = \"config-canary\"\n");
     let paths = fixture.paths(None, None);
     let cancellation = CancellationToken::new();
-    let bearer = load_bearer_for_usage(&paths, false, &cancellation).expect("native API key");
-    assert_eq!(bearer.kind(), CodexBearerKind::ApiKey);
+    let bundle =
+        load_bearer_bundle_for_usage(&paths, false, &cancellation).expect("native API-key bundle");
+    assert_eq!(bundle.credentials().kind(), CodexBearerKind::ApiKey);
 
     let diagnostics = format!(
-        "{paths:?} {bearer:?} {:?}",
+        "{paths:?} {bundle:?} {:?}",
         CodexCredentialLoadError::Credential(CodexCredentialError::Unreadable)
     );
     assert!(!diagnostics.contains("api-key-canary"));
+    assert!(!diagnostics.contains("config-canary"));
     assert!(!diagnostics.contains(fixture.home().to_string_lossy().as_ref()));
 }
