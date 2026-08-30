@@ -1,5 +1,6 @@
 //! Native first-party provider modules.
 
+pub mod abacus;
 pub mod aiand;
 pub mod alibaba;
 pub mod amp;
