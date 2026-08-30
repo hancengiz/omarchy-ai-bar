@@ -3,8 +3,8 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use oab_domain::{
-    AccountScope, BoundedText, ClassifiedError, CostSummary, CostUsageSnapshot, DataConfidence,
-    DetailSection, ErrorKind, IdentitySnapshot, Money, NamedRateWindow, Provenance,
+    AccountScope, BoundedText, ClassifiedError, CostSummary, CostUsageSnapshot, CreditsSnapshot,
+    DataConfidence, DetailSection, ErrorKind, IdentitySnapshot, Money, NamedRateWindow, Provenance,
     ProviderExtension, ProviderHealth, ProviderStatus, RateWindow, Timestamp, UsagePercent,
     UsageSample, WindowUsage,
 };
@@ -105,6 +105,7 @@ pub struct UsageSampleBuilder {
     secondary: Option<RateWindow>,
     tertiary: Option<RateWindow>,
     extra_windows: Vec<NamedRateWindow>,
+    credits: Option<CreditsSnapshot>,
     provider_account_id: Option<BoundedText<256>>,
     email: Option<BoundedText<256>>,
     organization: Option<BoundedText<256>>,
@@ -131,6 +132,7 @@ impl UsageSampleBuilder {
             secondary: None,
             tertiary: None,
             extra_windows: Vec::new(),
+            credits: None,
             provider_account_id: None,
             email: None,
             organization: None,
@@ -172,6 +174,15 @@ impl UsageSampleBuilder {
     #[must_use]
     pub fn extra_windows(mut self, extra_windows: Vec<NamedRateWindow>) -> Self {
         self.extra_windows = extra_windows;
+        self
+    }
+
+    /// Attaches provider credit state for this exact account scope.
+    ///
+    /// The nested scope is validated when [`Self::build`] finalizes the sample.
+    #[must_use]
+    pub fn credits(mut self, credits: CreditsSnapshot) -> Self {
+        self.credits = Some(credits);
         self
     }
 
@@ -332,7 +343,7 @@ impl UsageSampleBuilder {
             self.secondary,
             self.tertiary,
             self.extra_windows,
-            None,
+            self.credits,
             self.balance,
             self.cost,
             self.subscription_renews_at,
