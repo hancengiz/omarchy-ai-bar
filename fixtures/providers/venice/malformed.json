@@ -1,0 +1,9 @@
+{
+  "canConsume": true,
+  "consumptionCurrency": "DIEM",
+  "balances": {
+    "diem": "not-a-number",
+    "usd": null
+  },
+  "diemEpochAllocation": 100
+}

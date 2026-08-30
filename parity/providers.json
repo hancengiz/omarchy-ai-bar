@@ -1041,21 +1041,31 @@
       "id": "venice",
       "baseline_sources": [
         "Sources/CodexBarCore/Providers/Venice/",
+        "Sources/CodexBarCore/Resources/Plugins/venice.js",
         "Sources/CodexBarCore/Providers/ProviderManifest.swift"
       ],
       "cells": {
-        "authentication": "planned",
-        "usage_resets": "planned",
-        "costs_history": "planned",
-        "sessions": "planned",
-        "browser": "planned",
-        "status_errors": "planned",
-        "refresh": "planned",
-        "cli_server": "planned",
+        "authentication": "passing",
+        "usage_resets": "not-applicable",
+        "costs_history": "not-applicable",
+        "sessions": "not-applicable",
+        "browser": "not-applicable",
+        "status_errors": "passing",
+        "refresh": "passing",
+        "cli_server": "in-progress",
         "qml_ui": "planned"
       },
-      "status": "planned",
-      "tests": []
+      "status": "in-progress",
+      "tests": [
+        "crates/providers/tests/fixed_api.rs",
+        "crates/providers/tests/provider_venice.rs"
+      ],
+      "not_applicable_reasons": {
+        "usage_resets": "The pinned bundled plugin reports the current spendable DIEM or USD balance without a reset timestamp.",
+        "costs_history": "The pinned baseline explicitly has no Venice per-day cost history API.",
+        "sessions": "The pinned baseline has no Venice agent-session source.",
+        "browser": "The pinned baseline uses fixed-origin bearer API-key authentication only."
+      }
     },
     {
       "id": "commandcode",
