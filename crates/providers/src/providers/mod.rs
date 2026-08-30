@@ -14,6 +14,7 @@ pub mod codebuff;
 pub mod codex;
 pub mod codex_app_server;
 pub mod codex_files;
+pub mod codex_http;
 pub mod commandcode;
 pub mod copilot;
 pub mod crof;
