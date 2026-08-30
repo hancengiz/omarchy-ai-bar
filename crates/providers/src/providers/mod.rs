@@ -23,6 +23,7 @@ pub mod kilo;
 pub mod kiro;
 pub mod litellm;
 pub mod llmproxy;
+pub mod manus;
 pub mod moonshot;
 pub mod neuralwatt;
 pub mod openai;

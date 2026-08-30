@@ -1,0 +1,12 @@
+{
+  "totalCredits": 2869,
+  "freeCredits": 1500,
+  "periodicCredits": "1369",
+  "addonCredits": 10,
+  "refreshCredits": 0,
+  "maxRefreshCredits": 300,
+  "proMonthlyCredits": 4000,
+  "eventCredits": 0,
+  "nextRefreshTime": "2026-04-13T00:00:00Z",
+  "refreshInterval": "daily"
+}

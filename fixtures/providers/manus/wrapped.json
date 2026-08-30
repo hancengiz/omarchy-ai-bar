@@ -1,0 +1,12 @@
+{
+  "data": {
+    "totalCredits": "100",
+    "freeCredits": 40,
+    "periodicCredits": 50,
+    "refreshCredits": 5,
+    "maxRefreshCredits": 10,
+    "proMonthlyCredits": 200,
+    "nextRefreshTime": "2026-04-14T12:30:00Z",
+    "refreshInterval": "every day"
+  }
+}
