@@ -105,6 +105,7 @@ pub struct UsageSampleBuilder {
     secondary: Option<RateWindow>,
     tertiary: Option<RateWindow>,
     extra_windows: Vec<NamedRateWindow>,
+    provider_account_id: Option<BoundedText<256>>,
     email: Option<BoundedText<256>>,
     organization: Option<BoundedText<256>>,
     login_method: Option<BoundedText<256>>,
@@ -130,6 +131,7 @@ impl UsageSampleBuilder {
             secondary: None,
             tertiary: None,
             extra_windows: Vec::new(),
+            provider_account_id: None,
             email: None,
             organization: None,
             login_method: None,
@@ -171,6 +173,19 @@ impl UsageSampleBuilder {
     pub fn extra_windows(mut self, extra_windows: Vec<NamedRateWindow>) -> Self {
         self.extra_windows = extra_windows;
         self
+    }
+
+    /// Adds a bounded provider-owned account identifier.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable parse error when provider text violates domain bounds.
+    pub fn provider_account_id(mut self, value: Option<String>) -> Result<Self, ClassifiedError> {
+        self.provider_account_id = value
+            .map(BoundedText::new)
+            .transpose()
+            .map_err(|_| ClassifiedError::new(ErrorKind::Parse))?;
+        Ok(self)
     }
 
     /// Adds a bounded provider-reported account email.
@@ -294,7 +309,7 @@ impl UsageSampleBuilder {
     pub fn build(self) -> Result<UsageSample, ClassifiedError> {
         let identity = IdentitySnapshot::new(
             self.scope.clone(),
-            None,
+            self.provider_account_id,
             self.email,
             self.organization,
             None,

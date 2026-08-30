@@ -30,6 +30,7 @@ pub mod mimo;
 pub mod mistral;
 pub mod moonshot;
 pub mod neuralwatt;
+pub mod notion;
 pub mod openai;
 pub mod opencode;
 pub mod openrouter;
