@@ -1,0 +1,24 @@
+{
+  "user_id": "fixture-redacted",
+  "quota_key": "big_model_credits",
+  "next_reset_at": 1725148800000,
+  "status": "active",
+  "total_quota": {
+    "quota_summary": {
+      "used_value": 1500,
+      "limit_value": 1500,
+      "remaining_value": 0,
+      "usage_percentage": 100,
+      "unit": "credit"
+    }
+  },
+  "shared_quota": {
+    "quota_summary": {
+      "used_value": 200,
+      "limit_value": 1000,
+      "remaining_value": 800,
+      "usage_percentage": 20,
+      "unit": "credit"
+    }
+  }
+}

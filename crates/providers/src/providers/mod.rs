@@ -35,6 +35,7 @@ pub mod opencode;
 pub mod openrouter;
 pub mod perplexity;
 pub mod poe;
+pub mod qoder;
 pub mod qwencloud;
 pub mod sakana;
 pub mod sub2api;
