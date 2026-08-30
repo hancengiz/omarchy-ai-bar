@@ -1,0 +1,15 @@
+{
+  "data": {
+    "limit": 20,
+    "limit_remaining": 15,
+    "limit_reset": "monthly",
+    "usage": 5,
+    "usage_daily": 1,
+    "usage_weekly": 2,
+    "usage_monthly": 4,
+    "rate_limit": {
+      "requests": 120,
+      "interval": "10s"
+    }
+  }
+}

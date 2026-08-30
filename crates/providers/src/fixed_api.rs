@@ -99,6 +99,19 @@ pub struct FixedApiClient {
     transport: HttpTransport,
 }
 
+/// Public-safe failure detail retained only for optional provider enrichment.
+///
+/// The normal client surface intentionally collapses transport failures into
+/// [`ClassifiedError`]. A small number of provider contracts need to render a
+/// stable distinction between an HTTP status, a deadline, and another safe
+/// failure class while preserving an otherwise valid mandatory response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OptionalRequestError {
+    HttpStatus(u16),
+    Timeout,
+    Other(ErrorKind),
+}
+
 #[derive(Clone)]
 enum ApiKeyAuthentication {
     Bearer,
@@ -353,6 +366,43 @@ impl FixedApiClient {
         let request = HttpRequest::get_json(url);
         self.send_with_status_map(context, request, status_map)
             .await
+    }
+
+    /// Performs one authenticated JSON GET while retaining only the bounded,
+    /// non-secret diagnostics needed by best-effort enrichment UI.
+    pub(crate) async fn get_json_optional_diagnostic(
+        &self,
+        context: &ProviderContext,
+        url: Url,
+    ) -> Result<HttpResponse, OptionalRequestError> {
+        if context.scope() != &self.scope || context.source() != ProviderSource::ApiKey {
+            return Err(OptionalRequestError::Other(ErrorKind::Api));
+        }
+        let authentication = match &self.authentication {
+            ApiKeyAuthentication::Bearer => self.credential.bearer_authentication(),
+            ApiKeyAuthentication::AuthorizationScheme(scheme) => {
+                self.credential.authorization_scheme(scheme)
+            }
+            ApiKeyAuthentication::Header(header) => self.credential.authentication(header),
+        }
+        .map_err(|error| OptionalRequestError::Other(error.kind()))?;
+        let request = HttpRequest::get_json(url).authentication(authentication);
+        self.transport
+            .send(&request, context.cancellation())
+            .await
+            .map_err(|error| {
+                if let Some(status) = error.http_status() {
+                    OptionalRequestError::HttpStatus(status)
+                } else {
+                    match error {
+                        crate::transport::TransportError::Timeout
+                        | crate::transport::TransportError::RequestTimeout => {
+                            OptionalRequestError::Timeout
+                        }
+                        _ => OptionalRequestError::Other(error.classified().kind()),
+                    }
+                }
+            })
     }
 
     /// Performs an authenticated JSON GET with bounded, non-secret metadata

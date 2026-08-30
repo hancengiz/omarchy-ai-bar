@@ -1,0 +1,13 @@
+{
+  "data": [{
+    "date": "2026-08-17",
+    "model": "openai/gpt-5.6",
+    "endpoint_id": "endpoint-a",
+    "prompt_tokens": 100,
+    "completion_tokens": 50,
+    "reasoning_tokens": 20,
+    "requests": 2,
+    "usage": 1.25,
+    "byok_usage_inference": 0.75
+  }]
+}
