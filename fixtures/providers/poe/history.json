@@ -1,0 +1,21 @@
+{
+  "data": [
+    {
+      "query_id": "p1",
+      "creation_time": 1785686400000000,
+      "bot_name": "gpt-5",
+      "usage_type": "API",
+      "cost_points": 12.5,
+      "cost_usd": 0.03
+    },
+    {
+      "query_id": "p2",
+      "creation_time": 1785772800000000,
+      "bot_name": "claude-sonnet-4",
+      "usage_type": "Chat",
+      "cost_points": 8,
+      "cost_usd": 0.02
+    }
+  ],
+  "next_cursor": null
+}

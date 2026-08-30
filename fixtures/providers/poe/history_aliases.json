@@ -1,0 +1,21 @@
+{
+  "items": [
+    {
+      "query_id": "alias-1",
+      "timestamp": "2026-08-04T03:00:00Z",
+      "bot_name": " model-b ",
+      "usage_type": " Chat ",
+      "points": "4.25",
+      "usd": "0.015"
+    },
+    {
+      "query_id": "alias-2",
+      "created_at": 1785812400000,
+      "bot_name": "model-a",
+      "usage_type": "API",
+      "point_cost": -3,
+      "cost_usd": -1
+    }
+  ],
+  "next_cursor": null
+}

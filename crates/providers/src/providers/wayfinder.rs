@@ -154,7 +154,9 @@ impl WayfinderProvider {
         query: &[(&str, &str)],
         json: bool,
     ) -> Result<HttpResponse, ClassifiedError> {
-        if context.scope() != &self.scope || context.source() != ProviderSource::ApiKey {
+        if context.scope() != &self.scope
+            || context.source() != ProviderSource::ConfigurableEndpoint
+        {
             return Err(ClassifiedError::new(ErrorKind::Api));
         }
         let mut url = self.endpoint.path(None, path)?;

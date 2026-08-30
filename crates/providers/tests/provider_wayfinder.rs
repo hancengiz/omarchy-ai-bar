@@ -46,7 +46,7 @@ fn config(retry: RetryPolicy) -> TransportConfig {
 fn context(account: &str) -> ProviderContext {
     ProviderContext::new(
         scope(account),
-        ProviderSource::ApiKey,
+        ProviderSource::ConfigurableEndpoint,
         CancellationToken::new(),
     )
 }

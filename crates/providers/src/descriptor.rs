@@ -185,31 +185,30 @@ const fn sources_for(id: ProviderId) -> SourceSet {
 
     match id {
         Id::OpenAi
-        | Id::AzureOpenAi
         | Id::Fireworks
         | Id::DeepInfra
-        | Id::ElevenLabs
         | Id::Warp
+        | Id::AiAnd
+        | Id::IbmBob
+        | Id::ClinePass
+        | Id::Moonshot
+        | Id::Synthetic
+        | Id::Crof
+        | Id::Venice
+        | Id::Poe
+        | Id::ZenMux
+        | Id::Xai => SourceSet::one(Source::ApiKey),
+        Id::AzureOpenAi
+        | Id::ElevenLabs
         | Id::Deepgram
         | Id::Chutes
         | Id::Neuralwatt
-        | Id::AiAnd
-        | Id::IbmBob => SourceSet::one(Source::ApiKey),
-        Id::ClinePass
-        | Id::Zai
-        | Id::Moonshot
-        | Id::Synthetic
         | Id::OpenRouter
-        | Id::Crof
-        | Id::Venice
         | Id::LlmProxy
         | Id::LiteLlm
-        | Id::Poe
         | Id::ClawRouter
-        | Id::Sub2Api
-        | Id::Wayfinder
-        | Id::ZenMux
-        | Id::Xai => SourceSet::one(Source::ConfigurableEndpoint).with(Source::ApiKey),
+        | Id::Sub2Api => SourceSet::one(Source::ConfigurableEndpoint).with(Source::ApiKey),
+        Id::Wayfinder => SourceSet::one(Source::ConfigurableEndpoint),
         Id::Copilot => SourceSet::one(Source::OAuth),
         Id::Bedrock => SourceSet::one(Source::CloudCredentials),
         Id::Doubao => SourceSet::one(Source::CloudCredentials).with(Source::ApiKey),
@@ -247,7 +246,7 @@ const fn sources_for(id: ProviderId) -> SourceSet {
         Id::Grok => SourceSet::one(Source::ManualCookie)
             .with(Source::BrowserSession)
             .with(Source::LocalData),
-        Id::OpenCodeGo => SourceSet::one(Source::ConfigurableEndpoint)
+        Id::Zai | Id::OpenCodeGo => SourceSet::one(Source::ConfigurableEndpoint)
             .with(Source::ApiKey)
             .with(Source::LocalData),
         Id::Factory => SourceSet::one(Source::OAuth).with(Source::BrowserSession),

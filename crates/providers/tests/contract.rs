@@ -42,6 +42,68 @@ fn every_first_party_descriptor_is_closed_stable_and_actionable() {
 }
 
 #[test]
+fn completed_api_provider_sources_match_the_pinned_baseline() {
+    for id in [
+        ProviderId::OpenAi,
+        ProviderId::Fireworks,
+        ProviderId::DeepInfra,
+        ProviderId::Warp,
+        ProviderId::AiAnd,
+        ProviderId::IbmBob,
+        ProviderId::ClinePass,
+        ProviderId::Crof,
+        ProviderId::Moonshot,
+        ProviderId::ZenMux,
+        ProviderId::Xai,
+        ProviderId::Synthetic,
+        ProviderId::Venice,
+        ProviderId::Poe,
+    ] {
+        assert_eq!(
+            descriptor_for(id).sources().iter().collect::<Vec<_>>(),
+            [ProviderSource::ApiKey],
+            "source drift for {id:?}"
+        );
+    }
+    for id in [
+        ProviderId::ElevenLabs,
+        ProviderId::AzureOpenAi,
+        ProviderId::Deepgram,
+        ProviderId::Chutes,
+        ProviderId::Neuralwatt,
+        ProviderId::LiteLlm,
+        ProviderId::LlmProxy,
+        ProviderId::Sub2Api,
+        ProviderId::OpenRouter,
+        ProviderId::ClawRouter,
+    ] {
+        assert_eq!(
+            descriptor_for(id).sources().iter().collect::<Vec<_>>(),
+            [ProviderSource::ApiKey, ProviderSource::ConfigurableEndpoint],
+            "source drift for {id:?}"
+        );
+    }
+    assert_eq!(
+        descriptor_for(ProviderId::Zai)
+            .sources()
+            .iter()
+            .collect::<Vec<_>>(),
+        [
+            ProviderSource::ApiKey,
+            ProviderSource::ConfigurableEndpoint,
+            ProviderSource::LocalData
+        ]
+    );
+    assert_eq!(
+        descriptor_for(ProviderId::Wayfinder)
+            .sources()
+            .iter()
+            .collect::<Vec<_>>(),
+        [ProviderSource::ConfigurableEndpoint]
+    );
+}
+
+#[test]
 fn first_run_behavior_is_explicit_and_nonprobing_by_default() {
     assert_eq!(
         descriptor_for(ProviderId::Codex).default_behavior(),

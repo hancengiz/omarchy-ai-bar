@@ -17,6 +17,7 @@ thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+unicode-normalization.workspace = true
 url.workspace = true
 zeroize.workspace = true
 

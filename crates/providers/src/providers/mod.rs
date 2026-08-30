@@ -17,6 +17,7 @@ pub mod moonshot;
 pub mod neuralwatt;
 pub mod openai;
 pub mod openrouter;
+pub mod poe;
 pub mod sub2api;
 pub mod synthetic;
 pub mod venice;
