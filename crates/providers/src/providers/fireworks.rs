@@ -21,12 +21,8 @@ use crate::retry::RetryPolicy;
 use crate::transport::TransportConfig;
 
 const API_ORIGIN: &str = "https://api.fireworks.ai";
-const API_KEY_NAMES: [&str; 3] = [
-    "CODEXBAR_FIREWORKS_API_KEY",
-    "FIREWORKS_API_KEY",
-    "FIREWORKS_KEY",
-];
-const ACCOUNT_SLUG_NAMES: [&str; 2] = ["CODEXBAR_FIREWORKS_ACCOUNT_SLUG", "FIREWORKS_ACCOUNT_SLUG"];
+const API_KEY_NAMES: [&str; 2] = ["FIREWORKS_API_KEY", "FIREWORKS_KEY"];
+const ACCOUNT_SLUG_NAMES: [&str; 1] = ["FIREWORKS_ACCOUNT_SLUG"];
 const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_ACCOUNT_SLUG_BYTES: usize = 160;
 const MAX_PAGE_TOKEN_BYTES: usize = 2048;
@@ -40,7 +36,7 @@ pub struct FireworksCredential {
 }
 
 impl FireworksCredential {
-    /// Resolves the baseline key and account-slug precedence.
+    /// Resolves the standard Fireworks key and account-slug precedence.
     ///
     /// # Errors
     ///

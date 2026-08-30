@@ -22,6 +22,21 @@ the credential flow you use:
 - Doubao supports native API-key and Volcengine AK/SK modes. Ark CLI is also
   supported when installed separately, but no maintained Arch/AUR package was
   available when this release was prepared.
+- `ampcode` provides the `amp` executable for Amp's CLI source. Amp API-key
+  mode is native and does not require the helper.
+- `kiro-cli` provides Kiro login, profile discovery, and usage. Kiro requires
+  this executable because its provider interface is CLI-driven.
+- `kilo-cli-git` can perform Kilo login and populate the provider's local auth
+  file. Omarchy AI Bar reads that file and calls Kilo's API itself; a direct
+  `KILO_API_KEY` does not require the CLI package.
+- JetBrains AI quota discovery reads Linux XDG configuration/data roots and
+  requires no Apple framework or additional executable. AppCode discovery is
+  omitted because AppCode is macOS-only and has no Omarchy counterpart; the
+  supported JetBrains IDE families use their Linux configuration roots.
+- Codebuff API-key mode is native. Local-login mode reads the provider-owned
+  `manicode/credentials.json`; no maintained Codebuff Arch/AUR package was
+  located when checked on 2026-08-30, so use Codebuff's official installer if
+  you need its login command.
 
 `bridge install` copies the packaged QML plugin from the application's own
 `/usr/share/omarchy-ai-bar` directory, validates it with Omarchy, atomically

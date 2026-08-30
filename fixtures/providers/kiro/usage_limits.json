@@ -1,0 +1,25 @@
+{
+  "daysUntilReset": 0,
+  "limits": [],
+  "nextDateReset": 1788220800,
+  "overageConfiguration": {
+    "overageStatus": "ENABLED"
+  },
+  "subscriptionInfo": {
+    "subscriptionTitle": "KIRO POWER"
+  },
+  "usageBreakdownList": [
+    {
+      "bonuses": [],
+      "currency": "USD",
+      "currentOveragesWithPrecision": 3603.49,
+      "currentUsageWithPrecision": 13603.49,
+      "nextDateReset": 1788220800,
+      "overageCapWithPrecision": 10000.0,
+      "overageCharges": 144.139711109352,
+      "overageRate": 0.04,
+      "resourceType": "CREDIT",
+      "usageLimitWithPrecision": 10000.0
+    }
+  ]
+}

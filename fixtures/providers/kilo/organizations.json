@@ -1,0 +1,20 @@
+[
+  {
+    "result": {
+      "data": {
+        "json": [
+          {
+            "id": "org-alpha",
+            "name": "Alpha",
+            "role": "owner"
+          },
+          {
+            "id": "org-beta",
+            "name": "Beta",
+            "role": "member"
+          }
+        ]
+      }
+    }
+  }
+]

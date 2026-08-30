@@ -54,6 +54,18 @@ impl ApiKeyCredential {
         Self::from_cleaned(value)
     }
 
+    /// Validates an already-owned zeroizing key without duplicating its bytes.
+    ///
+    /// This is intentionally crate-private for credential-file readers. It
+    /// preserves the same trimming and quote handling as [`Self::new`] while
+    /// keeping the provider token inside zeroizing allocations throughout.
+    pub(crate) fn from_zeroizing(value: Zeroizing<String>) -> Result<Self, ClassifiedError> {
+        let Some(value) = clean_owned_secret(value) else {
+            return Err(ClassifiedError::new(ErrorKind::MissingCredential));
+        };
+        Self::from_cleaned(value)
+    }
+
     fn from_cleaned(value: Zeroizing<String>) -> Result<Self, ClassifiedError> {
         if value.len() > MAX_API_KEY_BYTES || value.contains(['\r', '\n']) {
             return Err(ClassifiedError::new(ErrorKind::MissingCredential));
@@ -632,6 +644,31 @@ fn clean_secret(raw: &str) -> Option<Zeroizing<String>> {
     (!value.is_empty()).then(|| Zeroizing::new(value.to_owned()))
 }
 
+fn clean_owned_secret(mut value: Zeroizing<String>) -> Option<Zeroizing<String>> {
+    trim_owned_string(&mut value);
+    if value.len() >= 2 {
+        let quoted = (value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\''));
+        if quoted {
+            value.remove(0);
+            value.pop();
+        }
+    }
+    trim_owned_string(&mut value);
+    (!value.is_empty()).then_some(value)
+}
+
+fn trim_owned_string(value: &mut String) {
+    let start = value.len().saturating_sub(value.trim_start().len());
+    let end = value.trim_end().len();
+    if start >= end {
+        value.clear();
+        return;
+    }
+    value.truncate(end);
+    value.drain(..start);
+}
+
 fn jwt_payload_is_object(value: &[u8]) -> bool {
     let mut parts = value.split(|byte| *byte == b'.');
     let Some(_header) = parts.next() else {
@@ -690,4 +727,20 @@ fn decode_base64_url(value: &[u8]) -> Option<Vec<u8>> {
         return None;
     }
     Some(decoded)
+}
+
+#[cfg(test)]
+mod tests {
+    use oab_domain::ErrorKind;
+    use zeroize::Zeroizing;
+
+    use super::ApiKeyCredential;
+
+    #[test]
+    fn owned_whitespace_only_credential_is_missing_without_panicking() {
+        let error = ApiKeyCredential::from_zeroizing(Zeroizing::new(" \t\n ".to_owned()))
+            .expect_err("whitespace-only owned credential must be rejected");
+
+        assert_eq!(error.kind(), ErrorKind::MissingCredential);
+    }
 }

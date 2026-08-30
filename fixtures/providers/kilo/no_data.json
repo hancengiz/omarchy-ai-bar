@@ -1,0 +1,32 @@
+[
+  {
+    "result": {
+      "data": {
+        "json": {
+          "blocks": []
+        }
+      }
+    }
+  },
+  {
+    "result": {
+      "data": {
+        "json": {
+          "plan": {
+            "name": null
+          }
+        }
+      }
+    }
+  },
+  {
+    "result": {
+      "data": {
+        "json": {
+          "enabled": null,
+          "paymentMethod": null
+        }
+      }
+    }
+  }
+]

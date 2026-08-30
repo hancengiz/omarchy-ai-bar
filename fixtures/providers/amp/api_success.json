@@ -1,0 +1,6 @@
+{
+  "ok": true,
+  "result": {
+    "displayText": "Signed in as api@example.test (api-team)\nAmp Free: $8/$10 remaining (replenishes +$0.5/hour)\nIndividual credits: $12.50 remaining\nWorkspace Alpha Team: $1,234.56 remaining\nWorkspace Beta: $7 remaining"
+  }
+}

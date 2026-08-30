@@ -611,6 +611,8 @@ snapshots, Secret Service decryption, LevelDB/local-storage readers, global brow
 
 Complete Copilot's optional budget enrichment in this batch using manual cookie capture and Linux Chromium/Firefox
 profile discovery; the macOS-only automatic cookie import is replaced by the shared Linux browser infrastructure.
+Complete Amp's deferred manual-cookie and browser-session sources in the same shared boundary; its Task 17 API-key and
+CLI sources remain independently usable while browser discovery is disabled.
 
 **Provider order:** `t3chat`, `alibaba`, `opencode`, `qwencloud`, `devin`, `manus`, `mimo`, `sakana`, `mistral`,
 `commandcode`, `qoder`, `stepfun`, `longcat`, `zoommate`, `notion`, `alibabatokenplan`, `minimax`, `kimi`, `perplexity`.
@@ -618,6 +620,7 @@ profile discovery; the macOS-only automatic cookie import is replaced by the sha
 **Special gates**
 
 - Manual source works with browser and keyring discovery disabled.
+- Amp manual-cookie and Linux Chromium/Firefox sources match its pinned HTML usage parser without Safari or Keychain.
 - Encrypted Chromium, Firefox, WAL, and local-storage fixtures remain host-scoped.
 - Invalid-session refresh never exposes or cross-forwards a cookie.
 - Alibaba regional and multi-cookie routing is tested independently.

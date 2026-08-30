@@ -1,0 +1,40 @@
+[
+  {
+    "result": {
+      "data": {
+        "json": {
+          "blocks": [
+            {
+              "usedCredits": 25,
+              "remainingCredits": 75
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "result": {
+      "data": {
+        "json": {
+          "planName": "Starter",
+          "amount_mUsd": 28500000,
+          "used_mUsd": 3500000,
+          "bonus_mUsd": 9500000,
+          "nextRenewalAt": "2026-09-28T04:00:00Z"
+        }
+      }
+    }
+  },
+  {
+    "result": {
+      "data": {
+        "json": {
+          "enabled": true,
+          "paymentMethod": null,
+          "amountCents": 5000
+        }
+      }
+    }
+  }
+]

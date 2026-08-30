@@ -490,18 +490,26 @@
         "Sources/CodexBarCore/Providers/ProviderManifest.swift"
       ],
       "cells": {
-        "authentication": "planned",
-        "usage_resets": "planned",
-        "costs_history": "planned",
-        "sessions": "planned",
-        "browser": "planned",
-        "status_errors": "planned",
-        "refresh": "planned",
-        "cli_server": "planned",
+        "authentication": "passing",
+        "usage_resets": "passing",
+        "costs_history": "not-applicable",
+        "sessions": "not-applicable",
+        "browser": "not-applicable",
+        "status_errors": "passing",
+        "refresh": "passing",
+        "cli_server": "in-progress",
         "qml_ui": "planned"
       },
-      "status": "planned",
-      "tests": []
+      "status": "in-progress",
+      "tests": [
+        "crates/providers/tests/fixed_api.rs",
+        "crates/providers/tests/provider_kilo.rs"
+      ],
+      "not_applicable_reasons": {
+        "costs_history": "The pinned baseline exposes current Kilo credits and Kilo Pass activity but explicitly reports cost summary as unsupported.",
+        "sessions": "The pinned baseline has no Kilo agent-session history source.",
+        "browser": "The pinned baseline uses API-key or provider CLI-auth credentials and does not read browser state."
+      }
     },
     {
       "id": "kiro",
@@ -510,18 +518,26 @@
         "Sources/CodexBarCore/Providers/ProviderManifest.swift"
       ],
       "cells": {
-        "authentication": "planned",
-        "usage_resets": "planned",
-        "costs_history": "planned",
-        "sessions": "planned",
-        "browser": "planned",
-        "status_errors": "planned",
-        "refresh": "planned",
-        "cli_server": "planned",
+        "authentication": "passing",
+        "usage_resets": "passing",
+        "costs_history": "not-applicable",
+        "sessions": "not-applicable",
+        "browser": "not-applicable",
+        "status_errors": "passing",
+        "refresh": "passing",
+        "cli_server": "in-progress",
         "qml_ui": "planned"
       },
-      "status": "planned",
-      "tests": []
+      "status": "in-progress",
+      "tests": [
+        "crates/providers/tests/provider_kiro.rs",
+        "crates/providers/tests/subprocess.rs"
+      ],
+      "not_applicable_reasons": {
+        "costs_history": "The pinned baseline exposes current Kiro overage and cost detail but no historical cost ledger.",
+        "sessions": "Kiro CLI quota output is usage state, not local agent-session history.",
+        "browser": "The pinned baseline uses the authenticated Kiro CLI and does not read browser state."
+      }
     },
     {
       "id": "vertexai",
@@ -578,18 +594,26 @@
         "Sources/CodexBarCore/Providers/ProviderManifest.swift"
       ],
       "cells": {
-        "authentication": "planned",
-        "usage_resets": "planned",
-        "costs_history": "planned",
-        "sessions": "planned",
-        "browser": "planned",
-        "status_errors": "planned",
-        "refresh": "planned",
-        "cli_server": "planned",
+        "authentication": "not-applicable",
+        "usage_resets": "passing",
+        "costs_history": "not-applicable",
+        "sessions": "not-applicable",
+        "browser": "not-applicable",
+        "status_errors": "passing",
+        "refresh": "passing",
+        "cli_server": "in-progress",
         "qml_ui": "planned"
       },
-      "status": "planned",
-      "tests": []
+      "status": "in-progress",
+      "tests": [
+        "crates/providers/tests/provider_jetbrains.rs"
+      ],
+      "not_applicable_reasons": {
+        "authentication": "The pinned baseline reads provider-owned IDE quota metadata and has no separate authentication source.",
+        "costs_history": "The pinned baseline exposes the current JetBrains AI quota and refill time but no cost history.",
+        "sessions": "The pinned baseline has no JetBrains agent-session history source.",
+        "browser": "JetBrains quota is read from bounded Linux IDE state rather than browser storage."
+      }
     },
     {
       "id": "moonshot",
@@ -627,18 +651,26 @@
         "Sources/CodexBarCore/Providers/ProviderManifest.swift"
       ],
       "cells": {
-        "authentication": "planned",
-        "usage_resets": "planned",
-        "costs_history": "planned",
-        "sessions": "planned",
+        "authentication": "passing",
+        "usage_resets": "passing",
+        "costs_history": "not-applicable",
+        "sessions": "not-applicable",
         "browser": "planned",
-        "status_errors": "planned",
-        "refresh": "planned",
-        "cli_server": "planned",
+        "status_errors": "passing",
+        "refresh": "passing",
+        "cli_server": "in-progress",
         "qml_ui": "planned"
       },
-      "status": "planned",
-      "tests": []
+      "status": "in-progress",
+      "tests": [
+        "crates/providers/tests/http_transport.rs",
+        "crates/providers/tests/provider_amp.rs",
+        "crates/providers/tests/subprocess.rs"
+      ],
+      "not_applicable_reasons": {
+        "costs_history": "The pinned baseline exposes current Amp individual and workspace credits but no historical cost ledger.",
+        "sessions": "The pinned baseline has no Amp agent-session history source."
+      }
     },
     {
       "id": "t3chat",
@@ -1019,18 +1051,26 @@
         "Sources/CodexBarCore/Providers/ProviderManifest.swift"
       ],
       "cells": {
-        "authentication": "planned",
-        "usage_resets": "planned",
-        "costs_history": "planned",
-        "sessions": "planned",
-        "browser": "planned",
-        "status_errors": "planned",
-        "refresh": "planned",
-        "cli_server": "planned",
+        "authentication": "passing",
+        "usage_resets": "passing",
+        "costs_history": "not-applicable",
+        "sessions": "not-applicable",
+        "browser": "not-applicable",
+        "status_errors": "passing",
+        "refresh": "passing",
+        "cli_server": "in-progress",
         "qml_ui": "planned"
       },
-      "status": "planned",
-      "tests": []
+      "status": "in-progress",
+      "tests": [
+        "crates/providers/tests/fixed_api.rs",
+        "crates/providers/tests/provider_codebuff.rs"
+      ],
+      "not_applicable_reasons": {
+        "costs_history": "The pinned baseline exposes current Codebuff credits and subscription state but no historical cost ledger.",
+        "sessions": "The pinned baseline has no Codebuff agent-session history source.",
+        "browser": "The pinned baseline uses an environment or provider-owned credential file and does not read browser state."
+      }
     },
     {
       "id": "crof",

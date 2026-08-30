@@ -1,0 +1,7 @@
+{
+  "ok": false,
+  "error": {
+    "code": "auth-required",
+    "message": "fixture-sensitive-message"
+  }
+}

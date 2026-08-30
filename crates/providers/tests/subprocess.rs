@@ -39,8 +39,30 @@ async fn passes_exact_argv_without_interpolation_and_captures_stdout() {
     assert!(!request_debug.contains("alpha beta"));
     assert!(!request_debug.contains("$HOME; echo interpolated"));
     assert_eq!(output.stdout(), b"alpha beta|$HOME; echo interpolated");
+    assert!(output.stderr().is_empty());
     assert!(!format!("{output:?}").contains("alpha beta"));
     assert_eq!(output.into_stdout(), b"alpha beta|$HOME; echo interpolated");
+}
+
+#[tokio::test]
+async fn successful_stderr_is_bounded_available_and_debug_redacted() {
+    let secret = "successful-stderr-fixture-secret";
+    let invocation = request(
+        "/bin/sh",
+        ["-c", "printf '%s' \"$OAB_SUCCESS_STDERR\" >&2"],
+        Duration::from_secs(1),
+    )
+    .with_cleared_environment()
+    .with_environment("OAB_SUCCESS_STDERR", secret)
+    .expect("valid environment");
+
+    let output = invocation
+        .run(&CancellationToken::new())
+        .await
+        .expect("successful stderr capture");
+    assert!(output.stdout().is_empty());
+    assert_eq!(output.stderr(), secret.as_bytes());
+    assert!(!format!("{output:?}").contains(secret));
 }
 
 #[tokio::test]

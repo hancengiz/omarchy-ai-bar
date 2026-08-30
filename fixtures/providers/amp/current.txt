@@ -1,0 +1,5 @@
+[2mSigned in as cli@example.test (fixture-team)[0m
+Amp Free: $8/$10 remaining (replenishes +$0.5/hour) - https://ampcode.com/settings#amp-free
+Individual credits: $12.50 remaining
+Workspace Alpha Team: $1,234.56 remaining
+Workspace Beta: $7 remaining

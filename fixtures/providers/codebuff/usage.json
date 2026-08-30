@@ -1,0 +1,7 @@
+{
+  "usage": 1250,
+  "quota": 5000,
+  "remainingBalance": 3750,
+  "autoTopupEnabled": true,
+  "next_quota_reset": "2026-09-01T00:00:00Z"
+}

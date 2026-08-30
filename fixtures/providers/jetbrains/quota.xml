@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<application>
+  <component name="UnrelatedComponent">
+    <option name="quotaInfo" value="{&quot;current&quot;:&quot;99&quot;,&quot;maximum&quot;:&quot;100&quot;}" />
+  </component>
+  <component version="1" name="AIAssistantQuotaManager2">
+    <option value="{&quot;type&quot;:&quot;PRO&quot;,&quot;current&quot;:&quot;25&quot;,&quot;maximum&quot;:&quot;100&quot;,&quot;until&quot;:&quot;2026-10-01T00:00:00Z&quot;,&quot;tariffQuota&quot;:{&quot;available&quot;:&quot;75&quot;}}" name="quotaInfo" />
+    <option name='nextRefill' value='{&quot;type&quot;:&quot;MONTHLY&quot;,&quot;next&quot;:&quot;2026-09-01T12:30:00Z&quot;,&quot;tariff&quot;:{&quot;amount&quot;:&quot;100&quot;,&quot;duration&quot;:&quot;P1M&quot;}}' />
+  </component>
+</application>

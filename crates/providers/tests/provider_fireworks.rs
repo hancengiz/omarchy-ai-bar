@@ -70,20 +70,13 @@ fn provider(server: &FakeHttpServer, account: &str, slug: Option<&str>) -> Firew
 }
 
 #[test]
-fn credential_resolution_uses_baseline_precedence_and_rejects_unsafe_slugs() {
+fn credential_resolution_uses_fireworks_precedence_and_rejects_unsafe_slugs() {
     let environment = BTreeMap::from([
-        (
-            "CODEXBAR_FIREWORKS_API_KEY".to_owned(),
-            format!(" '{KEY_CANARY}' "),
-        ),
-        ("FIREWORKS_API_KEY".to_owned(), "not-selected".to_owned()),
-        (
-            "CODEXBAR_FIREWORKS_ACCOUNT_SLUG".to_owned(),
-            format!(" \"{SLUG_CANARY}\" "),
-        ),
+        ("FIREWORKS_API_KEY".to_owned(), format!(" '{KEY_CANARY}' ")),
+        ("FIREWORKS_KEY".to_owned(), "not-selected".to_owned()),
         (
             "FIREWORKS_ACCOUNT_SLUG".to_owned(),
-            "not-selected".to_owned(),
+            format!(" \"{SLUG_CANARY}\" "),
         ),
     ]);
     let credential = FireworksCredential::resolve(&environment).expect("resolved credential");

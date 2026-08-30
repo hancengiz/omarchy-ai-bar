@@ -1,0 +1,46 @@
+[
+  {
+    "result": {
+      "data": {
+        "creditBlocks": [
+          {
+            "id": "credit-1",
+            "balance_mUsd": 19000000,
+            "amount_mUsd": 25000000,
+            "is_free": false
+          },
+          {
+            "id": "credit-2",
+            "balance_mUsd": 5000000,
+            "amount_mUsd": 5000000,
+            "is_free": true
+          }
+        ],
+        "totalBalance_mUsd": 24000000,
+        "autoTopUpEnabled": true
+      }
+    }
+  },
+  {
+    "result": {
+      "data": {
+        "subscription": {
+          "tier": "tier_49",
+          "currentPeriodUsageUsd": 9.5,
+          "currentPeriodBaseCreditsUsd": 49.0,
+          "currentPeriodBonusCreditsUsd": 10.0,
+          "nextBillingAt": "2026-09-28T04:00:00.000Z"
+        }
+      }
+    }
+  },
+  {
+    "result": {
+      "data": {
+        "enabled": true,
+        "amountCents": 5000,
+        "paymentMethod": "visa"
+      }
+    }
+  }
+]

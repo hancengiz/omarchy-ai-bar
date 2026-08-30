@@ -170,6 +170,12 @@ const fn capabilities_for(id: ProviderId) -> CapabilitySet {
         _ => {}
     }
     match id {
+        ProviderId::Amp | ProviderId::Codebuff => {
+            capabilities = capabilities.with(ProviderCapability::Credits);
+        }
+        _ => {}
+    }
+    match id {
         ProviderId::Codex | ProviderId::Claude | ProviderId::Gemini | ProviderId::Grok => {
             capabilities = capabilities.with(ProviderCapability::Sessions);
         }
@@ -219,9 +225,10 @@ const fn sources_for(id: ProviderId) -> SourceSet {
         Id::Doubao => SourceSet::one(Source::CloudCredentials)
             .with(Source::ApiKey)
             .with(Source::Cli),
-        Id::Amp | Id::Kilo | Id::Kiro | Id::JetBrains | Id::Codebuff => {
-            SourceSet::one(Source::Cli).with(Source::LocalData)
-        }
+        Id::Codebuff => SourceSet::one(Source::ApiKey).with(Source::LocalData),
+        Id::Amp | Id::Kilo => SourceSet::one(Source::ApiKey).with(Source::Cli),
+        Id::Kiro => SourceSet::one(Source::Cli),
+        Id::JetBrains => SourceSet::one(Source::LocalData),
         Id::T3Chat
         | Id::Alibaba
         | Id::AlibabaTokenPlan

@@ -73,6 +73,7 @@ pub enum SubprocessError {
 #[derive(PartialEq, Eq)]
 pub struct SubprocessOutput {
     stdout: Zeroizing<Vec<u8>>,
+    stderr: Zeroizing<Vec<u8>>,
 }
 
 impl Debug for SubprocessOutput {
@@ -80,6 +81,7 @@ impl Debug for SubprocessOutput {
         formatter
             .debug_struct("SubprocessOutput")
             .field("stdout_bytes", &self.stdout.len())
+            .field("stderr_bytes", &self.stderr.len())
             .finish()
     }
 }
@@ -89,6 +91,16 @@ impl SubprocessOutput {
     #[must_use]
     pub fn stdout(&self) -> &[u8] {
         &self.stdout
+    }
+
+    /// Returns the captured standard error bytes from a successful process.
+    ///
+    /// Some provider CLIs intentionally print their successful report to
+    /// standard error. The bytes remain bounded, zeroized on drop, and absent
+    /// from [`Debug`] output.
+    #[must_use]
+    pub fn stderr(&self) -> &[u8] {
+        &self.stderr
     }
 
     /// Consumes the result and returns its standard output bytes.
@@ -343,8 +355,8 @@ impl SubprocessRequest {
     /// Runs the configured executable until completion, cancellation, or timeout.
     ///
     /// Standard input is always closed. Standard output and standard error are
-    /// drained concurrently, but only bounded successful standard output is
-    /// returned. Raw standard error is never included in failures.
+    /// drained concurrently. Both bounded streams are returned on success;
+    /// raw standard error is never included in failures.
     ///
     /// # Errors
     ///
@@ -413,7 +425,7 @@ impl SubprocessRequest {
                 return finish(
                     completed_status,
                     stdout,
-                    &stderr,
+                    stderr,
                     self.stderr_classifier.as_ref(),
                 );
             }
@@ -572,15 +584,15 @@ fn validate_environment_set(changes: &[EnvironmentChange]) -> Result<(), Subproc
 fn finish(
     status: ExitStatus,
     stdout: Zeroizing<Vec<u8>>,
-    stderr: &[u8],
+    stderr: Zeroizing<Vec<u8>>,
     classifier: Option<&StderrClassifier>,
 ) -> Result<SubprocessOutput, SubprocessError> {
     if status.success() {
-        Ok(SubprocessOutput { stdout })
+        Ok(SubprocessOutput { stdout, stderr })
     } else {
         Err(SubprocessError::NonZero {
             code: status.code(),
-            stderr_tag: classifier.and_then(|classifier| classifier.classify(stderr)),
+            stderr_tag: classifier.and_then(|classifier| classifier.classify(&stderr)),
         })
     }
 }

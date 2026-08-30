@@ -1,0 +1,14 @@
+#!/bin/sh
+if [ "$#" -ne 1 ] || [ "$1" != "usage" ]; then
+    exit 9
+fi
+if [ "${NO_COLOR:-}" != "1" ] || [ "${TERM:-}" != "dumb" ]; then
+    exit 8
+fi
+if [ -n "${AMP_API_KEY:-}" ]; then
+    exit 7
+fi
+printf '%s\n' 'Signed in as cli@example.test (fixture-team)'
+printf '%s\n' 'Amp Free: $8/$10 remaining (replenishes +$0.5/hour)'
+printf '%s\n' 'Individual credits: $12.50 remaining'
+printf '%s\n' 'Workspace Alpha Team: $1,234.56 remaining'

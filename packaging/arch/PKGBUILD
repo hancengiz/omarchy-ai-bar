@@ -17,8 +17,11 @@ depends=(
   'sqlite'
 )
 optdepends=(
+  'ampcode: Amp CLI usage source (the package provides the amp executable)'
   'aws-cli-v2: AWS profile, SSO, assume-role, and credential_process authentication for Bedrock'
   'google-cloud-cli: Vertex AI application-default login and access-token acquisition'
+  'kilo-cli-git: Kilo login helper that can populate the local CLI auth file'
+  'kiro-cli: Kiro usage, login, and profile discovery'
 )
 makedepends=('cargo')
 install=omarchy-ai-bar.install

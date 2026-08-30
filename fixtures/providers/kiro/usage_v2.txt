@@ -1,0 +1,12 @@
+[1mEstimated Usage[0m | resets on 2026-09-01 | [mKIRO POWER[0m
+
+🎁 Bonus credits: 45.53/2000 credits used, expires in 19 days
+
+[1mCredits[0m (10000.00 of 10000 covered in plan)
+████████████████████ 100%
+
+Overages: [1mEnabled billed at $0.04 per request[0m
+Credits used: 40.29
+Est. cost: $1.61 USD
+
+To manage your plan or configure overages navigate to https://app.kiro.dev/account/usage

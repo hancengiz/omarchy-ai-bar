@@ -152,6 +152,54 @@ fn signed_cloud_provider_sources_are_exact_and_actionable() {
 }
 
 #[test]
+fn linux_cli_and_local_provider_sources_are_exact_and_actionable() {
+    for id in [ProviderId::Amp, ProviderId::Kilo] {
+        assert_eq!(
+            descriptor_for(id).sources().iter().collect::<Vec<_>>(),
+            [ProviderSource::ApiKey, ProviderSource::Cli],
+            "source drift for {id:?}"
+        );
+    }
+    assert_eq!(
+        descriptor_for(ProviderId::Kiro)
+            .sources()
+            .iter()
+            .collect::<Vec<_>>(),
+        [ProviderSource::Cli]
+    );
+    assert_eq!(
+        descriptor_for(ProviderId::JetBrains)
+            .sources()
+            .iter()
+            .collect::<Vec<_>>(),
+        [ProviderSource::LocalData]
+    );
+    assert_eq!(
+        descriptor_for(ProviderId::Codebuff)
+            .sources()
+            .iter()
+            .collect::<Vec<_>>(),
+        [ProviderSource::ApiKey, ProviderSource::LocalData]
+    );
+    for id in [ProviderId::Amp, ProviderId::Kilo, ProviderId::Kiro] {
+        assert!(
+            descriptor_for(id)
+                .capabilities()
+                .contains(ProviderCapability::LoginAction),
+            "missing login action for {id:?}"
+        );
+    }
+    for id in [ProviderId::Amp, ProviderId::Codebuff] {
+        assert!(
+            descriptor_for(id)
+                .capabilities()
+                .contains(ProviderCapability::Credits),
+            "missing credits capability for {id:?}"
+        );
+    }
+}
+
+#[test]
 fn first_run_behavior_is_explicit_and_nonprobing_by_default() {
     assert_eq!(
         descriptor_for(ProviderId::Codex).default_behavior(),

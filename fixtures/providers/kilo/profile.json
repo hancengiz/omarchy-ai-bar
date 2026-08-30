@@ -1,0 +1,11 @@
+{
+  "user": {
+    "email": "fixture@example.test"
+  },
+  "organizations": [
+    {
+      "id": "org-profile",
+      "name": "Profile fallback"
+    }
+  ]
+}

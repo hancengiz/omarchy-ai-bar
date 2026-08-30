@@ -1,0 +1,13 @@
+{
+  "subscription": {
+    "displayName": "Pro",
+    "status": "active",
+    "billingPeriodEnd": "2026-09-15T00:00:00Z"
+  },
+  "rateLimit": {
+    "weeklyUsed": 2100,
+    "weeklyLimit": 7000,
+    "weeklyResetsAt": "2026-09-06T00:00:00Z"
+  },
+  "email": "fixture-codebuff@example.com"
+}

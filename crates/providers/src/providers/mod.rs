@@ -1,11 +1,13 @@
 //! Native first-party provider modules.
 
 pub mod aiand;
+pub mod amp;
 pub mod azureopenai;
 pub mod bedrock;
 pub mod chutes;
 pub mod clawrouter;
 pub mod clinepass;
+pub mod codebuff;
 pub mod copilot;
 pub mod crof;
 pub mod deepgram;
@@ -14,6 +16,9 @@ pub mod doubao;
 pub mod elevenlabs;
 pub mod fireworks;
 pub mod ibmbob;
+pub mod jetbrains;
+pub mod kilo;
+pub mod kiro;
 pub mod litellm;
 pub mod llmproxy;
 pub mod moonshot;
