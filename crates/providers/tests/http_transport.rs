@@ -52,9 +52,10 @@ impl RetryClock for CountingClock {
 #[tokio::test]
 async fn typed_media_controls_emit_only_the_exact_supported_values() {
     let server =
-        FakeHttpServer::start((0..6).map(|_| FakeHttpResponse::new(200, Vec::new()))).await;
+        FakeHttpServer::start((0..7).map(|_| FakeHttpResponse::new(200, Vec::new()))).await;
     let transport = HttpTransport::new(policy(&server), config()).expect("HTTP transport");
     let requests = [
+        HttpRequest::get(server.url("/any")).accept(RequestAccept::Any),
         HttpRequest::get(server.url("/html")).accept(RequestAccept::Html),
         HttpRequest::post(server.url("/json"), b"json".to_vec())
             .expect("JSON body")
@@ -82,27 +83,28 @@ async fn typed_media_controls_emit_only_the_exact_supported_values() {
     }
 
     let captured = server.requests();
+    assert_eq!(captured[0].header("accept"), Some("*/*"));
     assert_eq!(
-        captured[0].header("accept"),
+        captured[1].header("accept"),
         Some("text/html,application/xhtml+xml")
     );
-    assert_eq!(captured[0].header("content-type"), None);
-    assert_eq!(captured[1].header("accept"), Some("application/json"));
-    assert_eq!(captured[1].header("content-type"), Some("application/json"));
+    assert_eq!(captured[1].header("content-type"), None);
+    assert_eq!(captured[2].header("accept"), Some("application/json"));
+    assert_eq!(captured[2].header("content-type"), Some("application/json"));
     assert_eq!(
-        captured[2].header("content-type"),
+        captured[3].header("content-type"),
         Some("application/x-www-form-urlencoded")
     );
     assert_eq!(
-        captured[3].header("content-type"),
+        captured[4].header("content-type"),
         Some("application/x-www-form-urlencoded; charset=utf-8")
     );
     assert_eq!(
-        captured[4].header("content-type"),
+        captured[5].header("content-type"),
         Some("application/x-amz-json-1.0")
     );
     assert_eq!(
-        captured[5].header("content-type"),
+        captured[6].header("content-type"),
         Some("application/x-amz-json-1.1")
     );
 }
@@ -276,13 +278,34 @@ fn request_control_sets_are_validated_and_debug_is_redacted() {
             HttpRequest::get(url.clone()).public_header(reserved, "public-canary"),
             Err(TransportError::InvalidConfiguration)
         ));
+        assert!(matches!(
+            HttpRequest::get(url.clone()).sensitive_header(reserved, "sensitive-canary"),
+            Err(TransportError::InvalidConfiguration)
+        ));
     }
+
+    assert!(matches!(
+        HttpRequest::get(url.clone())
+            .public_header("x-repeat", "one")
+            .expect("first header")
+            .sensitive_header("X-Repeat", "two"),
+        Err(TransportError::InvalidConfiguration)
+    ));
+    assert!(matches!(
+        HttpRequest::get(url.clone())
+            .sensitive_header("x-repeat", "one")
+            .expect("first header")
+            .public_header("X-Repeat", "two"),
+        Err(TransportError::InvalidConfiguration)
+    ));
 
     let request = HttpRequest::post(url, b"body-canary".to_vec())
         .expect("bounded body")
         .authentication(Authentication::bearer("auth-canary").expect("bearer"))
         .public_header("x-provider", "header-canary")
         .expect("public header")
+        .sensitive_header("x-client-context", "sensitive-header-canary")
+        .expect("sensitive metadata header")
         .accepted_statuses(&[400, 429])
         .expect("accepted statuses")
         .response_headers(&["x-result"])
@@ -294,10 +317,44 @@ fn request_control_sets_are_validated_and_debug_is_redacted() {
         "body-canary",
         "auth-canary",
         "header-canary",
+        "sensitive-header-canary",
         "x-result",
     ] {
         assert!(!debug.contains(canary), "debug leaked {canary}: {debug}");
     }
+}
+
+#[tokio::test]
+async fn sensitive_metadata_is_validation_bound_redacted_and_request_isolated() {
+    let server = FakeHttpServer::start([
+        FakeHttpResponse::new(200, Vec::new()),
+        FakeHttpResponse::new(200, Vec::new()),
+    ])
+    .await;
+    let transport = HttpTransport::new(policy(&server), config()).expect("HTTP transport");
+    let request = HttpRequest::get(server.url("/captured"))
+        .sensitive_header("x-client-context", "fixture-context-secret")
+        .expect("sensitive metadata");
+    assert!(!format!("{request:?}").contains("fixture-context-secret"));
+
+    transport
+        .send(&request, &CancellationToken::new())
+        .await
+        .expect("captured metadata request");
+    transport
+        .send(
+            &HttpRequest::get(server.url("/plain")),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("plain request");
+
+    let requests = server.requests();
+    assert_eq!(
+        requests[0].header("x-client-context"),
+        Some("fixture-context-secret")
+    );
+    assert_eq!(requests[1].header("x-client-context"), None);
 }
 
 #[tokio::test]

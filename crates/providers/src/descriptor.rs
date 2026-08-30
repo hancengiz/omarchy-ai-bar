@@ -164,13 +164,17 @@ const fn capabilities_for(id: ProviderId) -> CapabilitySet {
                 .with(ProviderCapability::Credits)
                 .with(ProviderCapability::CostHistory);
         }
-        ProviderId::Bedrock => {
+        ProviderId::Bedrock | ProviderId::Mistral => {
             capabilities = capabilities.with(ProviderCapability::CostHistory);
         }
         _ => {}
     }
     match id {
-        ProviderId::Amp | ProviderId::Codebuff => {
+        ProviderId::Amp
+        | ProviderId::Codebuff
+        | ProviderId::Mimo
+        | ProviderId::CommandCode
+        | ProviderId::ZoomMate => {
             capabilities = capabilities.with(ProviderCapability::Credits);
         }
         _ => {}
@@ -230,25 +234,34 @@ const fn sources_for(id: ProviderId) -> SourceSet {
         Id::Kiro => SourceSet::one(Source::Cli),
         Id::JetBrains => SourceSet::one(Source::LocalData),
         Id::T3Chat
-        | Id::Alibaba
-        | Id::AlibabaTokenPlan
         | Id::QwenCloud
         | Id::OpenCode
         | Id::Devin
-        | Id::MiniMax
         | Id::Manus
-        | Id::Kimi
-        | Id::Mimo
-        | Id::Sakana
         | Id::Mistral
         | Id::CommandCode
         | Id::Qoder
-        | Id::StepFun
         | Id::Perplexity
         | Id::LongCat
         | Id::ZoomMate
         | Id::Notion
         | Id::Abacus => SourceSet::one(Source::ManualCookie).with(Source::BrowserSession),
+        Id::Alibaba | Id::MiniMax | Id::DeepSeek | Id::Groq => SourceSet::one(Source::ApiKey)
+            .with(Source::ManualCookie)
+            .with(Source::BrowserSession),
+        Id::AlibabaTokenPlan => SourceSet::one(Source::ManualCookie)
+            .with(Source::BrowserSession)
+            .with(Source::Cli),
+        Id::Mimo | Id::Grok => SourceSet::one(Source::ManualCookie)
+            .with(Source::BrowserSession)
+            .with(Source::LocalData),
+        Id::Sakana | Id::StepFun => SourceSet::one(Source::ManualCookie),
+        Id::Kimi => SourceSet::one(Source::ApiKey)
+            .with(Source::ConfigurableEndpoint)
+            .with(Source::ManualCookie)
+            .with(Source::BrowserSession)
+            .with(Source::Cli)
+            .with(Source::LocalData),
         Id::Codex | Id::Claude => SourceSet::one(Source::OAuth)
             .with(Source::Cli)
             .with(Source::LocalData)
@@ -256,17 +269,11 @@ const fn sources_for(id: ProviderId) -> SourceSet {
         Id::Gemini | Id::Antigravity => SourceSet::one(Source::OAuth)
             .with(Source::Cli)
             .with(Source::LocalData),
-        Id::Grok => SourceSet::one(Source::ManualCookie)
-            .with(Source::BrowserSession)
-            .with(Source::LocalData),
         Id::Zai | Id::OpenCodeGo => SourceSet::one(Source::ConfigurableEndpoint)
             .with(Source::ApiKey)
             .with(Source::LocalData),
         Id::Factory => SourceSet::one(Source::OAuth).with(Source::BrowserSession),
         Id::Ollama => SourceSet::one(Source::ConfigurableEndpoint).with(Source::LocalData),
-        Id::DeepSeek | Id::Groq => SourceSet::one(Source::ApiKey)
-            .with(Source::ManualCookie)
-            .with(Source::BrowserSession),
         Id::Zed => SourceSet::one(Source::LocalData).with(Source::ApiKey),
         Id::Augment | Id::Cursor | Id::Windsurf => SourceSet::one(Source::Cli)
             .with(Source::LocalData)

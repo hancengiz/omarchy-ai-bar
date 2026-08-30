@@ -38,6 +38,8 @@ const MAX_REDIRECTS: u8 = 10;
 /// Typed values permitted in the request `Accept` header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestAccept {
+    /// Browser-compatible wildcard used by provider web APIs.
+    Any,
     /// `application/json`.
     Json,
     /// Browser-compatible HTML and XHTML.
@@ -47,6 +49,7 @@ pub enum RequestAccept {
 impl RequestAccept {
     const fn as_str(self) -> &'static str {
         match self {
+            Self::Any => "*/*",
             Self::Json => "application/json",
             Self::Html => "text/html,application/xhtml+xml",
         }
@@ -495,6 +498,7 @@ pub struct HttpRequest {
     url: Url,
     authentication: Option<Authentication>,
     public_headers: Vec<(HeaderName, HeaderValue)>,
+    sensitive_headers: Vec<(HeaderName, SecretValue)>,
     accepted_statuses: Vec<StatusCode>,
     response_headers: Vec<HeaderName>,
     body: Vec<u8>,
@@ -511,6 +515,7 @@ impl HttpRequest {
             url,
             authentication: None,
             public_headers: Vec::new(),
+            sensitive_headers: Vec::new(),
             accepted_statuses: Vec::new(),
             response_headers: Vec::new(),
             body: Vec::new(),
@@ -541,6 +546,7 @@ impl HttpRequest {
             url,
             authentication: None,
             public_headers: Vec::new(),
+            sensitive_headers: Vec::new(),
             accepted_statuses: Vec::new(),
             response_headers: Vec::new(),
             body,
@@ -662,20 +668,63 @@ impl HttpRequest {
         name: impl AsRef<str>,
         value: impl AsRef<str>,
     ) -> Result<Self, TransportError> {
-        if self.public_headers.len() >= MAX_PUBLIC_REQUEST_HEADERS
+        if self.public_headers.len() + self.sensitive_headers.len() >= MAX_PUBLIC_REQUEST_HEADERS
             || value.as_ref().len() > MAX_PUBLIC_HEADER_VALUE_BYTES
         {
             return Err(TransportError::InvalidConfiguration);
         }
         let name = HeaderName::from_bytes(name.as_ref().as_bytes())
             .map_err(|_| TransportError::InvalidConfiguration)?;
-        if is_reserved_public_header(&name) {
+        if is_reserved_public_header(&name) || self.has_metadata_header(&name) {
             return Err(TransportError::InvalidConfiguration);
         }
         let value = HeaderValue::from_str(value.as_ref())
             .map_err(|_| TransportError::InvalidConfiguration)?;
         self.public_headers.push((name, value));
         Ok(self)
+    }
+
+    /// Attaches one bounded, explicitly non-auth provider metadata header whose
+    /// value is zeroized with the request.
+    ///
+    /// This is intended for narrowly allowlisted browser-fingerprint metadata
+    /// copied from a manual capture. Cookie and authorization credentials still
+    /// belong in [`Authentication`]. Host, framing, redirect, media-type, and
+    /// duplicate headers are rejected.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid or reserved names, unsafe/oversized values,
+    /// duplicate names, or too many metadata headers.
+    pub fn sensitive_header(
+        mut self,
+        name: impl AsRef<str>,
+        value: impl Into<String>,
+    ) -> Result<Self, TransportError> {
+        if self.public_headers.len() + self.sensitive_headers.len() >= MAX_PUBLIC_REQUEST_HEADERS {
+            return Err(TransportError::InvalidConfiguration);
+        }
+        let name = HeaderName::from_bytes(name.as_ref().as_bytes())
+            .map_err(|_| TransportError::InvalidConfiguration)?;
+        if is_reserved_public_header(&name) || self.has_metadata_header(&name) {
+            return Err(TransportError::InvalidConfiguration);
+        }
+        let value = SecretValue::new(value)?;
+        if value.expose().len() > MAX_PUBLIC_HEADER_VALUE_BYTES {
+            return Err(TransportError::InvalidConfiguration);
+        }
+        self.sensitive_headers.push((name, value));
+        Ok(self)
+    }
+
+    fn has_metadata_header(&self, name: &HeaderName) -> bool {
+        self.public_headers
+            .iter()
+            .any(|(candidate, _)| candidate == name)
+            || self
+                .sensitive_headers
+                .iter()
+                .any(|(candidate, _)| candidate == name)
     }
 }
 
@@ -690,6 +739,7 @@ impl Debug for HttpRequest {
             .field("query", &"<redacted>")
             .field("authentication", &self.authentication)
             .field("public_header_count", &self.public_headers.len())
+            .field("sensitive_header_count", &self.sensitive_headers.len())
             .field("accepted_status_count", &self.accepted_statuses.len())
             .field("response_header_count", &self.response_headers.len())
             .field("accept", &self.accept)
@@ -887,6 +937,9 @@ impl<C: RetryClock> HttpTransport<C> {
                 for (name, value) in &request.public_headers {
                     builder = builder.header(name, value);
                 }
+                for (name, value) in &request.sensitive_headers {
+                    builder = builder.header(name, sensitive_header(value.expose())?);
+                }
                 if let Some(authentication) = &request.authentication {
                     builder = authentication.apply(builder)?;
                 }
@@ -1005,6 +1058,11 @@ fn signing_request(
                     .to_str()
                     .map_err(|_| TransportError::InvalidConfiguration)?,
             )
+            .map_err(|_| TransportError::InvalidConfiguration)?;
+    }
+    for (name, value) in &request.sensitive_headers {
+        signing = signing
+            .with_header(name.as_str(), value.expose())
             .map_err(|_| TransportError::InvalidConfiguration)?;
     }
     Ok(signing)

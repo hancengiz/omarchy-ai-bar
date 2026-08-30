@@ -200,6 +200,127 @@ fn linux_cli_and_local_provider_sources_are_exact_and_actionable() {
 }
 
 #[test]
+fn browser_and_manual_provider_metadata_matches_the_pinned_baseline() {
+    use ProviderSource as Source;
+
+    for id in [
+        ProviderId::T3Chat,
+        ProviderId::QwenCloud,
+        ProviderId::OpenCode,
+        ProviderId::Devin,
+        ProviderId::Manus,
+        ProviderId::CommandCode,
+        ProviderId::Qoder,
+        ProviderId::Perplexity,
+        ProviderId::LongCat,
+        ProviderId::ZoomMate,
+        ProviderId::Notion,
+    ] {
+        assert_eq!(
+            descriptor_for(id).sources().iter().collect::<Vec<_>>(),
+            [Source::ManualCookie, Source::BrowserSession],
+            "source drift for {id:?}"
+        );
+    }
+
+    assert_eq!(
+        descriptor_for(ProviderId::Mistral)
+            .sources()
+            .iter()
+            .collect::<Vec<_>>(),
+        [Source::ManualCookie, Source::BrowserSession]
+    );
+    for id in [ProviderId::Alibaba, ProviderId::MiniMax] {
+        assert_eq!(
+            descriptor_for(id).sources().iter().collect::<Vec<_>>(),
+            [Source::ApiKey, Source::ManualCookie, Source::BrowserSession],
+            "source drift for {id:?}"
+        );
+    }
+    assert_eq!(
+        descriptor_for(ProviderId::AlibabaTokenPlan)
+            .sources()
+            .iter()
+            .collect::<Vec<_>>(),
+        [Source::ManualCookie, Source::BrowserSession, Source::Cli]
+    );
+    assert_eq!(
+        descriptor_for(ProviderId::Mimo)
+            .sources()
+            .iter()
+            .collect::<Vec<_>>(),
+        [
+            Source::ManualCookie,
+            Source::BrowserSession,
+            Source::LocalData
+        ]
+    );
+    for id in [ProviderId::Sakana, ProviderId::StepFun] {
+        assert_eq!(
+            descriptor_for(id).sources().iter().collect::<Vec<_>>(),
+            [Source::ManualCookie],
+            "source drift for {id:?}"
+        );
+    }
+    assert_eq!(
+        descriptor_for(ProviderId::Kimi)
+            .sources()
+            .iter()
+            .collect::<Vec<_>>(),
+        [
+            Source::ApiKey,
+            Source::ConfigurableEndpoint,
+            Source::ManualCookie,
+            Source::BrowserSession,
+            Source::Cli,
+            Source::LocalData,
+        ]
+    );
+}
+
+#[test]
+fn browser_and_manual_provider_capabilities_match_the_pinned_baseline() {
+    use ProviderCapability as Capability;
+
+    assert_eq!(
+        descriptor_for(ProviderId::Mistral)
+            .capabilities()
+            .iter()
+            .collect::<Vec<_>>(),
+        [
+            Capability::Usage,
+            Capability::CostHistory,
+            Capability::BrowserAuth
+        ]
+    );
+    for id in [
+        ProviderId::Mimo,
+        ProviderId::CommandCode,
+        ProviderId::ZoomMate,
+    ] {
+        assert!(
+            descriptor_for(id)
+                .capabilities()
+                .contains(Capability::Credits),
+            "missing credits capability for {id:?}"
+        );
+    }
+    assert!(
+        descriptor_for(ProviderId::AlibabaTokenPlan)
+            .capabilities()
+            .contains(Capability::LoginAction)
+    );
+    for id in [ProviderId::Mimo, ProviderId::Kimi] {
+        assert!(
+            descriptor_for(id)
+                .capabilities()
+                .contains(Capability::StorageReport),
+            "missing storage capability for {id:?}"
+        );
+    }
+}
+
+#[test]
 fn first_run_behavior_is_explicit_and_nonprobing_by_default() {
     assert_eq!(
         descriptor_for(ProviderId::Codex).default_behavior(),
