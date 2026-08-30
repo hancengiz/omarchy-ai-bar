@@ -3,9 +3,10 @@ use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
-use oab_domain::Timestamp;
+use oab_domain::{ErrorKind, Timestamp};
 use oab_providers::providers::codex::{
-    CodexBearerKind, CodexCredentialError, CodexCredentialSource, CodexPatHomeScope, CodexPatRoot,
+    CodexAttemptFailure, CodexBearerKind, CodexCredentialError, CodexCredentialSource,
+    CodexPatHomeScope, CodexPatRoot,
 };
 use oab_providers::providers::codex_files::{
     CodexCredentialLoadError, CodexCredentialPaths, load_bearer_bundle_for_usage,
@@ -69,6 +70,51 @@ fn opencode_auth(access: &str) -> String {
     format!(
         r#"{{"openai":{{"type":"oauth","access":"{access}","refresh":"refresh","expires":4102444800000}}}}"#
     )
+}
+
+#[test]
+fn credential_load_errors_project_to_planner_and_public_error_classes() {
+    let cases = [
+        (CodexCredentialError::NotFound, ErrorKind::MissingCredential),
+        (
+            CodexCredentialError::Unreadable,
+            ErrorKind::MissingCredential,
+        ),
+        (CodexCredentialError::Invalid, ErrorKind::Parse),
+        (
+            CodexCredentialError::MissingTokens,
+            ErrorKind::MissingCredential,
+        ),
+        (
+            CodexCredentialError::NativeRefreshRequired,
+            ErrorKind::AuthenticationExpired,
+        ),
+        (
+            CodexCredentialError::ReadOnlySource,
+            ErrorKind::AuthenticationExpired,
+        ),
+    ];
+
+    for (credential, expected_kind) in cases {
+        let error = CodexCredentialLoadError::Credential(credential);
+        assert_eq!(
+            error.attempt_failure(),
+            Some(CodexAttemptFailure::Credential(credential))
+        );
+        assert_eq!(
+            error.classified().map(|classified| classified.kind()),
+            Some(expected_kind)
+        );
+    }
+}
+
+#[test]
+fn cancelled_credential_load_remains_a_distinct_control_flow_outcome() {
+    let error = CodexCredentialLoadError::Cancelled;
+
+    assert!(matches!(error, CodexCredentialLoadError::Cancelled));
+    assert_eq!(error.attempt_failure(), None);
+    assert_eq!(error.classified(), None);
 }
 
 #[test]

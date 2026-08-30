@@ -5,13 +5,15 @@ use std::fmt::{self, Debug, Formatter};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Component, Path, PathBuf};
 
+use oab_domain::{ClassifiedError, ErrorKind};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
 use super::codex::{
-    CodexBearerCredentials, CodexCredentialError, CodexCredentialSource, CodexPatCredentials,
-    CodexPatHomeScope, CodexPatRoot, parse_codex_bearer, parse_native_codex_pat,
+    CodexAttemptFailure, CodexBearerCredentials, CodexCredentialError, CodexCredentialSource,
+    CodexPatCredentials, CodexPatHomeScope, CodexPatRoot, parse_codex_bearer,
+    parse_native_codex_pat,
 };
 use crate::provider_files::{ProviderFileContents, ProviderFileError, ProviderFileRoot};
 
@@ -32,6 +34,41 @@ pub enum CodexCredentialLoadError {
     /// Cooperative cancellation stopped credential acquisition.
     #[error("Codex credential acquisition was cancelled")]
     Cancelled,
+}
+
+impl CodexCredentialLoadError {
+    /// Credential failure consumed by the closed Codex source planner.
+    ///
+    /// Cancellation is deliberately not projected into a fallback class, so callers must
+    /// preserve it as a terminal control-flow outcome.
+    #[must_use]
+    pub const fn attempt_failure(self) -> Option<CodexAttemptFailure> {
+        match self {
+            Self::Credential(error) => Some(CodexAttemptFailure::Credential(error)),
+            Self::Cancelled => None,
+        }
+    }
+
+    /// Public-safe domain projection for credential failures.
+    ///
+    /// Cancellation remains outside the public error vocabulary and must be propagated by the
+    /// caller rather than presented as an authentication or transport failure.
+    #[must_use]
+    pub fn classified(self) -> Option<ClassifiedError> {
+        let Self::Credential(error) = self else {
+            return None;
+        };
+        let kind = match error {
+            CodexCredentialError::NotFound
+            | CodexCredentialError::Unreadable
+            | CodexCredentialError::MissingTokens => ErrorKind::MissingCredential,
+            CodexCredentialError::Invalid => ErrorKind::Parse,
+            CodexCredentialError::NativeRefreshRequired | CodexCredentialError::ReadOnlySource => {
+                ErrorKind::AuthenticationExpired
+            }
+        };
+        Some(ClassifiedError::new(kind))
+    }
 }
 
 struct CodexCredentialLocation {
