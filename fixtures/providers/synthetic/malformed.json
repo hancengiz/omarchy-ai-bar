@@ -1,0 +1,8 @@
+{
+  "quotas": [
+    {
+      "name": "response-canary",
+      "limit": "not-a-number"
+    }
+  ]
+}

@@ -17,6 +17,7 @@ pub mod neuralwatt;
 pub mod openai;
 pub mod openrouter;
 pub mod sub2api;
+pub mod synthetic;
 pub mod warp;
 pub mod wayfinder;
 pub mod xai;

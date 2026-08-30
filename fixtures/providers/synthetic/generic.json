@@ -1,0 +1,25 @@
+{
+  "plan_name": "Team",
+  "limits": {
+    "a-first": {
+      "used_messages": "3",
+      "available": "7",
+      "windowHours": "2"
+    },
+    "m-second": {
+      "percent_remaining": "0.25",
+      "windowSeconds": 3600,
+      "resetAt": "not-a-date",
+      "reset_at": 1735689600
+    },
+    "z-third": {
+      "usage_percent": 0.5,
+      "windowLabel": " .5 days ",
+      "next_tick_percent": 3
+    },
+    "zz-cost": {
+      "percent": 20,
+      "max_credits": "$1,000.50"
+    }
+  }
+}
