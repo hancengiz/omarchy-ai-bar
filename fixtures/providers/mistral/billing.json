@@ -1,0 +1,97 @@
+{
+  "completion": {
+    "models": {
+      "mistral-large-latest::completion": {
+        "input": [
+          {
+            "billing_metric": "large_input",
+            "billing_group": "tokens",
+            "timestamp": "2025-11-14T10:00:00Z",
+            "value": 11121
+          }
+        ],
+        "output": [
+          {
+            "billing_metric": "large_output",
+            "billing_group": "tokens",
+            "timestamp": "2025-11-14T10:00:00Z",
+            "value_paid": 1115,
+            "value": 999999
+          }
+        ]
+      },
+      "mistral-small-latest::completion": {
+        "input": [
+          {
+            "billing_metric": "small_input",
+            "billing_group": "tokens",
+            "billing_display_name": "Mistral Small",
+            "timestamp": "2025-11-14T12:00:00Z",
+            "value": 20
+          },
+          {
+            "billing_metric": "small_input",
+            "billing_group": "tokens",
+            "billing_display_name": "Mistral Small",
+            "timestamp": "2025-11-24T12:00:00Z",
+            "value": 100
+          }
+        ],
+        "output": [
+          {
+            "billing_metric": "small_output",
+            "billing_group": "tokens",
+            "billing_display_name": "Mistral Small",
+            "timestamp": "2025-11-14T12:00:00Z",
+            "value": 500
+          },
+          {
+            "billing_metric": "small_output",
+            "billing_group": "tokens",
+            "billing_display_name": "Mistral Small",
+            "timestamp": "2025-11-24T12:00:00Z",
+            "value": 2482
+          }
+        ],
+        "cached": [
+          {
+            "billing_metric": "small_cached",
+            "billing_group": "tokens",
+            "billing_display_name": "Mistral Small",
+            "timestamp": "2025-11-24T12:00:00Z",
+            "value": 30
+          }
+        ]
+      }
+    }
+  },
+  "libraries_api": {
+    "pages": {
+      "models": {
+        "mistral-ocr-latest::pages": {
+          "input": [
+            {
+              "billing_metric": "ocr_pages",
+              "billing_group": "pages",
+              "billing_display_name": "OCR Pages",
+              "timestamp": "2025-11-15T09:00:00Z",
+              "value": 42
+            }
+          ]
+        }
+      }
+    }
+  },
+  "start_date": "2025-11-01T00:00:00Z",
+  "end_date": "2025-11-30T23:59:59Z",
+  "currency": "eur",
+  "currency_symbol": "€",
+  "prices": [
+    { "billing_metric": "large_input", "billing_group": "tokens", "price": "0.0000017" },
+    { "billing_metric": "large_output", "billing_group": "tokens", "price": "0.0000051" },
+    { "billing_metric": "small_input", "billing_group": "tokens", "price": "0.000000085" },
+    { "billing_metric": "small_output", "billing_group": "tokens", "price": "0.000000255" },
+    { "billing_metric": "small_cached", "billing_group": "tokens", "price": "0.00000005" },
+    { "billing_metric": "ocr_pages", "billing_group": "pages", "price": "0.01" }
+  ]
+}

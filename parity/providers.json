@@ -1079,18 +1079,27 @@
         "Sources/CodexBarCore/Providers/ProviderManifest.swift"
       ],
       "cells": {
-        "authentication": "planned",
-        "usage_resets": "planned",
-        "costs_history": "planned",
-        "sessions": "planned",
-        "browser": "planned",
-        "status_errors": "planned",
-        "refresh": "planned",
-        "cli_server": "planned",
+        "authentication": "passing",
+        "usage_resets": "passing",
+        "costs_history": "passing",
+        "sessions": "not-applicable",
+        "browser": "passing",
+        "status_errors": "passing",
+        "refresh": "passing",
+        "cli_server": "in-progress",
         "qml_ui": "planned"
       },
-      "status": "planned",
-      "tests": []
+      "status": "in-progress",
+      "tests": [
+        "crates/providers/tests/browser_cookie.rs",
+        "crates/providers/tests/cookie.rs",
+        "crates/providers/tests/http_transport.rs",
+        "crates/providers/tests/manual_capture.rs",
+        "crates/providers/tests/provider_mistral.rs"
+      ],
+      "not_applicable_reasons": {
+        "sessions": "The pinned baseline exposes Mistral billing usage, credits, and Vibe quota, not agent-session history."
+      }
     },
     {
       "id": "deepseek",

@@ -27,6 +27,7 @@ pub mod litellm;
 pub mod llmproxy;
 pub mod manus;
 pub mod mimo;
+pub mod mistral;
 pub mod moonshot;
 pub mod neuralwatt;
 pub mod openai;
