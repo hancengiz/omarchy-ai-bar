@@ -38,8 +38,8 @@ tell a restarted Omarchy shell to use the development executable:
 ```sh
 OMARCHY_AI_BAR_BRIDGE_SOURCE="$PWD/qml/omarchy-plugin" \
   "$PWD/target/release/omarchy-ai-bar" bridge install
-systemctl --user set-environment \
-  OMARCHY_AI_BAR_EXECUTABLE="$PWD/target/release/omarchy-ai-bar"
+hyprctl eval \
+  "hl.env(\"OMARCHY_AI_BAR_EXECUTABLE\", \"$PWD/target/release/omarchy-ai-bar\")"
 omarchy restart shell
 ```
 
@@ -56,7 +56,7 @@ bridge afterward:
 
 ```sh
 target/release/omarchy-ai-bar bridge uninstall
-systemctl --user unset-environment OMARCHY_AI_BAR_EXECUTABLE
+hyprctl eval 'hl.env("OMARCHY_AI_BAR_EXECUTABLE", "")'
 omarchy restart shell
 ```
 

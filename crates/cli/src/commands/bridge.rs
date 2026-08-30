@@ -7,6 +7,8 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread;
+use std::time::Duration;
 
 use nix::fcntl::{AT_FDCWD, RenameFlags, renameat2};
 use serde::{Deserialize, Serialize};
@@ -29,6 +31,8 @@ const MAX_MARKER_BYTES: u64 = 16 * 1024;
 const MAX_PAYLOAD_FILE_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_PAYLOAD_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_PAYLOAD_FILES: usize = 4_096;
+const ENABLE_DISCOVERY_ATTEMPTS: usize = 20;
+const ENABLE_DISCOVERY_INTERVAL: Duration = Duration::from_millis(100);
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Stable failures surfaced by bridge lifecycle commands.
@@ -146,14 +150,26 @@ impl OmarchyPluginCommands for SystemOmarchyCommands {
     }
 
     fn enable(&self, plugin_id: &str) -> Result<(), BridgeError> {
-        run_command(
-            omarchy_executable(),
-            [
-                OsStr::new("plugin"),
-                OsStr::new("enable"),
-                OsStr::new(plugin_id),
-            ],
-        )
+        let arguments = [
+            OsStr::new("plugin"),
+            OsStr::new("enable"),
+            OsStr::new(plugin_id),
+        ];
+        for attempt in 0..ENABLE_DISCOVERY_ATTEMPTS {
+            let status = Command::new(omarchy_executable())
+                .args(arguments)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .map_err(|_| BridgeError::OmarchyCommand)?;
+            if status.success() {
+                return Ok(());
+            }
+            if attempt + 1 < ENABLE_DISCOVERY_ATTEMPTS {
+                thread::sleep(ENABLE_DISCOVERY_INTERVAL);
+            }
+        }
+        Err(BridgeError::OmarchyCommand)
     }
 
     fn disable(&self, plugin_id: &str) -> Result<(), BridgeError> {
