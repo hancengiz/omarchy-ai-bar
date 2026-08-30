@@ -237,6 +237,40 @@ fn copilot_budget_browser_capability_is_auxiliary_to_oauth() {
 }
 
 #[test]
+fn codex_api_key_source_is_additive_and_does_not_change_claude() {
+    assert_eq!(
+        descriptor_for(ProviderId::Codex)
+            .sources()
+            .iter()
+            .collect::<Vec<_>>(),
+        [
+            ProviderSource::ApiKey,
+            ProviderSource::BrowserSession,
+            ProviderSource::OAuth,
+            ProviderSource::Cli,
+            ProviderSource::LocalData,
+        ]
+    );
+    assert_eq!(
+        descriptor_for(ProviderId::Claude)
+            .sources()
+            .iter()
+            .collect::<Vec<_>>(),
+        [
+            ProviderSource::BrowserSession,
+            ProviderSource::OAuth,
+            ProviderSource::Cli,
+            ProviderSource::LocalData,
+        ]
+    );
+    assert!(
+        !descriptor_for(ProviderId::Claude)
+            .sources()
+            .contains(ProviderSource::ApiKey)
+    );
+}
+
+#[test]
 fn browser_and_manual_provider_metadata_matches_the_pinned_baseline() {
     use ProviderSource as Source;
 

@@ -267,7 +267,12 @@ const fn sources_for(id: ProviderId) -> SourceSet {
             .with(Source::BrowserSession)
             .with(Source::Cli)
             .with(Source::LocalData),
-        Id::Codex | Id::Claude => SourceSet::one(Source::OAuth)
+        Id::Codex => SourceSet::one(Source::ApiKey)
+            .with(Source::OAuth)
+            .with(Source::Cli)
+            .with(Source::LocalData)
+            .with(Source::BrowserSession),
+        Id::Claude => SourceSet::one(Source::OAuth)
             .with(Source::Cli)
             .with(Source::LocalData)
             .with(Source::BrowserSession),
