@@ -1,6 +1,7 @@
 //! Native first-party provider modules.
 
 pub mod aiand;
+pub mod alibaba;
 pub mod amp;
 pub mod azureopenai;
 pub mod bedrock;
@@ -26,8 +27,10 @@ pub mod neuralwatt;
 pub mod openai;
 pub mod openrouter;
 pub mod poe;
+pub mod sakana;
 pub mod sub2api;
 pub mod synthetic;
+pub mod t3chat;
 pub mod venice;
 pub mod vertexai;
 pub mod warp;
