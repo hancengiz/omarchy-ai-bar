@@ -217,6 +217,26 @@ fn linux_cli_and_local_provider_sources_are_exact_and_actionable() {
 }
 
 #[test]
+fn copilot_budget_browser_capability_is_auxiliary_to_oauth() {
+    let descriptor = descriptor_for(ProviderId::Copilot);
+
+    assert_eq!(
+        descriptor.sources().iter().collect::<Vec<_>>(),
+        [ProviderSource::OAuth]
+    );
+    assert!(
+        descriptor
+            .capabilities()
+            .contains(ProviderCapability::BrowserAuth)
+    );
+    assert!(
+        descriptor
+            .capabilities()
+            .contains(ProviderCapability::LoginAction)
+    );
+}
+
+#[test]
 fn browser_and_manual_provider_metadata_matches_the_pinned_baseline() {
     use ProviderSource as Source;
 

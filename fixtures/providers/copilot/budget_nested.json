@@ -1,0 +1,47 @@
+{
+  "payload": {
+    "budgets": [
+      {
+        "uuid": "product-budget",
+        "budgetProductSkus": [
+          {
+            "productName": "Copilot"
+          }
+        ],
+        "budgetScope": "customer",
+        "targetAmount": {
+          "cents": 10000
+        },
+        "currentAmount": "$15.00"
+      },
+      {
+        "budgetId": 42,
+        "pricingTargetType": "BundlePricing",
+        "pricingTargetId": "coding agent premium requests",
+        "spendingLimit": "20.00 USD",
+        "amountUsed": {
+          "value": 5
+        }
+      },
+      {
+        "id": "spark-overage",
+        "sku": "Spark Premium Request",
+        "limit": 1,
+        "spent": 20
+      },
+      {
+        "id": "unrelated",
+        "sku": "actions_linux",
+        "limit": 100,
+        "spent": 50
+      },
+      {
+        "id": "zero-budget",
+        "sku": "copilot_premium_request",
+        "limit": 0,
+        "spent": 0
+      }
+    ],
+    "has_next_page": false
+  }
+}

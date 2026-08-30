@@ -1,0 +1,12 @@
+{
+  "budgets": [
+    {
+      "uuid": "duplicate",
+      "pricingTargetId": "premium_requests",
+      "targetAmount": 100,
+      "currentAmount": 25
+    }
+  ],
+  "hasNextPage": null,
+  "has_next_page": true
+}

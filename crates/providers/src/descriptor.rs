@@ -142,6 +142,7 @@ const fn capabilities_for(id: ProviderId) -> CapabilitySet {
     let mut capabilities = CapabilitySet::USAGE;
     if sources.contains(ProviderSource::ManualCookie)
         || sources.contains(ProviderSource::BrowserSession)
+        || matches!(id, ProviderId::Copilot)
     {
         capabilities = capabilities.with(ProviderCapability::BrowserAuth);
     }

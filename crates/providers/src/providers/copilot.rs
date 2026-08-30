@@ -1,6 +1,10 @@
 //! GitHub Copilot OAuth usage and quota normalization.
+//!
+//! Optional web-budget enrichment is restricted to public GitHub OAuth accounts.
+//! Enterprise-host tokens are never rebound to `api.github.com`; they retain the
+//! successful base sample and skip all public GitHub identity and cookie traffic.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Debug, Formatter};
 use std::future::Future;
 use std::pin::Pin;
@@ -9,25 +13,39 @@ use std::time::{Duration, Instant};
 
 use oab_domain::{
     AccountScope, BoundedText, ClassifiedError, DetailRow, DetailSection, DetailSensitivity,
-    ErrorKind, ProviderId, RateWindow, Timestamp, UsagePercent, UsageSample, WindowUsage,
+    ErrorKind, NamedRateWindow, ProviderId, RateWindow, Timestamp, UsagePercent, UsageSample,
+    WindowUsage,
 };
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 use serde::Deserialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
+use time::{Date, Month, OffsetDateTime, PrimitiveDateTime, Time, UtcOffset};
 use tokio_util::sync::CancellationToken;
-use url::Url;
+use url::{Host, Url};
 use zeroize::Zeroizing;
 
+use crate::browser_cookie::{
+    BrowserCookieDomainAllowlist, BrowserCookieDomainPolicy, BrowserCookieDomainRule,
+    ChromiumCookieDecryptor, import_browser_cookie_stores_with_decryptor,
+};
+use crate::browser_profile::BrowserProfileDiscovery;
 use crate::context::{ProviderAdapter, ProviderContext, ProviderFuture};
+use crate::cookie::{
+    CookieHeaderNormalizer, CookieImport, CookieImportOrder, CookieJar, CookieSourceId,
+    CookieUrlPolicy, ValidatedCookieUrl,
+};
 use crate::descriptor::ProviderSource;
 use crate::endpoint::{EndpointClass, EndpointPolicy, classify_https_endpoint};
 use crate::fixed_api::{ApiKeyCredential, FixedApiClient};
+use crate::manual_capture::{CaptureHeader, ManualCaptureError, ManualCapturePolicy};
 use crate::normalize::{UsageSampleBuilder, system_timestamp};
 use crate::registry::descriptor_for;
 use crate::retry::RetryPolicy;
 use crate::transport::{
-    HttpRequest, HttpTransport, RequestAccept, RequestContentType, TransportConfig,
+    Authentication, HttpRequest, HttpTransport, RequestAccept, RequestContentType, TransportConfig,
+    TransportError,
 };
 
 const DEFAULT_HOST: &str = "github.com";
@@ -44,6 +62,36 @@ const MAX_VERIFICATION_URL_BYTES: usize = 8 * 1024;
 const MAX_DEVICE_FLOW_LIFETIME: Duration = Duration::from_hours(24);
 const MAX_DEVICE_POLL_INTERVAL: Duration = Duration::from_mins(5);
 const SLOW_DOWN_DELAY: Duration = Duration::from_secs(5);
+const BUDGET_SETTINGS_URL: &str = "https://github.com/settings/billing/budgets";
+const BUDGET_ORIGIN: &str = "https://github.com";
+const BUDGET_USER_AGENT: &str = "omarchy-ai-bar";
+const MAX_BUDGET_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+const MAX_BUDGET_JSON_DEPTH: usize = 32;
+const MAX_BUDGET_JSON_NODES: usize = 16 * 1024;
+const MAX_BUDGET_OBJECT_FIELDS: usize = 256;
+const MAX_BUDGET_ARRAY_ITEMS: usize = 2_048;
+const MAX_BUDGET_STRING_BYTES: usize = 64 * 1024;
+const MAX_BUDGET_FIELD_BYTES: usize = 8 * 1024;
+const MAX_BUDGETS_PER_PAGE: usize = 100;
+const MAX_BUDGET_PAGES: usize = 20;
+const MAX_TOTAL_BUDGETS: usize = MAX_BUDGETS_PER_PAGE * MAX_BUDGET_PAGES;
+const MAX_BUDGET_WINDOWS: usize = 16;
+const MAX_BROWSER_PROFILES: usize = 64;
+const MAX_BROWSER_SESSIONS: usize = 16;
+const MAX_HTML_META_TAGS: usize = 512;
+const MAX_HTML_ATTRIBUTES: usize = 64;
+const MAX_NONCE_BYTES: usize = 8 * 1024;
+const MAX_IDENTITY_BYTES: usize = 256;
+const MAX_NAMED_WINDOW_ID_BYTES: usize = 128;
+const BROWSER_COOKIE_SOURCE: CookieSourceId = CookieSourceId::new(61);
+const BROWSER_ROOT_COOKIE_SOURCE: CookieSourceId = CookieSourceId::new(62);
+const SESSION_COOKIE_NAMES: [&str; 5] = [
+    "user_session",
+    "__Host-user_session_same_site",
+    "_gh_sess",
+    "logged_in",
+    "dotcom_user",
+];
 
 /// Monotonic time boundary used by the device authorization state machine.
 ///
@@ -499,9 +547,1340 @@ fn form_body(parameters: &[(&str, &str)]) -> Vec<u8> {
     serializer.finish().into_bytes()
 }
 
+/// Fixed GitHub billing-settings route used by optional Copilot budget enrichment.
+pub struct CopilotBudgetRouteSet {
+    settings: Url,
+    endpoints: EndpointPolicy,
+}
+
+impl CopilotBudgetRouteSet {
+    /// Creates the pinned public GitHub budget route.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable API error only if the compile-time route contract is invalid.
+    pub fn production() -> Result<Self, ClassifiedError> {
+        let settings =
+            Url::parse(BUDGET_SETTINGS_URL).map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        let endpoints = EndpointPolicy::new([(BUDGET_ORIGIN, EndpointClass::PublicHttps)])
+            .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        Self::new(settings, endpoints)
+    }
+
+    /// Creates an exact loopback billing-settings route for deterministic tests.
+    ///
+    /// # Errors
+    ///
+    /// Rejects non-loopback, credential-bearing, queried, or incorrectly pathed URLs.
+    #[doc(hidden)]
+    pub fn loopback(settings: Url) -> Result<Self, ClassifiedError> {
+        let origin = settings.origin().ascii_serialization();
+        let endpoints = EndpointPolicy::new([(origin, EndpointClass::LoopbackDevelopment)])
+            .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        Self::new(settings, endpoints)
+    }
+
+    fn new(settings: Url, endpoints: EndpointPolicy) -> Result<Self, ClassifiedError> {
+        if !settings.username().is_empty()
+            || settings.password().is_some()
+            || settings.path() != "/settings/billing/budgets"
+            || settings.query().is_some()
+            || settings.fragment().is_some()
+        {
+            return Err(ClassifiedError::new(ErrorKind::Api));
+        }
+        endpoints
+            .validate(&settings)
+            .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        Ok(Self {
+            settings,
+            endpoints,
+        })
+    }
+
+    fn page(&self, page: usize) -> Url {
+        let mut url = self.settings.clone();
+        url.query_pairs_mut()
+            .append_pair("page", &page.to_string())
+            .append_pair("page_size", "10")
+            .append_pair("scope", "customer");
+        url
+    }
+}
+
+impl Debug for CopilotBudgetRouteSet {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CopilotBudgetRouteSet")
+            .field("origin", &self.settings.origin().ascii_serialization())
+            .field("path", &"<redacted>")
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BudgetCookieMode {
+    Manual,
+    Browser,
+}
+
+struct BudgetWebSession {
+    cookie: Zeroizing<String>,
+}
+
+impl Debug for BudgetWebSession {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str("BudgetWebSession(<redacted>)")
+    }
+}
+
+/// Explicit, optional GitHub web-budget configuration attached to an OAuth provider.
+///
+/// This object never becomes the provider's authentication source. It only adds
+/// best-effort quota windows after the OAuth usage request has succeeded and the
+/// same OAuth credential has identified its GitHub account through `/user`.
+pub struct CopilotBudgetEnrichment {
+    mode: BudgetCookieMode,
+    routes: CopilotBudgetRouteSet,
+    sessions: Vec<BudgetWebSession>,
+    transport: HttpTransport,
+    local_offset: Option<UtcOffset>,
+}
+
+impl CopilotBudgetEnrichment {
+    /// Parses a manual Cookie header or non-executed cURL capture for GitHub budgets.
+    ///
+    /// Only the pinned session-cookie names are retained. A captured URL, when
+    /// present, must be the exact GitHub billing-budgets path.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable missing-credential, parse, or route errors without retaining
+    /// input text in diagnostics.
+    pub fn manual(raw: &str) -> Result<Self, ClassifiedError> {
+        Self::from_manual_capture_routes(raw, CopilotBudgetRouteSet::production()?)
+    }
+
+    /// Builds browser enrichment from explicitly enabled Linux profile discovery.
+    ///
+    /// Chromium Network and root stores become separate candidates in that order;
+    /// Firefox and Zen use one shared SQLite candidate. Profiles stay isolated and
+    /// duplicate sessions are removed.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable bounded discovery, cookie, or route errors. An empty profile
+    /// set is valid because enrichment is optional.
+    pub fn browser(
+        discovery: &BrowserProfileDiscovery,
+        decryptor: &dyn ChromiumCookieDecryptor,
+        now: OffsetDateTime,
+    ) -> Result<Self, ClassifiedError> {
+        Self::from_browser_routes(
+            discovery,
+            decryptor,
+            now,
+            CopilotBudgetRouteSet::production()?,
+        )
+    }
+
+    /// Injects a route while retaining production manual-capture authority.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable capture, cookie, or transport configuration errors.
+    #[doc(hidden)]
+    pub fn from_manual_capture_routes(
+        raw: &str,
+        routes: CopilotBudgetRouteSet,
+    ) -> Result<Self, ClassifiedError> {
+        let policy = ManualCapturePolicy::new(["github.com"], [CaptureHeader::Cookie])
+            .map_err(classify_budget_capture_error)?
+            .with_ignored_url_query();
+        let capture = policy.parse(raw).map_err(classify_budget_capture_error)?;
+        if capture.url().is_some_and(|url| {
+            !url.host_str()
+                .is_some_and(|host| host.eq_ignore_ascii_case("github.com"))
+                || url.path() != "/settings/billing/budgets"
+        }) {
+            return Err(ClassifiedError::new(ErrorKind::Parse));
+        }
+        let raw_cookie = capture
+            .header(CaptureHeader::Cookie)
+            .ok_or_else(|| ClassifiedError::new(ErrorKind::MissingCredential))?;
+        let cookie = normalized_budget_cookie(raw_cookie)?;
+        Self::build(
+            BudgetCookieMode::Manual,
+            routes,
+            vec![BudgetWebSession { cookie }],
+        )
+    }
+
+    /// Injects a route for deterministic browser-profile and HTTP tests.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable bounded discovery, cookie, or transport errors. Individual
+    /// unreadable profiles are skipped like the pinned browser rotation.
+    #[doc(hidden)]
+    pub fn from_browser_routes(
+        discovery: &BrowserProfileDiscovery,
+        decryptor: &dyn ChromiumCookieDecryptor,
+        now: OffsetDateTime,
+        routes: CopilotBudgetRouteSet,
+    ) -> Result<Self, ClassifiedError> {
+        let sessions = budget_browser_sessions(discovery, decryptor, now)?;
+        Self::build(BudgetCookieMode::Browser, routes, sessions)
+    }
+
+    fn build(
+        mode: BudgetCookieMode,
+        routes: CopilotBudgetRouteSet,
+        sessions: Vec<BudgetWebSession>,
+    ) -> Result<Self, ClassifiedError> {
+        if sessions.len() > MAX_BROWSER_SESSIONS {
+            return Err(ClassifiedError::new(ErrorKind::Parse));
+        }
+        let transport = HttpTransport::new(routes.endpoints.clone(), budget_transport_config()?)
+            .map_err(|error| error.classified())?;
+        Ok(Self {
+            mode,
+            routes,
+            sessions,
+            transport,
+            local_offset: None,
+        })
+    }
+
+    /// Uses one fixed local-calendar offset at both fetch and reset time.
+    ///
+    /// This deterministic seam intentionally disables production DST resolution.
+    #[must_use]
+    pub const fn with_local_offset(mut self, offset: UtcOffset) -> Self {
+        self.local_offset = Some(offset);
+        self
+    }
+}
+
+impl Debug for CopilotBudgetEnrichment {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CopilotBudgetEnrichment")
+            .field("mode", &self.mode)
+            .field("routes", &self.routes)
+            .field("session_count", &self.sessions.len())
+            .field("local_offset", &self.local_offset)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BudgetFailure {
+    NoSession,
+    NotLoggedIn,
+    AccountMismatch,
+    Status,
+    InvalidResponse,
+    Network,
+}
+
+impl From<ClassifiedError> for BudgetFailure {
+    fn from(error: ClassifiedError) -> Self {
+        match error.kind() {
+            ErrorKind::AuthenticationExpired | ErrorKind::PermissionDenied => Self::NotLoggedIn,
+            ErrorKind::Network => Self::Network,
+            ErrorKind::Api
+            | ErrorKind::Parse
+            | ErrorKind::MissingCredential
+            | ErrorKind::RateLimited
+            | ErrorKind::ProviderUnavailable => Self::InvalidResponse,
+        }
+    }
+}
+
+struct GitHubOAuthIdentity {
+    id: String,
+    _login: String,
+}
+
+struct GitHubWebIdentity {
+    id: Option<String>,
+    _login: Option<String>,
+}
+
+struct BudgetPageMetadata {
+    nonce: Option<Zeroizing<String>>,
+    identity: Option<GitHubWebIdentity>,
+}
+
+struct BudgetPage {
+    budgets: Vec<BudgetRecord>,
+    has_next_page: bool,
+}
+
+struct BudgetRecord {
+    id: Option<String>,
+    name: Option<String>,
+    budget_type: Option<String>,
+    product_skus: Vec<String>,
+    _scope: Option<String>,
+    entity_name: Option<String>,
+    budget_amount: f64,
+    current_amount: f64,
+}
+
+impl BudgetRecord {
+    fn selectors(&self) -> BTreeSet<String> {
+        self.product_skus
+            .iter()
+            .map(String::as_str)
+            .chain(self.budget_type.as_deref())
+            .chain(self.entity_name.as_deref())
+            .chain(self.name.as_deref())
+            .filter_map(normalized_billing_identifier)
+            .collect()
+    }
+}
+
+impl CopilotBudgetEnrichment {
+    async fn fetch_for_identity(
+        &self,
+        cancellation: &CancellationToken,
+        expected: &GitHubOAuthIdentity,
+        fetched_at: Timestamp,
+    ) -> Result<Vec<NamedRateWindow>, BudgetFailure> {
+        if self.sessions.is_empty() {
+            return Err(BudgetFailure::NoSession);
+        }
+        for session in &self.sessions {
+            match self
+                .fetch_session(cancellation, session, expected, fetched_at)
+                .await
+            {
+                Ok(windows) => return Ok(windows),
+                Err(BudgetFailure::NotLoggedIn | BudgetFailure::AccountMismatch)
+                    if self.mode == BudgetCookieMode::Browser => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Err(BudgetFailure::NoSession)
+    }
+
+    async fn fetch_session(
+        &self,
+        cancellation: &CancellationToken,
+        session: &BudgetWebSession,
+        expected: &GitHubOAuthIdentity,
+        fetched_at: Timestamp,
+    ) -> Result<Vec<NamedRateWindow>, BudgetFailure> {
+        let metadata = self.fetch_metadata(cancellation, session).await?;
+        let Some(actual) = metadata.identity else {
+            return Err(BudgetFailure::AccountMismatch);
+        };
+        if actual.id.as_deref() != Some(expected.id.as_str()) {
+            return Err(BudgetFailure::AccountMismatch);
+        }
+
+        let mut records = Vec::new();
+        let mut page = 1_usize;
+        let mut should_continue = true;
+        while should_continue && page <= MAX_BUDGET_PAGES {
+            let response = self
+                .fetch_page(
+                    cancellation,
+                    session,
+                    metadata.nonce.as_ref().map(|nonce| nonce.as_str()),
+                    page,
+                )
+                .await?;
+            if records.len().saturating_add(response.budgets.len()) > MAX_TOTAL_BUDGETS {
+                return Err(BudgetFailure::InvalidResponse);
+            }
+            records.extend(response.budgets);
+            should_continue = response.has_next_page;
+            page = page.saturating_add(1);
+        }
+        budget_windows_from_records(&records, fetched_at, self.local_offset)
+            .map_err(BudgetFailure::from)
+    }
+
+    async fn fetch_metadata(
+        &self,
+        cancellation: &CancellationToken,
+        session: &BudgetWebSession,
+    ) -> Result<BudgetPageMetadata, BudgetFailure> {
+        let authentication = Authentication::cookie(session.cookie.as_str().to_owned())
+            .map_err(|_| BudgetFailure::InvalidResponse)?;
+        let request = HttpRequest::get(self.routes.settings.clone())
+            .accept(RequestAccept::Html)
+            .authentication(authentication)
+            .public_header("user-agent", BUDGET_USER_AGENT)
+            .map_err(|_| BudgetFailure::InvalidResponse)?;
+        let response = self
+            .transport
+            .send(&request, cancellation)
+            .await
+            .map_err(|error| classify_budget_transport_error(&error))?;
+        if response.status() != 200 {
+            return Err(BudgetFailure::Status);
+        }
+        let html =
+            std::str::from_utf8(response.body()).map_err(|_| BudgetFailure::InvalidResponse)?;
+        parse_budget_page_metadata(html)
+    }
+
+    async fn fetch_page(
+        &self,
+        cancellation: &CancellationToken,
+        session: &BudgetWebSession,
+        nonce: Option<&str>,
+        page: usize,
+    ) -> Result<BudgetPage, BudgetFailure> {
+        let authentication = Authentication::cookie(session.cookie.as_str().to_owned())
+            .map_err(|_| BudgetFailure::InvalidResponse)?;
+        let mut request = HttpRequest::get(self.routes.page(page))
+            .accept(RequestAccept::Json)
+            .authentication(authentication)
+            .public_header("user-agent", BUDGET_USER_AGENT)
+            .map_err(|_| BudgetFailure::InvalidResponse)?
+            .public_header("referer", self.routes.settings.as_str())
+            .map_err(|_| BudgetFailure::InvalidResponse)?
+            .public_header("x-requested-with", "XMLHttpRequest")
+            .map_err(|_| BudgetFailure::InvalidResponse)?
+            .public_header("github-verified-fetch", "true")
+            .map_err(|_| BudgetFailure::InvalidResponse)?;
+        if let Some(nonce) = nonce.filter(|nonce| !nonce.is_empty()) {
+            request = request
+                .sensitive_header("x-fetch-nonce", nonce.to_owned())
+                .map_err(|_| BudgetFailure::InvalidResponse)?;
+        }
+        let response = self
+            .transport
+            .send(&request, cancellation)
+            .await
+            .map_err(|error| classify_budget_transport_error(&error))?;
+        if response.status() != 200 {
+            return Err(BudgetFailure::Status);
+        }
+        if std::str::from_utf8(response.body()).is_ok_and(looks_like_github_login) {
+            return Err(BudgetFailure::NotLoggedIn);
+        }
+        parse_budget_page(response.body())
+    }
+}
+
+fn classify_budget_transport_error(error: &TransportError) -> BudgetFailure {
+    match error {
+        TransportError::AuthenticationExpired | TransportError::PermissionDenied => {
+            BudgetFailure::NotLoggedIn
+        }
+        TransportError::Cancelled
+        | TransportError::Timeout
+        | TransportError::Network
+        | TransportError::RequestTimeout => BudgetFailure::Network,
+        TransportError::Endpoint(_)
+        | TransportError::InvalidConfiguration
+        | TransportError::ResponseTooLarge
+        | TransportError::MalformedResponse
+        | TransportError::TooManyRedirects
+        | TransportError::RateLimited { .. }
+        | TransportError::ProviderUnavailable { .. }
+        | TransportError::Api { .. } => BudgetFailure::Status,
+    }
+}
+
+fn classify_budget_capture_error(error: ManualCaptureError) -> ClassifiedError {
+    let kind = match error {
+        ManualCaptureError::MissingSecret
+        | ManualCaptureError::InvalidSecret
+        | ManualCaptureError::DisallowedHeader => ErrorKind::MissingCredential,
+        ManualCaptureError::InvalidPolicy => ErrorKind::Api,
+        ManualCaptureError::InputTooLarge
+        | ManualCaptureError::InvalidSyntax
+        | ManualCaptureError::UnsafeSyntax
+        | ManualCaptureError::UnsafeOption
+        | ManualCaptureError::TooManyTokens
+        | ManualCaptureError::TooManyHeaders
+        | ManualCaptureError::DuplicateSecret
+        | ManualCaptureError::ConflictingHeader
+        | ManualCaptureError::DisallowedUrl => ErrorKind::Parse,
+    };
+    ClassifiedError::new(kind)
+}
+
+fn normalized_budget_cookie(raw: &str) -> Result<Zeroizing<String>, ClassifiedError> {
+    let target = ValidatedCookieUrl::parse(BUDGET_SETTINGS_URL, CookieUrlPolicy::HttpsOnly)
+        .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+    normalized_budget_cookie_for_target(raw, &target)
+}
+
+fn normalized_budget_cookie_for_target(
+    raw: &str,
+    target: &ValidatedCookieUrl,
+) -> Result<Zeroizing<String>, ClassifiedError> {
+    let normalized = CookieHeaderNormalizer::filtered(Some(raw), &SESSION_COOKIE_NAMES)
+        .map_err(|_| ClassifiedError::new(ErrorKind::Parse))?
+        .ok_or_else(|| ClassifiedError::new(ErrorKind::MissingCredential))?;
+    let import =
+        CookieImport::from_normalized_host_only(CookieSourceId::MANUAL, normalized, target, None)
+            .map_err(|_| ClassifiedError::new(ErrorKind::Parse))?;
+    let order = CookieImportOrder::new([CookieSourceId::MANUAL])
+        .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+    let jar = CookieJar::from_imports(&order, [import])
+        .map_err(|_| ClassifiedError::new(ErrorKind::Parse))?;
+    let header = jar
+        .header_for(target, OffsetDateTime::UNIX_EPOCH)
+        .map_err(|_| ClassifiedError::new(ErrorKind::Parse))?
+        .ok_or_else(|| ClassifiedError::new(ErrorKind::MissingCredential))?;
+    Ok(Zeroizing::new(header.expose().to_owned()))
+}
+
+fn budget_browser_sessions(
+    discovery: &BrowserProfileDiscovery,
+    decryptor: &dyn ChromiumCookieDecryptor,
+    now: OffsetDateTime,
+) -> Result<Vec<BudgetWebSession>, ClassifiedError> {
+    let allowlist = BrowserCookieDomainAllowlist::new([BrowserCookieDomainRule {
+        domain: "github.com",
+        policy: BrowserCookieDomainPolicy::Exact,
+    }])
+    .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+    let target = ValidatedCookieUrl::parse(BUDGET_SETTINGS_URL, CookieUrlPolicy::HttpsOnly)
+        .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+    let report = discovery.discover();
+    if report.profiles().len() > MAX_BROWSER_PROFILES {
+        return Err(ClassifiedError::new(ErrorKind::Parse));
+    }
+    let mut sessions = Vec::new();
+    let mut seen = BTreeSet::<[u8; 32]>::new();
+    for profile in report.profiles() {
+        let Ok(imports) = import_browser_cookie_stores_with_decryptor(
+            profile,
+            [BROWSER_COOKIE_SOURCE, BROWSER_ROOT_COOKIE_SOURCE],
+            &allowlist,
+            decryptor,
+        ) else {
+            continue;
+        };
+        for import in imports {
+            let order = CookieImportOrder::new([BROWSER_COOKIE_SOURCE, BROWSER_ROOT_COOKIE_SOURCE])
+                .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+            let jar = CookieJar::from_imports(&order, [import])
+                .map_err(|_| ClassifiedError::new(ErrorKind::Parse))?;
+            let Some(header) = jar
+                .header_for(&target, now)
+                .map_err(|_| ClassifiedError::new(ErrorKind::Parse))?
+            else {
+                continue;
+            };
+            let Ok(cookie) = normalized_budget_cookie_for_target(header.expose(), &target) else {
+                continue;
+            };
+            let digest: [u8; 32] = Sha256::digest(cookie.as_bytes()).into();
+            if seen.insert(digest) {
+                sessions.push(BudgetWebSession { cookie });
+                if sessions.len() > MAX_BROWSER_SESSIONS {
+                    return Err(ClassifiedError::new(ErrorKind::Parse));
+                }
+            }
+        }
+    }
+    Ok(sessions)
+}
+
+fn budget_transport_config() -> Result<TransportConfig, ClassifiedError> {
+    TransportConfig::new(
+        Duration::from_secs(5),
+        Duration::from_secs(15),
+        MAX_BUDGET_RESPONSE_BYTES,
+        0,
+        RetryPolicy::none(),
+    )
+    .map_err(|error| error.classified())
+}
+
+fn parse_oauth_identity(body: &[u8]) -> Result<GitHubOAuthIdentity, BudgetFailure> {
+    let value: Value = serde_json::from_slice(body).map_err(|_| BudgetFailure::InvalidResponse)?;
+    validate_budget_json(&value).map_err(BudgetFailure::from)?;
+    let object = value.as_object().ok_or(BudgetFailure::InvalidResponse)?;
+    let id = flexible_identifier(object.get("id"))
+        .filter(|value| !value.is_empty() && value.len() <= MAX_IDENTITY_BYTES)
+        .ok_or(BudgetFailure::InvalidResponse)?;
+    let login = object
+        .get("login")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.len() <= MAX_IDENTITY_BYTES)
+        .ok_or(BudgetFailure::InvalidResponse)?
+        .to_owned();
+    Ok(GitHubOAuthIdentity { id, _login: login })
+}
+
+fn parse_budget_page_metadata(html: &str) -> Result<BudgetPageMetadata, BudgetFailure> {
+    if html.len() > MAX_BUDGET_RESPONSE_BYTES {
+        return Err(BudgetFailure::InvalidResponse);
+    }
+    let tags = meta_attributes(html)?;
+    let id = first_meta_content(
+        &tags,
+        &["octolytics-actor-id", "analytics-user-id", "user-id"],
+    );
+    let login = first_meta_content(
+        &tags,
+        &[
+            "user-login",
+            "octolytics-actor-login",
+            "analytics-user-login",
+        ],
+    );
+    let identity = if id.is_some() || login.is_some() {
+        Some(GitHubWebIdentity { id, _login: login })
+    } else {
+        None
+    };
+    if identity.is_none() && looks_like_github_login(html) {
+        return Err(BudgetFailure::NotLoggedIn);
+    }
+    let nonce = first_meta_content(&tags, &["x-fetch-nonce"])
+        .or_else(|| quoted_assignment(html, "X-Fetch-Nonce"))
+        .or_else(|| quoted_assignment(html, "fetchNonce"))
+        .or_else(|| quoted_assignment(html, "data-fetch-nonce"))
+        .filter(|value| {
+            !value.is_empty()
+                && value.len() <= MAX_NONCE_BYTES
+                && !value.chars().any(char::is_control)
+        })
+        .map(Zeroizing::new);
+    Ok(BudgetPageMetadata { nonce, identity })
+}
+
+fn looks_like_github_login(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    lower.contains("sign in to github")
+        || lower.contains("action=\"/session\"")
+        || lower.contains("action='/session'")
+        || lower.contains("/login?return_to=")
+}
+
+fn meta_attributes(html: &str) -> Result<Vec<BTreeMap<String, String>>, BudgetFailure> {
+    let bytes = html.as_bytes();
+    let mut output = Vec::new();
+    let mut cursor = 0_usize;
+    while let Some(start) = find_ascii_case_insensitive(bytes, b"<meta", cursor) {
+        let boundary = bytes.get(start + 5).copied();
+        if boundary.is_some_and(|byte| !byte.is_ascii_whitespace() && byte != b'>' && byte != b'/')
+        {
+            cursor = start.saturating_add(5);
+            continue;
+        }
+        if output.len() == MAX_HTML_META_TAGS {
+            return Err(BudgetFailure::InvalidResponse);
+        }
+        let relative_end = bytes[start..]
+            .iter()
+            .position(|byte| *byte == b'>')
+            .ok_or(BudgetFailure::InvalidResponse)?;
+        let end = start.saturating_add(relative_end).saturating_add(1);
+        let tag =
+            std::str::from_utf8(&bytes[start..end]).map_err(|_| BudgetFailure::InvalidResponse)?;
+        output.push(parse_meta_attributes(tag)?);
+        cursor = end;
+    }
+    Ok(output)
+}
+
+fn parse_meta_attributes(tag: &str) -> Result<BTreeMap<String, String>, BudgetFailure> {
+    let bytes = tag.as_bytes();
+    let mut attributes = BTreeMap::new();
+    let mut cursor = 5_usize;
+    while cursor < bytes.len() {
+        while cursor < bytes.len()
+            && (bytes[cursor].is_ascii_whitespace() || matches!(bytes[cursor], b'/' | b'>'))
+        {
+            cursor += 1;
+        }
+        if cursor >= bytes.len() {
+            break;
+        }
+        let key_start = cursor;
+        while cursor < bytes.len() && is_html_attribute_name_byte(bytes[cursor]) {
+            cursor += 1;
+        }
+        if cursor == key_start {
+            cursor += 1;
+            continue;
+        }
+        let key = tag[key_start..cursor].to_ascii_lowercase();
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        if bytes.get(cursor) != Some(&b'=') {
+            continue;
+        }
+        cursor += 1;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        let Some(quote @ (b'\'' | b'"')) = bytes.get(cursor).copied() else {
+            continue;
+        };
+        cursor += 1;
+        let value_start = cursor;
+        while cursor < bytes.len() && bytes[cursor] != quote {
+            cursor += 1;
+        }
+        if cursor >= bytes.len() {
+            return Err(BudgetFailure::InvalidResponse);
+        }
+        if attributes.len() == MAX_HTML_ATTRIBUTES && !attributes.contains_key(&key) {
+            return Err(BudgetFailure::InvalidResponse);
+        }
+        let value = tag[value_start..cursor].to_owned();
+        if value.len() > MAX_BUDGET_FIELD_BYTES {
+            return Err(BudgetFailure::InvalidResponse);
+        }
+        attributes.insert(key, value);
+        cursor += 1;
+    }
+    Ok(attributes)
+}
+
+const fn is_html_attribute_name_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b':' | b'.')
+}
+
+fn find_ascii_case_insensitive(haystack: &[u8], needle: &[u8], start: usize) -> Option<usize> {
+    haystack
+        .get(start..)?
+        .windows(needle.len())
+        .position(|window| window.eq_ignore_ascii_case(needle))
+        .map(|position| position + start)
+}
+
+fn first_meta_content(tags: &[BTreeMap<String, String>], names: &[&str]) -> Option<String> {
+    for name in names {
+        for tag in tags {
+            if tag
+                .get("name")
+                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
+                && let Some(content) = tag.get("content").map(|value| value.trim())
+                && !content.is_empty()
+            {
+                return Some(content.to_owned());
+            }
+        }
+    }
+    None
+}
+
+fn quoted_assignment(haystack: &str, key: &str) -> Option<String> {
+    let bytes = haystack.as_bytes();
+    let start = find_ascii_case_insensitive(bytes, key.as_bytes(), 0)? + key.len();
+    let tail = bytes.get(start..)?;
+    let operator = tail.iter().position(|byte| matches!(byte, b':' | b'='))?;
+    if operator > 32 {
+        return None;
+    }
+    let mut cursor = start + operator + 1;
+    while bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+        cursor += 1;
+    }
+    let quote @ (b'\'' | b'"') = *bytes.get(cursor)? else {
+        return None;
+    };
+    cursor += 1;
+    let end = bytes[cursor..].iter().position(|byte| *byte == quote)? + cursor;
+    let value = std::str::from_utf8(&bytes[cursor..end]).ok()?.trim();
+    (!value.is_empty()).then(|| value.to_owned())
+}
+
+fn parse_budget_page(body: &[u8]) -> Result<BudgetPage, BudgetFailure> {
+    let value: Value = serde_json::from_slice(body).map_err(|_| BudgetFailure::InvalidResponse)?;
+    validate_budget_json(&value).map_err(BudgetFailure::from)?;
+    let mut current = &value;
+    for _ in 0..=MAX_BUDGET_JSON_DEPTH {
+        let object = current.as_object().ok_or(BudgetFailure::InvalidResponse)?;
+        if let Some(payload) = object.get("payload").filter(|payload| !payload.is_null()) {
+            current = payload;
+            continue;
+        }
+        let budgets = match object.get("budgets") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::Array(values)) if values.len() <= MAX_BUDGETS_PER_PAGE => values
+                .iter()
+                .map(parse_budget_record)
+                .collect::<Result<Vec<_>, _>>()?,
+            Some(_) => return Err(BudgetFailure::InvalidResponse),
+        };
+        let pagination = match object.get("hasNextPage") {
+            None | Some(Value::Null) => object.get("has_next_page"),
+            value => value,
+        };
+        let has_next_page = match pagination {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => return Err(BudgetFailure::InvalidResponse),
+        };
+        return Ok(BudgetPage {
+            budgets,
+            has_next_page,
+        });
+    }
+    Err(BudgetFailure::InvalidResponse)
+}
+
+#[cfg(test)]
+mod budget_page_tests {
+    use super::*;
+
+    #[test]
+    fn null_camel_pagination_falls_back_to_true_snake_value() {
+        let page = parse_budget_page(br#"{"budgets":[],"hasNextPage":null,"has_next_page":true}"#)
+            .expect("null camel pagination must inspect snake fallback");
+
+        assert!(page.has_next_page);
+    }
+}
+
+fn validate_budget_json(value: &Value) -> Result<(), ClassifiedError> {
+    let mut nodes = 0_usize;
+    validate_budget_json_node(value, 0, &mut nodes)
+}
+
+fn validate_budget_json_node(
+    value: &Value,
+    depth: usize,
+    nodes: &mut usize,
+) -> Result<(), ClassifiedError> {
+    if depth > MAX_BUDGET_JSON_DEPTH || *nodes >= MAX_BUDGET_JSON_NODES {
+        return Err(ClassifiedError::new(ErrorKind::Parse));
+    }
+    *nodes += 1;
+    match value {
+        Value::Object(object) => {
+            if object.len() > MAX_BUDGET_OBJECT_FIELDS {
+                return Err(ClassifiedError::new(ErrorKind::Parse));
+            }
+            for (key, child) in object {
+                if key.len() > MAX_BUDGET_FIELD_BYTES {
+                    return Err(ClassifiedError::new(ErrorKind::Parse));
+                }
+                validate_budget_json_node(child, depth + 1, nodes)?;
+            }
+        }
+        Value::Array(array) => {
+            if array.len() > MAX_BUDGET_ARRAY_ITEMS {
+                return Err(ClassifiedError::new(ErrorKind::Parse));
+            }
+            for child in array {
+                validate_budget_json_node(child, depth + 1, nodes)?;
+            }
+        }
+        Value::String(value) if value.len() > MAX_BUDGET_STRING_BYTES => {
+            return Err(ClassifiedError::new(ErrorKind::Parse));
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+    Ok(())
+}
+
+fn parse_budget_record(value: &Value) -> Result<BudgetRecord, BudgetFailure> {
+    let object = value.as_object().ok_or(BudgetFailure::InvalidResponse)?;
+    Ok(BudgetRecord {
+        id: first_flexible_string(object, &["id", "uuid", "budget_id", "budgetId"]),
+        name: first_flexible_string(object, &["name", "display_name", "displayName", "title"]),
+        budget_type: first_flexible_string(
+            object,
+            &[
+                "budget_type",
+                "budgetType",
+                "type",
+                "pricing_target_type",
+                "pricingTargetType",
+            ],
+        ),
+        product_skus: first_string_array(
+            object,
+            &[
+                "budget_product_skus",
+                "budgetProductSkus",
+                "budget_product_sku",
+                "budgetProductSku",
+                "product_skus",
+                "productSkus",
+                "skus",
+                "sku",
+                "product",
+                "product_name",
+                "productName",
+                "pricing_target_id",
+                "pricingTargetId",
+            ],
+        ),
+        _scope: first_flexible_string(object, &["budget_scope", "budgetScope", "scope"]),
+        entity_name: first_flexible_string(
+            object,
+            &[
+                "budget_entity_name",
+                "budgetEntityName",
+                "entity_name",
+                "entityName",
+                "target_name",
+                "targetName",
+            ],
+        ),
+        budget_amount: first_amount(
+            object,
+            &[
+                "budget_amount",
+                "budgetAmount",
+                "target_amount",
+                "targetAmount",
+                "spending_limit",
+                "spendingLimit",
+                "limit",
+                "amount",
+                "max",
+            ],
+        )
+        .unwrap_or(0.0),
+        current_amount: first_amount(
+            object,
+            &[
+                "current_usage",
+                "currentUsage",
+                "current_amount",
+                "currentAmount",
+                "usage_amount",
+                "usageAmount",
+                "usage",
+                "spent",
+                "amount_used",
+                "amountUsed",
+            ],
+        )
+        .unwrap_or(0.0),
+    })
+}
+
+fn first_flexible_string(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        let value = object.get(*key)?;
+        let value = flexible_identifier(Some(value))?;
+        (!value.is_empty() && value.len() <= MAX_BUDGET_FIELD_BYTES).then_some(value)
+    })
+}
+
+fn flexible_identifier(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::String(value) => Some(value.clone()),
+        Value::Number(value) if value.is_i64() || value.is_u64() => Some(value.to_string()),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_) => {
+            None
+        }
+    }
+}
+
+fn first_string_array(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Vec<String> {
+    for key in keys {
+        let Some(value) = object.get(*key) else {
+            continue;
+        };
+        if let Value::Array(values) = value {
+            let strings = values.iter().map(Value::as_str).collect::<Option<Vec<_>>>();
+            if let Some(strings) = strings.filter(|strings| !strings.is_empty()) {
+                return strings
+                    .into_iter()
+                    .filter(|value| !value.is_empty() && value.len() <= MAX_BUDGET_FIELD_BYTES)
+                    .map(str::to_owned)
+                    .collect();
+            }
+            let objects = values
+                .iter()
+                .map(Value::as_object)
+                .collect::<Option<Vec<_>>>();
+            if let Some(objects) = objects.filter(|objects| !objects.is_empty()) {
+                return objects
+                    .into_iter()
+                    .flat_map(product_sku_selectors)
+                    .collect();
+            }
+        }
+        if let Some(value) = value
+            .as_str()
+            .filter(|value| !value.is_empty() && value.len() <= MAX_BUDGET_FIELD_BYTES)
+        {
+            return vec![value.to_owned()];
+        }
+    }
+    Vec::new()
+}
+
+fn product_sku_selectors(object: &serde_json::Map<String, Value>) -> Vec<String> {
+    [
+        "sku",
+        "name",
+        "display_name",
+        "displayName",
+        "product",
+        "product_name",
+        "productName",
+    ]
+    .into_iter()
+    .filter_map(|key| {
+        object
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty() && value.len() <= MAX_BUDGET_FIELD_BYTES)
+            .map(str::to_owned)
+    })
+    .collect()
+}
+
+fn first_amount(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<f64> {
+    keys.iter()
+        .find_map(|key| object.get(*key).and_then(|value| amount_value(value, key)))
+}
+
+fn amount_value(value: &Value, key: &str) -> Option<f64> {
+    match value {
+        Value::Number(number) => {
+            number
+                .as_f64()
+                .filter(|number| number.is_finite())
+                .map(|number| {
+                    if key == "cents" {
+                        number / 100.0
+                    } else {
+                        number
+                    }
+                })
+        }
+        Value::String(value) => parse_budget_amount(value),
+        Value::Object(object) => ["amount", "value", "total", "cents", "formatted"]
+            .into_iter()
+            .find_map(|nested| {
+                object
+                    .get(nested)
+                    .and_then(|value| amount_value(value, nested))
+            }),
+        Value::Null | Value::Bool(_) | Value::Array(_) => None,
+    }
+}
+
+fn parse_budget_amount(value: &str) -> Option<f64> {
+    let trimmed = value.trim();
+    let negative = trimmed.starts_with('-');
+    let unsigned_source = trimmed.strip_prefix('-').unwrap_or(trimmed);
+    if unsigned_source.contains('-') {
+        return None;
+    }
+    let mut unsigned = String::new();
+    for character in unsigned_source.chars() {
+        if character.is_ascii_digit() || character == '.' {
+            unsigned.push(character);
+        }
+    }
+    if unsigned.is_empty() {
+        return None;
+    }
+    let candidate = if negative {
+        format!("-{unsigned}")
+    } else {
+        unsigned
+    };
+    candidate
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
+}
+
+/// Normalizes a GitHub billing selector to the pinned Copilot budget vocabulary.
+#[must_use]
+#[doc(hidden)]
+pub fn normalized_billing_identifier(value: &str) -> Option<String> {
+    let slug = slug(value);
+    if slug.is_empty() {
+        return None;
+    }
+    let underscored = slug.replace('-', "_");
+    let normalized = if underscored == "copilot" {
+        "copilot"
+    } else if matches!(underscored.as_str(), "premium_request" | "premium_requests") {
+        "copilot_premium_request"
+    } else if underscored == "coding_agent_premium_request"
+        || underscored == "coding_agent_premium_requests"
+    {
+        "copilot_agent_premium_request"
+    } else if underscored.contains("spark")
+        && underscored.contains("premium")
+        && underscored.contains("request")
+    {
+        "spark_premium_request"
+    } else if (underscored.contains("cloud") || underscored.contains("coding"))
+        && underscored.contains("agent")
+        && underscored.contains("premium")
+        && underscored.contains("request")
+    {
+        "copilot_agent_premium_request"
+    } else if underscored.contains("bundled")
+        && underscored.contains("premium")
+        && underscored.contains("request")
+    {
+        "copilot_premium_request"
+    } else if underscored.contains("copilot")
+        && underscored.contains("agent")
+        && underscored.contains("premium")
+        && underscored.contains("request")
+    {
+        "copilot_agent_premium_request"
+    } else if underscored.contains("copilot")
+        && underscored.contains("premium")
+        && underscored.contains("request")
+    {
+        "copilot_premium_request"
+    } else {
+        return Some(underscored);
+    };
+    Some(normalized.to_owned())
+}
+
+fn budget_windows_from_records(
+    records: &[BudgetRecord],
+    now: Timestamp,
+    fixed_local_offset: Option<UtcOffset>,
+) -> Result<Vec<NamedRateWindow>, ClassifiedError> {
+    const SELECTORS: [&str; 4] = [
+        "copilot",
+        "copilot_premium_request",
+        "copilot_agent_premium_request",
+        "spark_premium_request",
+    ];
+    let reset = approximate_next_month_reset(now, fixed_local_offset);
+    let mut used_ids = BTreeSet::new();
+    let mut windows = Vec::new();
+    for record in records {
+        let selectors = record.selectors();
+        if record.budget_amount <= 0.0
+            || selectors
+                .iter()
+                .all(|selector| !SELECTORS.contains(&selector.as_str()))
+        {
+            continue;
+        }
+        if windows.len() == MAX_BUDGET_WINDOWS {
+            break;
+        }
+        let percentage = (record.current_amount / record.budget_amount * 100.0).clamp(0.0, 999.0);
+        if !percentage.is_finite() {
+            return Err(ClassifiedError::new(ErrorKind::Parse));
+        }
+        let usage =
+            UsagePercent::new(percentage).map_err(|_| ClassifiedError::new(ErrorKind::Parse))?;
+        let window = RateWindow::new(WindowUsage::known(usage), None, reset, None, None, false)
+            .map_err(|_| ClassifiedError::new(ErrorKind::Parse))?;
+        let title = budget_window_title(record, &selectors);
+        let id = unique_budget_window_id(record, &title, &mut used_ids);
+        windows.push(NamedRateWindow::new(
+            BoundedText::new(id).map_err(|_| ClassifiedError::new(ErrorKind::Parse))?,
+            BoundedText::new(title).map_err(|_| ClassifiedError::new(ErrorKind::Parse))?,
+            window,
+        ));
+    }
+    Ok(windows)
+}
+
+fn budget_window_title(record: &BudgetRecord, selectors: &BTreeSet<String>) -> String {
+    let label = if selectors.len() == 1 && selectors.contains("copilot") {
+        "Copilot"
+    } else if selectors.contains("copilot_agent_premium_request") {
+        "Copilot Agent Premium Requests"
+    } else if selectors.contains("spark_premium_request") {
+        "Spark Premium Requests"
+    } else if selectors.contains("copilot_premium_request") {
+        "All Premium Request SKUs"
+    } else {
+        record
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or("Copilot Premium Requests")
+    };
+    format!("Budget - {label}")
+}
+
+fn unique_budget_window_id(
+    record: &BudgetRecord,
+    title: &str,
+    used: &mut BTreeSet<String>,
+) -> String {
+    let source = record
+        .id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .map_or_else(|| record.product_skus.join("-"), str::to_owned);
+    let slug = slug(if source.is_empty() { title } else { &source });
+    let base = if slug.is_empty() {
+        "copilot-budget".to_owned()
+    } else {
+        let maximum = MAX_NAMED_WINDOW_ID_BYTES.saturating_sub("copilot-budget-".len());
+        format!("copilot-budget-{}", truncate_utf8(&slug, maximum))
+    };
+    let mut candidate = base.clone();
+    let mut suffix = 2_usize;
+    while !used.insert(candidate.clone()) {
+        let suffix_text = format!("-{suffix}");
+        let maximum = MAX_NAMED_WINDOW_ID_BYTES.saturating_sub(suffix_text.len());
+        candidate = format!("{}{}", truncate_utf8(&base, maximum), suffix_text);
+        suffix = suffix.saturating_add(1);
+    }
+    candidate
+}
+
+fn slug(value: &str) -> String {
+    let mut result = String::new();
+    let mut last_was_dash = false;
+    for character in value.to_lowercase().chars() {
+        if character.is_alphanumeric() {
+            result.push(character);
+            last_was_dash = false;
+        } else if !last_was_dash {
+            result.push('-');
+            last_was_dash = true;
+        }
+    }
+    result.trim_matches('-').to_owned()
+}
+
+fn truncate_utf8(value: &str, maximum: usize) -> &str {
+    if value.len() <= maximum {
+        return value;
+    }
+    let mut boundary = maximum;
+    while boundary > 0 && !value.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    &value[..boundary]
+}
+
+fn approximate_next_month_reset(
+    now: Timestamp,
+    fixed_local_offset: Option<UtcOffset>,
+) -> Option<Timestamp> {
+    let fallback_offset = fixed_local_offset.unwrap_or(UtcOffset::UTC);
+    if fixed_local_offset.is_some() {
+        return approximate_next_month_reset_with_resolver(now, fallback_offset, |_| None);
+    }
+    approximate_next_month_reset_with_resolver(now, fallback_offset, |instant| {
+        UtcOffset::local_offset_at(instant).ok()
+    })
+}
+
+fn approximate_next_month_reset_with_resolver(
+    now: Timestamp,
+    fallback_offset: UtcOffset,
+    mut resolve_offset: impl FnMut(OffsetDateTime) -> Option<UtcOffset>,
+) -> Option<Timestamp> {
+    let local_offset = resolve_offset(now.as_offset_date_time()).unwrap_or(fallback_offset);
+    let local = now.as_offset_date_time().to_offset(local_offset);
+    let (year, month) = if local.month() == Month::December {
+        (local.year().checked_add(1)?, Month::January)
+    } else {
+        (local.year(), local.month().next())
+    };
+    let date = Date::from_calendar_date(year, month, 1).ok()?;
+    let local_midnight = PrimitiveDateTime::new(date, Time::MIDNIGHT);
+    let mut target_offset = local_offset;
+    for _ in 0..4 {
+        let candidate = local_midnight.assume_offset(target_offset);
+        let observed = resolve_offset(candidate).unwrap_or(target_offset);
+        if observed == target_offset {
+            return Timestamp::new(candidate).ok();
+        }
+        target_offset = observed;
+    }
+    None
+}
+
+#[cfg(test)]
+mod reset_tests {
+    use super::*;
+
+    #[test]
+    fn production_calendar_resolves_offset_at_future_month_boundary() {
+        let fetched_at = Timestamp::parse("2026-03-01T12:00:00Z").expect("fetch timestamp");
+        let transition = Timestamp::parse("2026-03-08T07:00:00Z")
+            .expect("transition timestamp")
+            .as_offset_date_time();
+        let standard = UtcOffset::from_hms(-5, 0, 0).expect("standard offset");
+        let daylight = UtcOffset::from_hms(-4, 0, 0).expect("daylight offset");
+
+        let reset = approximate_next_month_reset_with_resolver(fetched_at, standard, |instant| {
+            Some(if instant < transition {
+                standard
+            } else {
+                daylight
+            })
+        })
+        .expect("DST-aware reset");
+
+        assert_eq!(
+            reset,
+            Timestamp::parse("2026-04-01T04:00:00Z").expect("expected daylight reset")
+        );
+    }
+
+    #[test]
+    fn fixed_offset_seam_stays_stable_across_future_dst_transition() {
+        let fetched_at = Timestamp::parse("2026-03-01T12:00:00Z").expect("fetch timestamp");
+        let standard = UtcOffset::from_hms(-5, 0, 0).expect("fixed standard offset");
+
+        let reset =
+            approximate_next_month_reset(fetched_at, Some(standard)).expect("fixed-offset reset");
+
+        assert_eq!(
+            reset,
+            Timestamp::parse("2026-04-01T05:00:00Z").expect("expected fixed-offset reset")
+        );
+    }
+}
+
+/// Parses one bounded GitHub budget page into normalized extra quota windows.
+///
+/// # Errors
+///
+/// Returns a stable parse error for malformed, excessive, or incompatible JSON.
+#[doc(hidden)]
+pub fn parse_budget_windows(
+    body: &[u8],
+    now: Timestamp,
+    local_offset: UtcOffset,
+) -> Result<Vec<NamedRateWindow>, ClassifiedError> {
+    let page = parse_budget_page(body).map_err(|_| ClassifiedError::new(ErrorKind::Parse))?;
+    budget_windows_from_records(&page.budgets, now, Some(local_offset))
+}
+
 /// Native GitHub Copilot usage adapter.
 pub struct CopilotProvider {
     client: FixedApiClient,
+    budget_identity_allowed: bool,
+    budget: Option<CopilotBudgetEnrichment>,
+}
+
+fn is_public_github_or_loopback(url: &Url) -> bool {
+    if url
+        .host_str()
+        .is_some_and(|host| host.eq_ignore_ascii_case("api.github.com"))
+    {
+        return true;
+    }
+    match url.host() {
+        Some(Host::Ipv4(address)) => address.is_loopback(),
+        Some(Host::Ipv6(address)) => address.is_loopback(),
+        Some(Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+        None => false,
+    }
 }
 
 impl CopilotProvider {
@@ -559,7 +1938,40 @@ impl CopilotProvider {
         {
             return Err(ClassifiedError::new(ErrorKind::Api));
         }
-        Ok(Self { client })
+        let budget_identity_allowed = is_public_github_or_loopback(client.base_url());
+        Ok(Self {
+            client,
+            budget_identity_allowed,
+            budget: None,
+        })
+    }
+
+    /// Reports whether this client's OAuth origin may perform public GitHub
+    /// identity binding for optional web-budget enrichment.
+    #[must_use]
+    #[doc(hidden)]
+    pub const fn public_budget_identity_allowed(&self) -> bool {
+        self.budget_identity_allowed
+    }
+
+    /// Disables public GitHub identity binding for a deterministic security-policy seam.
+    #[must_use]
+    #[doc(hidden)]
+    pub const fn without_public_budget_identity(mut self) -> Self {
+        self.budget_identity_allowed = false;
+        self
+    }
+
+    /// Attaches optional GitHub web-budget enrichment to this OAuth account.
+    ///
+    /// The adapter and [`ProviderContext`] remain OAuth-bound. Manual cookies
+    /// and browser sessions are auxiliary inputs and cannot authorize the base
+    /// usage request or alter its account scope. Enterprise-host accounts skip
+    /// enrichment because their token is never forwarded to public GitHub.
+    #[must_use]
+    pub fn with_budget_enrichment(mut self, enrichment: CopilotBudgetEnrichment) -> Self {
+        self.budget = Some(enrichment);
+        self
     }
 
     /// Fetches and normalizes one deterministic Copilot usage snapshot.
@@ -592,7 +2004,44 @@ impl CopilotProvider {
             return Err(ClassifiedError::new(ErrorKind::Api));
         }
         let payload: Value = response.json()?;
-        normalize(context.scope().clone(), fetched_at, &payload)
+        let base = normalize(context.scope().clone(), fetched_at, &payload, Vec::new())?;
+        let Some(enrichment) = &self.budget else {
+            return Ok(base);
+        };
+        if !self.budget_identity_allowed {
+            return Ok(base);
+        }
+        let extras = match self
+            .fetch_budget_windows(context, enrichment, fetched_at)
+            .await
+        {
+            Ok(extras) if !extras.is_empty() => extras,
+            Ok(_) | Err(_) => return Ok(base),
+        };
+        normalize(context.scope().clone(), fetched_at, &payload, extras).or(Ok(base))
+    }
+
+    async fn fetch_budget_windows(
+        &self,
+        context: &ProviderContext,
+        enrichment: &CopilotBudgetEnrichment,
+        fetched_at: Timestamp,
+    ) -> Result<Vec<oab_domain::NamedRateWindow>, BudgetFailure> {
+        let identity_url = self.client.url("user").map_err(BudgetFailure::from)?;
+        let response = self
+            .client
+            .get_json_with_status_map(context, identity_url, |status| {
+                matches!(status, 401 | 403).then_some(ErrorKind::AuthenticationExpired)
+            })
+            .await
+            .map_err(BudgetFailure::from)?;
+        if response.status() != 200 {
+            return Err(BudgetFailure::Status);
+        }
+        let identity = parse_oauth_identity(response.body())?;
+        enrichment
+            .fetch_for_identity(context.cancellation(), &identity, fetched_at)
+            .await
     }
 }
 
@@ -711,6 +2160,7 @@ fn normalize(
     scope: AccountScope,
     fetched_at: Timestamp,
     payload: &Value,
+    extra_windows: Vec<oab_domain::NamedRateWindow>,
 ) -> Result<UsageSample, ClassifiedError> {
     let root = payload
         .as_object()
@@ -788,6 +2238,7 @@ fn normalize(
     };
 
     let mut builder = UsageSampleBuilder::new(scope, fetched_at)
+        .extra_windows(extra_windows)
         .login_method(Some(plan))?
         .detail_sections(details);
     if let Some(primary) = primary {

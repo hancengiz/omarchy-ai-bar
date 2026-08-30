@@ -1,0 +1,13 @@
+{
+  "payload": {
+    "budgets": [
+      {
+        "uuid": "duplicate",
+        "productSkus": ["copilot_agent_premium_request"],
+        "targetAmount": 50,
+        "currentAmount": 25
+      }
+    ],
+    "has_next_page": false
+  }
+}

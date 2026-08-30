@@ -1,0 +1,6 @@
+{
+  "payload": {
+    "budgets": "not-an-array",
+    "has_next_page": false
+  }
+}
