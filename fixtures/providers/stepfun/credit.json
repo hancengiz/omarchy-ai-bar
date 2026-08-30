@@ -1,0 +1,21 @@
+{
+  "status": 1,
+  "plan_family": 2,
+  "plan_credit_rate_limit": {
+    "subscription_credit_left_rate": 0.8,
+    "subscription_credit_reset_time": "1782864000",
+    "topup_credit_left_rate": 0.5,
+    "credit_buckets": [
+      {
+        "credit_total": "100",
+        "credit_residual": "80",
+        "expire_at": "1792416128",
+        "next_reset_at": "1782864000"
+      },
+      {
+        "credit_total": 300,
+        "credit_residual": 150
+      }
+    ]
+  }
+}

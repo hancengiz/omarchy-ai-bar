@@ -38,6 +38,7 @@ pub mod poe;
 pub mod qoder;
 pub mod qwencloud;
 pub mod sakana;
+pub mod stepfun;
 pub mod sub2api;
 pub mod synthetic;
 pub mod t3chat;
