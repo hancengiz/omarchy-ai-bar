@@ -1,0 +1,27 @@
+{
+  "updated_at": "2026-06-03T05:04:03.123456Z",
+  "sessions_scanned": 1296,
+  "windows": {
+    "today": {
+      "input": 1500,
+      "output": 500,
+      "cache_read": 0,
+      "cache_create": 250,
+      "messages": 3
+    },
+    "week": {
+      "input": 30000,
+      "output": 10000,
+      "cache_read": 60000,
+      "cache_create": 10000,
+      "messages": 25
+    },
+    "all_time": {
+      "input": 3600000,
+      "output": 1100000,
+      "cache_read": 16100000,
+      "cache_create": 2000000,
+      "messages": 1315
+    }
+  }
+}
