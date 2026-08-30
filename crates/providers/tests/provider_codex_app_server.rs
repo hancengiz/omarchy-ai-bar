@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use nix::fcntl::{Flock, FlockArg};
-use oab_domain::{AccountKey, AccountScope, ProviderId, ProviderInstanceId, Timestamp};
+use oab_domain::{
+    AccountKey, AccountScope, DataConfidence, ProviderId, ProviderInstanceId, Timestamp,
+};
 use oab_providers::executable::{ExecutablePath, resolve_executable};
 use oab_providers::providers::codex_app_server::{
     CodexAppServerClient, CodexAppServerError, CodexAppServerStage,
@@ -508,8 +510,12 @@ async fn exact_wire_and_flexible_aliases_normalize_authoritative_rate_response()
             .as_str(),
         "private-plan-canary"
     );
+    assert_eq!(usage.confidence(), DataConfidence::Unknown);
+    assert_eq!(usage.provenance()[0].source(), "codex");
+    assert_eq!(usage.provenance()[0].strategy(), "cli");
     let credits = snapshot.credits().expect("credits");
     assert_eq!(credits.remaining().to_string(), "42.5");
+    assert_eq!(usage.credits(), Some(credits));
     let limit = credits.limit().expect("spend limit");
     assert_eq!(limit.title(), "A limit");
     assert_eq!(limit.limit().to_string(), "100.5");
@@ -539,6 +545,19 @@ async fn exact_wire_and_flexible_aliases_normalize_authoritative_rate_response()
     let rendered = format!("{snapshot:?}");
     assert!(!rendered.contains("user@example.test"));
     assert!(!rendered.contains("private-plan-canary"));
+    let merged = snapshot
+        .clone()
+        .into_usage_sample()
+        .expect("single runtime sample");
+    assert!(merged.primary().is_some());
+    assert_eq!(
+        merged
+            .credits()
+            .expect("merged credits")
+            .remaining()
+            .to_string(),
+        "42.5"
+    );
     assert_process_gone(fixture.pid()).await;
 }
 
@@ -602,8 +621,17 @@ async fn credits_only_and_identity_only_results_remain_representable() {
             }
         }),
     );
-    let api_key = envelope(3, json!({"account": {"type": "apiKey"}}));
-    let credits_fixture = AppServerFixture::replies(&credits_rate, &api_key);
+    let credits_account = envelope(
+        3,
+        json!({
+            "account": {
+                "type": "chatgpt",
+                "email": "credits@example.test",
+                "planType": "plus"
+            }
+        }),
+    );
+    let credits_fixture = AppServerFixture::replies(&credits_rate, &credits_account);
     let credits = credits_fixture
         .client()
         .fetch(
@@ -623,6 +651,34 @@ async fn credits_only_and_identity_only_results_remain_representable() {
         "0"
     );
     assert!(credits.identity().is_some());
+    let credits = credits
+        .into_usage_sample()
+        .expect("credits-only runtime sample");
+    assert!(credits.primary().is_none());
+    assert!(credits.secondary().is_none());
+    assert_eq!(credits.confidence(), DataConfidence::Unknown);
+    assert_eq!(
+        credits.identity().email().expect("retained email").as_str(),
+        "credits@example.test"
+    );
+    assert_eq!(
+        credits
+            .identity()
+            .login_method()
+            .expect("retained plan")
+            .as_str(),
+        "plus"
+    );
+    assert_eq!(
+        credits
+            .credits()
+            .expect("merged zero credit marker")
+            .remaining()
+            .to_string(),
+        "0"
+    );
+    assert_eq!(credits.provenance()[0].source(), "codex");
+    assert_eq!(credits.provenance()[0].strategy(), "cli");
     drop(credits_fixture);
 
     let identity_rate = envelope(2, json!({"rateLimits": {}}));
@@ -650,6 +706,7 @@ async fn credits_only_and_identity_only_results_remain_representable() {
             .as_str(),
         "unknown"
     );
+    assert_eq!(usage.confidence(), DataConfidence::Unknown);
     assert!(identity.credits().is_none());
 }
 
@@ -816,6 +873,14 @@ async fn remote_body_recovery_handles_nested_braces_and_preserves_identity_and_c
         "19.75"
     );
     assert_eq!(
+        usage
+            .credits()
+            .expect("same-sample body credits")
+            .remaining()
+            .to_string(),
+        "19.75"
+    );
+    assert_eq!(
         fixture.frames().len(),
         3,
         "account enrichment must not run after rate error"
@@ -864,6 +929,22 @@ async fn malformed_session_lane_cannot_publish_weekly_only_but_credits_still_rec
     let rendered = format!("{snapshot:?}");
     assert!(!rendered.contains(canary));
     assert!(!rendered.contains("must-not-publish@example.test"));
+    let merged = snapshot
+        .into_usage_sample()
+        .expect("credits survive as a blank usage sample");
+    assert!(merged.primary().is_none());
+    assert!(merged.secondary().is_none());
+    assert!(merged.identity().email().is_none());
+    assert!(merged.identity().login_method().is_none());
+    assert_eq!(merged.confidence(), DataConfidence::Unknown);
+    assert_eq!(
+        merged
+            .credits()
+            .expect("recovered credits")
+            .remaining()
+            .to_string(),
+        "7"
+    );
 }
 
 #[tokio::test]

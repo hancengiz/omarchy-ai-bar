@@ -11,9 +11,9 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use oab_domain::{
-    AccountScope, BoundedText, CreditLimitSnapshot, CreditsSnapshot, DisplayPercent, ExactDecimal,
-    IdentitySnapshot, ProviderId, RateWindow, Timestamp, UsagePercent, UsageSample, WindowDuration,
-    WindowUsage,
+    AccountScope, BoundedText, CreditLimitSnapshot, CreditsSnapshot, DataConfidence,
+    DisplayPercent, ExactDecimal, IdentitySnapshot, ProviderId, RateWindow, Timestamp,
+    UsagePercent, UsageSample, WindowDuration, WindowUsage,
 };
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
@@ -161,6 +161,43 @@ impl CodexAppServerSnapshot {
     #[must_use]
     pub const fn identity(&self) -> Option<&IdentitySnapshot> {
         self.identity.as_ref()
+    }
+
+    /// Consumes the app-server lanes into the runtime's single usage sample.
+    ///
+    /// Windowed and identity-only samples already carry their same-session
+    /// credits. When the app-server returns credits alone, this synthesizes the
+    /// empty usage marker used by the pinned CLI strategy. Unsafe recovered
+    /// identity is never reintroduced.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CodexAppServerError::NoRateLimits`] if the snapshot contains
+    /// neither usage nor credits, or [`CodexAppServerError::Protocol`] if the
+    /// retained bounded identity cannot be projected into the domain model.
+    pub fn into_usage_sample(self) -> Result<UsageSample, CodexAppServerError> {
+        if let Some(usage) = self.usage {
+            return Ok(usage);
+        }
+        let credits = self.credits.ok_or(CodexAppServerError::NoRateLimits)?;
+        let email = self
+            .identity
+            .as_ref()
+            .and_then(IdentitySnapshot::email)
+            .map(|value| value.as_str().to_owned());
+        let login_method = self
+            .identity
+            .as_ref()
+            .and_then(IdentitySnapshot::login_method)
+            .map(|value| value.as_str().to_owned());
+        UsageSampleBuilder::new(credits.scope().clone(), credits.updated_at())
+            .credits(credits)
+            .confidence(DataConfidence::Unknown)
+            .email(email)
+            .and_then(|builder| builder.login_method(login_method))
+            .and_then(|builder| builder.provenance("codex", "cli"))
+            .and_then(UsageSampleBuilder::build)
+            .map_err(|_| CodexAppServerError::Protocol)
     }
 }
 
@@ -632,6 +669,7 @@ fn normalize_success(
         secondary,
         &identity_fields,
         should_make_empty_usage,
+        credits.as_ref(),
     )?;
     if usage.is_none() && credits.is_none() {
         return Err(CodexAppServerError::NoRateLimits);
@@ -677,23 +715,28 @@ fn build_usage(
     secondary: Option<RateWindow>,
     fields: &AccountFields,
     make_empty_if_identified: bool,
+    credits: Option<&CreditsSnapshot>,
 ) -> Result<Option<UsageSample>, CodexAppServerError> {
     let has_windows = primary.is_some() || secondary.is_some();
     let has_identity = fields.email.is_some() || fields.plan.is_some();
     if !(has_windows || make_empty_if_identified && has_identity) {
         return Ok(None);
     }
-    let mut builder = UsageSampleBuilder::new(scope.clone(), fetched_at);
+    let mut builder =
+        UsageSampleBuilder::new(scope.clone(), fetched_at).confidence(DataConfidence::Unknown);
     if let Some(window) = primary {
         builder = builder.primary(window);
     }
     if let Some(window) = secondary {
         builder = builder.secondary(window);
     }
+    if let Some(credits) = credits {
+        builder = builder.credits(credits.clone());
+    }
     let sample = builder
         .email(fields.email.clone())
         .and_then(|builder| builder.login_method(fields.plan.clone()))
-        .and_then(|builder| builder.provenance("codex_app_server", "json_rpc"))
+        .and_then(|builder| builder.provenance("codex", "cli"))
         .and_then(UsageSampleBuilder::build)
         .map_err(|_| CodexAppServerError::Protocol)?;
     Ok(Some(sample))
@@ -858,11 +901,6 @@ fn recover_remote_snapshot(
         .unwrap_or_default();
     let (primary, secondary) = normalize_windows(parsed_windows.primary, parsed_windows.secondary);
     let unsafe_window_recovery = parsed_windows.decode_failed && primary.is_none();
-    let usage = if unsafe_window_recovery {
-        None
-    } else {
-        build_usage(scope, fetched_at, primary, secondary, &fields, false).ok()?
-    };
     let credits = root
         .get("credits")
         .and_then(parse_recovery_credits)
@@ -876,6 +914,20 @@ fn recover_remote_snapshot(
             )
             .ok()
         });
+    let usage = if unsafe_window_recovery {
+        None
+    } else {
+        build_usage(
+            scope,
+            fetched_at,
+            primary,
+            secondary,
+            &fields,
+            false,
+            credits.as_ref(),
+        )
+        .ok()?
+    };
     if usage.is_none() && credits.is_none() {
         return None;
     }
