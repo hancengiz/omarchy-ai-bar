@@ -42,6 +42,8 @@ pub enum RequestAccept {
     Any,
     /// `application/json`.
     Json,
+    /// Browser API preference for JSON, plain text, then any representation.
+    JsonTextAny,
     /// Browser-compatible HTML and XHTML.
     Html,
 }
@@ -51,6 +53,7 @@ impl RequestAccept {
         match self {
             Self::Any => "*/*",
             Self::Json => "application/json",
+            Self::JsonTextAny => "application/json, text/plain, */*",
             Self::Html => "text/html,application/xhtml+xml",
         }
     }

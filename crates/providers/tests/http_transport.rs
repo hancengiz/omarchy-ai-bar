@@ -52,11 +52,12 @@ impl RetryClock for CountingClock {
 #[tokio::test]
 async fn typed_media_controls_emit_only_the_exact_supported_values() {
     let server =
-        FakeHttpServer::start((0..7).map(|_| FakeHttpResponse::new(200, Vec::new()))).await;
+        FakeHttpServer::start((0..8).map(|_| FakeHttpResponse::new(200, Vec::new()))).await;
     let transport = HttpTransport::new(policy(&server), config()).expect("HTTP transport");
     let requests = [
         HttpRequest::get(server.url("/any")).accept(RequestAccept::Any),
         HttpRequest::get(server.url("/html")).accept(RequestAccept::Html),
+        HttpRequest::get(server.url("/json-text-any")).accept(RequestAccept::JsonTextAny),
         HttpRequest::post(server.url("/json"), b"json".to_vec())
             .expect("JSON body")
             .accept(RequestAccept::Json)
@@ -89,22 +90,27 @@ async fn typed_media_controls_emit_only_the_exact_supported_values() {
         Some("text/html,application/xhtml+xml")
     );
     assert_eq!(captured[1].header("content-type"), None);
-    assert_eq!(captured[2].header("accept"), Some("application/json"));
-    assert_eq!(captured[2].header("content-type"), Some("application/json"));
     assert_eq!(
-        captured[3].header("content-type"),
+        captured[2].header("accept"),
+        Some("application/json, text/plain, */*")
+    );
+    assert_eq!(captured[2].header("content-type"), None);
+    assert_eq!(captured[3].header("accept"), Some("application/json"));
+    assert_eq!(captured[3].header("content-type"), Some("application/json"));
+    assert_eq!(
+        captured[4].header("content-type"),
         Some("application/x-www-form-urlencoded")
     );
     assert_eq!(
-        captured[4].header("content-type"),
+        captured[5].header("content-type"),
         Some("application/x-www-form-urlencoded; charset=utf-8")
     );
     assert_eq!(
-        captured[5].header("content-type"),
+        captured[6].header("content-type"),
         Some("application/x-amz-json-1.0")
     );
     assert_eq!(
-        captured[6].header("content-type"),
+        captured[7].header("content-type"),
         Some("application/x-amz-json-1.1")
     );
 }

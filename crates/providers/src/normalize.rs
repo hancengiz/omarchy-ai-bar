@@ -4,8 +4,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use oab_domain::{
     AccountScope, BoundedText, ClassifiedError, CostSummary, CostUsageSnapshot, DataConfidence,
-    DetailSection, ErrorKind, IdentitySnapshot, Money, NamedRateWindow, Provenance, ProviderHealth,
-    ProviderStatus, RateWindow, Timestamp, UsagePercent, UsageSample, WindowUsage,
+    DetailSection, ErrorKind, IdentitySnapshot, Money, NamedRateWindow, Provenance,
+    ProviderExtension, ProviderHealth, ProviderStatus, RateWindow, Timestamp, UsagePercent,
+    UsageSample, WindowUsage,
 };
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
@@ -113,6 +114,7 @@ pub struct UsageSampleBuilder {
     subscription_renews_at: Option<Timestamp>,
     subscription_expires_at: Option<Timestamp>,
     detail_sections: Vec<DetailSection>,
+    extensions: Vec<ProviderExtension>,
     provenance: Vec<Provenance>,
     confidence: DataConfidence,
 }
@@ -137,6 +139,7 @@ impl UsageSampleBuilder {
             subscription_renews_at: None,
             subscription_expires_at: None,
             detail_sections: Vec::new(),
+            extensions: Vec::new(),
             provenance: Vec::new(),
             confidence: DataConfidence::Exact,
         }
@@ -237,6 +240,13 @@ impl UsageSampleBuilder {
         self
     }
 
+    /// Replaces provider-specific typed extension payloads.
+    #[must_use]
+    pub fn extensions(mut self, extensions: Vec<ProviderExtension>) -> Self {
+        self.extensions = extensions;
+        self
+    }
+
     /// Sets the provider's confidence after bounded/truncation analysis.
     #[must_use]
     pub fn confidence(mut self, confidence: DataConfidence) -> Self {
@@ -314,7 +324,7 @@ impl UsageSampleBuilder {
             self.subscription_expires_at,
             None,
             self.detail_sections,
-            Vec::new(),
+            self.extensions,
             Vec::new(),
             self.provenance,
             self.confidence,
