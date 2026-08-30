@@ -25,6 +25,7 @@ pub mod kilo;
 pub mod kiro;
 pub mod litellm;
 pub mod llmproxy;
+pub mod longcat;
 pub mod manus;
 pub mod mimo;
 pub mod mistral;

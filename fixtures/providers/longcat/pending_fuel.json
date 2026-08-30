@@ -1,0 +1,16 @@
+{
+  "code": 0,
+  "data": {
+    "totalQuota": 1000,
+    "list": [
+      {
+        "availableToken": 600,
+        "expireTime": 1750000000000
+      },
+      {
+        "availableToken": "150",
+        "expireTime": "2026-04-15T00:00:00Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "userId": 123,
+    "name": "LongCat User",
+    "phone": "neutralized",
+    "token": "neutralized"
+  }
+}
