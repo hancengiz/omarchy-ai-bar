@@ -1,0 +1,9 @@
+{
+  "openai": {
+    "type": "OAuth",
+    "access": "fixture-opencode-access-canary",
+    "refresh": "fixture-opencode-refresh-canary",
+    "accountId": "fixture-opencode-account",
+    "expires": 4102444800000
+  }
+}

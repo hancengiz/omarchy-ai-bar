@@ -11,6 +11,7 @@ pub mod chutes;
 pub mod clawrouter;
 pub mod clinepass;
 pub mod codebuff;
+pub mod codex;
 pub mod commandcode;
 pub mod copilot;
 pub mod crof;

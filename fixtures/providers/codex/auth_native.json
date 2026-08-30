@@ -1,0 +1,10 @@
+{
+  "personal_access_token": "fixture-codex-pat-canary",
+  "tokens": {
+    "accessToken": "fixture-codex-access-canary",
+    "refreshToken": "fixture-codex-refresh-canary",
+    "idToken": "fixture-codex-id-canary",
+    "accountId": "fixture-account"
+  },
+  "last_refresh": "2026-08-29T12:00:00Z"
+}
