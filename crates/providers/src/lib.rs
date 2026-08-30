@@ -6,6 +6,7 @@ pub mod configured_endpoint;
 pub mod context;
 pub mod descriptor;
 pub mod endpoint;
+pub mod executable;
 pub mod fixed_api;
 pub mod normalize;
 pub mod providers;
