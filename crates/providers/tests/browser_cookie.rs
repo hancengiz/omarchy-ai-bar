@@ -6,7 +6,8 @@ use oab_providers::browser_cookie::{
     BrowserCookieDomainAllowlist, BrowserCookieDomainPolicy, BrowserCookieDomainRule,
     BrowserCookieImportError, ChromiumCookieDecryptionError, ChromiumCookieDecryptor,
     DisabledChromiumCookieDecryptor, MAX_BROWSER_COOKIE_BYTES, MAX_BROWSER_COOKIE_ROWS,
-    import_browser_cookies, import_browser_cookies_merging_chromium_stores_with_decryptor,
+    import_browser_cookie_stores_with_decryptor, import_browser_cookies,
+    import_browser_cookies_merging_chromium_stores_with_decryptor,
     import_browser_cookies_with_decryptor,
 };
 use oab_providers::browser_profile::{
@@ -23,6 +24,7 @@ use zeroize::Zeroizing;
 
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 const SOURCE: CookieSourceId = CookieSourceId::new(41);
+const ROOT_SOURCE: CookieSourceId = CookieSourceId::new(42);
 const CHROMIUM_EPOCH_OFFSET_MICROSECONDS: i64 = 11_644_473_600_000_000;
 
 struct TestDirectory(PathBuf);
@@ -298,6 +300,18 @@ fn import_merged_chromium(
     import_browser_cookies_merging_chromium_stores_with_decryptor(
         profile,
         SOURCE,
+        allowlist,
+        &DisabledChromiumCookieDecryptor,
+    )
+}
+
+fn import_ordered_chromium_stores(
+    profile: &BrowserProfile,
+    allowlist: &BrowserCookieDomainAllowlist,
+) -> Result<Vec<CookieImport>, BrowserCookieImportError> {
+    import_browser_cookie_stores_with_decryptor(
+        profile,
+        [SOURCE, ROOT_SOURCE],
         allowlist,
         &DisabledChromiumCookieDecryptor,
     )
@@ -628,6 +642,76 @@ fn opt_in_chromium_merge_prefers_later_expiry_and_network_on_ties() {
     ] {
         assert!(!merged_header.contains(rejected), "retained {rejected}");
     }
+}
+
+#[test]
+fn ordered_dual_store_keeps_network_first_and_root_as_separate_fallback() {
+    let fixture = TestDirectory::new();
+    let profile = discovered_profile(&fixture, BrowserKind::Chromium);
+    let network = chromium_database(&profile, "Network/Cookies", false);
+    let root = chromium_database(&profile, "Cookies", false);
+    let later_expiry = chromium_timestamp(now() + Duration::hours(2));
+    insert_chromium(
+        &network,
+        "example.com",
+        "session",
+        "/",
+        0,
+        1,
+        "network-session",
+        &[],
+    );
+    insert_chromium(
+        &network,
+        "example.com",
+        "network-only",
+        "/",
+        0,
+        1,
+        "network-value",
+        &[],
+    );
+    insert_chromium(
+        &root,
+        "example.com",
+        "session",
+        "/",
+        later_expiry,
+        1,
+        "root-later-must-lose",
+        &[],
+    );
+    insert_chromium(
+        &root,
+        "example.com",
+        "root-only",
+        "/",
+        later_expiry,
+        1,
+        "root-fallback",
+        &[],
+    );
+    drop((network, root));
+
+    let mut imports = import_ordered_chromium_stores(&profile, &exact("example.com"))
+        .expect("ordered dual-store import")
+        .into_iter();
+    let order = CookieImportOrder::new([SOURCE, ROOT_SOURCE]).expect("store order");
+    let network = CookieJar::from_imports(&order, [imports.next().expect("Network import")])
+        .expect("Network jar");
+    let network_header = header(&network, &https("https://example.com/"), now()).expect("Network");
+    assert!(network_header.contains("session=network-session"));
+    assert!(network_header.contains("network-only=network-value"));
+    assert!(!network_header.contains("root-later-must-lose"));
+    assert!(!network_header.contains("root-only=root-fallback"));
+
+    let root =
+        CookieJar::from_imports(&order, [imports.next().expect("root import")]).expect("root jar");
+    let root_header = header(&root, &https("https://example.com/"), now()).expect("root");
+    assert!(root_header.contains("session=root-later-must-lose"));
+    assert!(root_header.contains("root-only=root-fallback"));
+    assert!(!root_header.contains("network-session"));
+    assert!(imports.next().is_none());
 }
 
 #[test]

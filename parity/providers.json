@@ -743,7 +743,7 @@
         "usage_resets": "passing",
         "costs_history": "not-applicable",
         "sessions": "not-applicable",
-        "browser": "planned",
+        "browser": "passing",
         "status_errors": "passing",
         "refresh": "passing",
         "cli_server": "in-progress",
@@ -751,8 +751,15 @@
       },
       "status": "in-progress",
       "tests": [
+        "crates/providers/tests/browser_cookie.rs",
+        "crates/providers/tests/browser_profile.rs",
+        "crates/providers/tests/chromium_crypto.rs",
+        "crates/providers/tests/configured_endpoint.rs",
+        "crates/providers/tests/cookie.rs",
         "crates/providers/tests/http_transport.rs",
+        "crates/providers/tests/manual_capture.rs",
         "crates/providers/tests/provider_amp.rs",
+        "crates/providers/tests/sqlite_snapshot.rs",
         "crates/providers/tests/subprocess.rs"
       ],
       "not_applicable_reasons": {

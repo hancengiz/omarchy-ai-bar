@@ -5,7 +5,7 @@ fi
 if [ "${NO_COLOR:-}" != "1" ] || [ "${TERM:-}" != "dumb" ]; then
     exit 8
 fi
-if [ -n "${AMP_API_KEY:-}" ]; then
+if [ "${AMP_API_KEY:-}" != "sgamp-fixture-sensitive-token" ]; then
     exit 7
 fi
 printf '%s\n' 'Signed in as cli@example.test (fixture-team)'

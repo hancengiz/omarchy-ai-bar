@@ -1,28 +1,45 @@
-//! Amp Free, subscription, and credit usage through the native CLI or bearer API.
+//! Amp Free, subscription, and credit usage through CLI, bearer API, or web session.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Debug, Formatter};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
 
+use futures_util::StreamExt;
 use oab_domain::{
     AccountScope, BoundedText, ClassifiedError, DetailRow, DetailSection, DetailSensitivity,
     ErrorKind, NamedRateWindow, ProviderId, RateWindow, Timestamp, UsagePercent, UsageSample,
     WindowDuration, WindowUsage,
 };
-use rust_decimal::Decimal;
+use reqwest::header::{
+    ACCEPT, ACCEPT_LANGUAGE, COOKIE, HeaderValue, LOCATION, ORIGIN, REFERER, USER_AGENT,
+};
+use reqwest::{Client, StatusCode};
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::{Decimal, RoundingStrategy};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use time::{Date, Month, OffsetDateTime, PrimitiveDateTime, Time, UtcOffset, Weekday};
+use tokio_util::sync::CancellationToken;
 use url::Url;
 use zeroize::Zeroizing;
 
+use crate::browser_cookie::{
+    BrowserCookieDomainAllowlist, BrowserCookieDomainPolicy, BrowserCookieDomainRule,
+    ChromiumCookieDecryptor, import_browser_cookie_stores_with_decryptor,
+};
+use crate::browser_profile::BrowserProfileDiscovery;
 use crate::configured_endpoint::{ConfiguredEndpoint, ConfiguredHttpPolicy, clean_setting};
 use crate::context::{ProviderAdapter, ProviderContext, ProviderFuture};
+use crate::cookie::{
+    CookieImportOrder, CookieJar, CookieSourceId, CookieUrlPolicy, MAX_COOKIE_HEADER_BYTES,
+    ValidatedCookieUrl,
+};
 use crate::descriptor::ProviderSource;
 use crate::endpoint::{EndpointClass, EndpointPolicy};
 use crate::executable::{ExecutablePath, resolve_executable};
+use crate::manual_capture::{CaptureHeader, ManualCaptureError, ManualCapturePolicy};
 use crate::normalize::{UsageSampleBuilder, system_timestamp};
 use crate::registry::descriptor_for;
 use crate::retry::RetryPolicy;
@@ -32,10 +49,21 @@ use crate::transport::{
 };
 
 const API_ENDPOINT: &str = "https://ampcode.com/api/internal?userDisplayBalanceInfo";
+const SETTINGS_ENDPOINT: &str = "https://ampcode.com/settings";
+const APP_ORIGIN: &str = "https://app.ampcode.com";
+const WWW_ORIGIN: &str = "https://www.ampcode.com";
 const API_TOKEN_KEY: &str = "AMP_API_KEY";
 const CLI_OVERRIDE: &str = "OMARCHY_AI_BAR_AMP_PATH";
+const PINNED_CLI_OVERRIDE: &str = "AMP_CLI_PATH";
 const MAX_TOKEN_BYTES: usize = 16 * 1024;
 const MAX_RESPONSE_BYTES: usize = 512 * 1024;
+const MAX_HTML_OBJECT_DEPTH: usize = 64;
+const MAX_HTML_FIELDS: usize = 4_096;
+const MAX_HTML_STRING_BYTES: usize = 128 * 1024;
+const MAX_BROWSER_PROFILES: usize = 64;
+const MAX_BROWSER_SESSIONS: usize = 16;
+const MAX_NAVIGATION_REDIRECTS: usize = 5;
+const MAX_NAVIGATION_URL_BYTES: usize = 16 * 1024;
 const MAX_DISPLAY_TEXT_BYTES: usize = 256 * 1024;
 const MAX_DISPLAY_LINES: usize = 4_096;
 const MAX_WORKSPACES: usize = 23;
@@ -48,6 +76,13 @@ const CLI_STDERR_BYTES: usize = MAX_DISPLAY_TEXT_BYTES;
 const MAX_CLI_CUSTOM_VALUE_BYTES: usize = 4 * 1024;
 const AUTH_STDERR_TAG: u8 = 1;
 const MONTHLY_SECONDS: u64 = 30 * 24 * 60 * 60;
+const WEB_ACCEPT: &str = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+const WEB_ACCEPT_LANGUAGE: &str = "en-US,en;q=0.9";
+const WEB_ORIGIN: &str = "https://ampcode.com";
+const WEB_USER_AGENT: &str = concat!(
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ",
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+);
 
 /// A bounded Amp access token which is zeroized on drop.
 #[derive(Clone)]
@@ -100,6 +135,7 @@ impl Debug for AmpApiCredential {
 pub struct AmpCliSettings {
     executable: ExecutablePath,
     environment: Vec<(String, String)>,
+    api_token: Option<Zeroizing<String>>,
     timeout: Duration,
     max_stdout_bytes: usize,
     max_stderr_bytes: usize,
@@ -142,9 +178,16 @@ impl AmpCliSettings {
         environment: &BTreeMap<String, String>,
     ) -> Result<Self, ClassifiedError> {
         let sanitized = sanitized_cli_environment(environment, executable.as_path())?;
+        let api_token = environment
+            .get(API_TOKEN_KEY)
+            .and_then(|value| clean_setting(value))
+            .map(AmpApiCredential::new)
+            .transpose()?
+            .map(|credential| credential.value);
         Ok(Self {
             executable,
             environment: sanitized,
+            api_token,
             timeout: CLI_TIMEOUT,
             max_stdout_bytes: CLI_STDOUT_BYTES,
             max_stderr_bytes: CLI_STDERR_BYTES,
@@ -191,11 +234,103 @@ impl Debug for AmpCliSettings {
             .debug_struct("AmpCliSettings")
             .field("executable", &"<redacted>")
             .field("environment_entries", &self.environment.len())
+            .field("api_token", &"<redacted>")
             .field("timeout", &self.timeout)
             .field("max_stdout_bytes", &self.max_stdout_bytes)
             .field("max_stderr_bytes", &self.max_stderr_bytes)
             .finish()
     }
+}
+
+/// Fixed Amp settings route plus the exact origins a navigation may use.
+pub struct AmpWebRouteSet {
+    settings: Url,
+    endpoints: EndpointPolicy,
+}
+
+impl AmpWebRouteSet {
+    /// Creates Amp's production settings route and known cookie-bearing origins.
+    ///
+    /// # Errors
+    ///
+    /// Returns API only if the compile-time route contract is invalid.
+    #[doc(hidden)]
+    pub fn production() -> Result<Self, ClassifiedError> {
+        let settings = Url::parse(SETTINGS_ENDPOINT).map_err(|_| api_error())?;
+        let endpoints = EndpointPolicy::new([
+            (WEB_ORIGIN, EndpointClass::PublicHttps),
+            (WWW_ORIGIN, EndpointClass::PublicHttps),
+            (APP_ORIGIN, EndpointClass::PublicHttps),
+        ])
+        .map_err(|_| api_error())?;
+        Self::new(settings, endpoints)
+    }
+
+    /// Reports whether a complete URL may receive the Amp session cookie.
+    #[must_use]
+    #[doc(hidden)]
+    pub fn allows_cookie_target(&self, url: &Url) -> bool {
+        self.endpoints.validate(url).is_ok() && !is_amp_login_redirect(url) && !is_login_route(url)
+    }
+
+    /// Creates an exact loopback route for deterministic HTTP tests.
+    ///
+    /// # Errors
+    ///
+    /// Rejects non-loopback, credential-bearing, queried, or non-settings URLs.
+    #[doc(hidden)]
+    pub fn loopback(settings: Url) -> Result<Self, ClassifiedError> {
+        let origin = settings.origin().ascii_serialization();
+        let endpoints = EndpointPolicy::new([(origin, EndpointClass::LoopbackDevelopment)])
+            .map_err(|_| api_error())?;
+        Self::new(settings, endpoints)
+    }
+
+    fn new(settings: Url, endpoints: EndpointPolicy) -> Result<Self, ClassifiedError> {
+        if !settings.username().is_empty()
+            || settings.password().is_some()
+            || settings.path() != "/settings"
+            || settings.query().is_some()
+            || settings.fragment().is_some()
+        {
+            return Err(api_error());
+        }
+        endpoints.validate(&settings).map_err(|_| api_error())?;
+        Ok(Self {
+            settings,
+            endpoints,
+        })
+    }
+}
+
+impl Debug for AmpWebRouteSet {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AmpWebRouteSet")
+            .field(
+                "settings_origin",
+                &self.settings.origin().ascii_serialization(),
+            )
+            .field("settings_path", &"<redacted>")
+            .finish_non_exhaustive()
+    }
+}
+
+struct WebSession {
+    cookie: Zeroizing<String>,
+}
+
+impl Debug for WebSession {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str("WebSession(<redacted>)")
+    }
+}
+
+struct WebBackend {
+    source: ProviderSource,
+    routes: AmpWebRouteSet,
+    sessions: Vec<WebSession>,
+    transport: AmpWebTransport,
 }
 
 /// Amp adapter permanently bound to one account and one explicit source.
@@ -207,6 +342,7 @@ pub struct AmpProvider {
 enum Backend {
     Api(ApiBackend),
     Cli(AmpCliSettings),
+    Web(Box<WebBackend>),
 }
 
 struct ApiBackend {
@@ -216,10 +352,8 @@ struct ApiBackend {
 }
 
 impl AmpProvider {
-    /// Resolves and constructs only the selected non-browser source.
-    ///
-    /// Browser-session and manual-cookie modes are intentionally owned by the
-    /// shared Linux browser boundary rather than silently mixed here.
+    /// Resolves and constructs only sources whose credentials fit the injected
+    /// environment. Manual and browser sources use their explicit constructors.
     ///
     /// # Errors
     ///
@@ -276,6 +410,113 @@ impl AmpProvider {
         })
     }
 
+    /// Creates a production adapter from a manual Cookie header or cURL capture.
+    ///
+    /// Only exact known Amp web hosts and the case-sensitive `session` cookie
+    /// are retained.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable missing, parse, scope, or route errors.
+    pub fn new_manual(scope: AccountScope, raw: &str) -> Result<Self, ClassifiedError> {
+        Self::from_manual_capture_routes(scope, raw, AmpWebRouteSet::production()?)
+    }
+
+    /// Creates an injected-route manual-session adapter for HTTP tests.
+    ///
+    /// A cURL URL, when present, remains restricted to exact production Amp
+    /// hosts. The route changes only the already-authorized network target.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable capture, credential, scope, or route errors.
+    #[doc(hidden)]
+    pub fn from_manual_capture_routes(
+        scope: AccountScope,
+        raw: &str,
+        routes: AmpWebRouteSet,
+    ) -> Result<Self, ClassifiedError> {
+        let policy = ManualCapturePolicy::new(
+            ["ampcode.com", "www.ampcode.com", "app.ampcode.com"],
+            [CaptureHeader::Cookie],
+        )
+        .map_err(classify_capture_error)?
+        .with_ignored_url_query();
+        let capture = policy.parse(raw).map_err(classify_capture_error)?;
+        let cookie = capture
+            .header(CaptureHeader::Cookie)
+            .ok_or_else(missing_credential)?;
+        let session = session_cookie_header(cookie)?;
+        Self::build_web(
+            scope,
+            ProviderSource::ManualCookie,
+            routes,
+            vec![WebSession { cookie: session }],
+        )
+    }
+
+    /// Creates a production adapter from ordered Linux browser profiles.
+    ///
+    /// Chromium-family root/Network stores and Firefox/Zen SQLite stores are
+    /// read through the shared snapshot boundary. Profiles never share jars.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable missing, bounded local-data, decryption, scope, or route errors.
+    pub fn new_browser(
+        scope: AccountScope,
+        discovery: &BrowserProfileDiscovery,
+        decryptor: &dyn ChromiumCookieDecryptor,
+        now: OffsetDateTime,
+    ) -> Result<Self, ClassifiedError> {
+        let routes = AmpWebRouteSet::production()?;
+        Self::from_browser_routes(scope, discovery, decryptor, now, routes)
+    }
+
+    /// Creates an injected-route browser adapter for deterministic profile tests.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable missing, bounded local-data, decryption, scope, or route errors.
+    #[doc(hidden)]
+    pub fn from_browser_routes(
+        scope: AccountScope,
+        discovery: &BrowserProfileDiscovery,
+        decryptor: &dyn ChromiumCookieDecryptor,
+        now: OffsetDateTime,
+        routes: AmpWebRouteSet,
+    ) -> Result<Self, ClassifiedError> {
+        let sessions = browser_sessions(discovery, decryptor, now)?;
+        Self::build_web(scope, ProviderSource::BrowserSession, routes, sessions)
+    }
+
+    fn build_web(
+        scope: AccountScope,
+        source: ProviderSource,
+        routes: AmpWebRouteSet,
+        sessions: Vec<WebSession>,
+    ) -> Result<Self, ClassifiedError> {
+        validate_scope(&scope)?;
+        if !matches!(
+            source,
+            ProviderSource::ManualCookie | ProviderSource::BrowserSession
+        ) || sessions.is_empty()
+            || sessions.len() > MAX_BROWSER_SESSIONS
+        {
+            return Err(api_error());
+        }
+        let transport = AmpWebTransport::new(routes.endpoints.clone())?;
+        Ok(Self {
+            scope,
+            backend: Backend::Web(Box::new(WebBackend {
+                source,
+                routes,
+                sessions,
+                transport,
+            })),
+        })
+    }
+
     /// Deterministic loopback seam retaining transport-owned endpoint policy.
     ///
     /// # Errors
@@ -303,9 +544,10 @@ impl AmpProvider {
     /// Source to which this adapter is permanently bound.
     #[must_use]
     pub const fn source(&self) -> ProviderSource {
-        match self.backend {
+        match &self.backend {
             Backend::Api(_) => ProviderSource::ApiKey,
             Backend::Cli(_) => ProviderSource::Cli,
+            Backend::Web(web) => web.source,
         }
     }
 
@@ -326,6 +568,7 @@ impl AmpProvider {
         match &self.backend {
             Backend::Api(backend) => fetch_api(backend, context, fetched_at).await,
             Backend::Cli(settings) => fetch_cli(settings, context, fetched_at).await,
+            Backend::Web(web) => fetch_web(web, context, fetched_at).await,
         }
     }
 }
@@ -334,7 +577,7 @@ impl Debug for AmpProvider {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("AmpProvider")
-            .field("scope", &self.scope)
+            .field("scope", &"<redacted>")
             .field("source", &self.source())
             .finish_non_exhaustive()
     }
@@ -435,6 +678,11 @@ async fn fetch_cli(
             .with_environment(name, value)
             .map_err(map_subprocess_error)?;
     }
+    if let Some(api_token) = &settings.api_token {
+        request = request
+            .with_environment(API_TOKEN_KEY, api_token.as_str())
+            .map_err(map_subprocess_error)?;
+    }
     request = request
         .with_environment("NO_COLOR", "1")
         .map_err(map_subprocess_error)?
@@ -463,6 +711,311 @@ async fn fetch_cli(
         text,
         ProviderSource::Cli,
     )
+}
+
+async fn fetch_web(
+    backend: &WebBackend,
+    context: &ProviderContext,
+    fetched_at: Timestamp,
+) -> Result<UsageSample, ClassifiedError> {
+    let mut last_error = None;
+    for session in &backend.sessions {
+        let result = backend
+            .transport
+            .fetch(&backend.routes.settings, session, context.cancellation())
+            .await
+            .and_then(|body| {
+                let html = std::str::from_utf8(&body).map_err(|_| parse_error(()))?;
+                parse_html(context.scope().clone(), fetched_at, html, backend.source)
+            });
+        match result {
+            Ok(sample) => return Ok(sample),
+            Err(error)
+                if backend.source == ProviderSource::BrowserSession
+                    && error.kind() == ErrorKind::AuthenticationExpired =>
+            {
+                last_error = Some(error);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(missing_credential))
+}
+
+struct AmpWebTransport {
+    client: Client,
+    endpoints: EndpointPolicy,
+}
+
+impl AmpWebTransport {
+    fn new(endpoints: EndpointPolicy) -> Result<Self, ClassifiedError> {
+        let client = Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(20))
+            .build()
+            .map_err(|_| api_error())?;
+        Ok(Self { client, endpoints })
+    }
+
+    async fn fetch(
+        &self,
+        settings: &Url,
+        session: &WebSession,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<u8>, ClassifiedError> {
+        let mut current = settings.clone();
+        let mut referer = SETTINGS_ENDPOINT.to_owned();
+        for redirect_count in 0..=MAX_NAVIGATION_REDIRECTS {
+            if current.as_str().len() > MAX_NAVIGATION_URL_BYTES {
+                return Err(parse_error(()));
+            }
+            if is_amp_login_redirect(&current) {
+                return Err(authentication_expired());
+            }
+            let endpoint = self
+                .endpoints
+                .validate(&current)
+                .map_err(|_| parse_error(()))?;
+            if is_login_route(&current) {
+                return Err(authentication_expired());
+            }
+            let cookie = sensitive_header(session.cookie.as_str())?;
+            let request = self
+                .client
+                .get(endpoint.url().clone())
+                .header(ACCEPT, WEB_ACCEPT)
+                .header(ACCEPT_LANGUAGE, WEB_ACCEPT_LANGUAGE)
+                .header(USER_AGENT, WEB_USER_AGENT)
+                .header(ORIGIN, WEB_ORIGIN)
+                .header(REFERER, &referer)
+                .header(COOKIE, cookie);
+            let response = tokio::select! {
+                biased;
+                () = cancellation.cancelled() => return Err(network_error()),
+                response = request.send() => response.map_err(|_| network_error())?,
+            };
+            if response.status().is_redirection() {
+                if redirect_count == MAX_NAVIGATION_REDIRECTS {
+                    return Err(parse_error(()));
+                }
+                let location = response
+                    .headers()
+                    .get(LOCATION)
+                    .ok_or_else(|| parse_error(()))?;
+                if location.as_bytes().len() > MAX_NAVIGATION_URL_BYTES {
+                    return Err(parse_error(()));
+                }
+                let location = location.to_str().map_err(parse_error)?;
+                let target = current.join(location).map_err(parse_error)?;
+                if target.as_str().len() > MAX_NAVIGATION_URL_BYTES {
+                    return Err(parse_error(()));
+                }
+                if is_amp_login_redirect(&target) {
+                    return Err(authentication_expired());
+                }
+                self.endpoints
+                    .validate(&target)
+                    .map_err(|_| parse_error(()))?;
+                if is_login_route(&target) {
+                    return Err(authentication_expired());
+                }
+                referer = current.as_str().to_owned();
+                current = target;
+                continue;
+            }
+            classify_web_status(response.status())?;
+            if response
+                .content_length()
+                .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
+            {
+                return Err(parse_error(()));
+            }
+            let mut body = Vec::new();
+            let mut stream = response.bytes_stream();
+            loop {
+                let next = tokio::select! {
+                    biased;
+                    () = cancellation.cancelled() => return Err(network_error()),
+                    next = stream.next() => next,
+                };
+                let Some(chunk) = next else {
+                    break;
+                };
+                let chunk = chunk.map_err(|_| network_error())?;
+                let length = body
+                    .len()
+                    .checked_add(chunk.len())
+                    .filter(|length| *length <= MAX_RESPONSE_BYTES)
+                    .ok_or_else(|| parse_error(()))?;
+                body.reserve(length.saturating_sub(body.len()));
+                body.extend_from_slice(&chunk);
+            }
+            return Ok(body);
+        }
+        Err(parse_error(()))
+    }
+}
+
+impl Debug for AmpWebTransport {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str("AmpWebTransport(<redacted>)")
+    }
+}
+
+fn classify_web_status(status: StatusCode) -> Result<(), ClassifiedError> {
+    match status {
+        StatusCode::OK => Ok(()),
+        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(authentication_expired()),
+        StatusCode::REQUEST_TIMEOUT => Err(network_error()),
+        StatusCode::TOO_MANY_REQUESTS => Err(ClassifiedError::new(ErrorKind::RateLimited)),
+        status if status.is_server_error() => {
+            Err(ClassifiedError::new(ErrorKind::ProviderUnavailable))
+        }
+        _ => Err(api_error()),
+    }
+}
+
+fn sensitive_header(value: &str) -> Result<HeaderValue, ClassifiedError> {
+    if value.is_empty() || value.len() > MAX_COOKIE_HEADER_BYTES {
+        return Err(api_error());
+    }
+    let mut value = HeaderValue::from_str(value).map_err(|_| api_error())?;
+    value.set_sensitive(true);
+    Ok(value)
+}
+
+/// Reports whether a URL is one of Amp's pinned sign-in redirect shapes.
+#[must_use]
+#[doc(hidden)]
+pub fn is_amp_login_redirect(url: &Url) -> bool {
+    if !is_amp_host(url.host_str()) {
+        return false;
+    }
+    url.host_str()
+        .is_some_and(|host| host.eq_ignore_ascii_case("auth.ampcode.com"))
+        || is_login_route(url)
+}
+
+fn is_amp_host(host: Option<&str>) -> bool {
+    host.is_some_and(|host| {
+        host.eq_ignore_ascii_case("ampcode.com")
+            || host
+                .to_ascii_lowercase()
+                .strip_suffix(".ampcode.com")
+                .is_some_and(|prefix| !prefix.is_empty())
+    })
+}
+
+fn is_login_route(url: &Url) -> bool {
+    let components = url
+        .path_segments()
+        .into_iter()
+        .flatten()
+        .map(str::to_ascii_lowercase)
+        .collect::<Vec<_>>();
+    if components
+        .iter()
+        .any(|component| matches!(component.as_str(), "login" | "signin" | "sign-in"))
+    {
+        return true;
+    }
+    if components.iter().any(|component| component == "auth") {
+        let query = url.query().unwrap_or_default().to_ascii_lowercase();
+        return ["returnto=", "redirect=", "redirectto="]
+            .iter()
+            .any(|needle| query.contains(needle));
+    }
+    false
+}
+
+fn browser_sessions(
+    discovery: &BrowserProfileDiscovery,
+    decryptor: &dyn ChromiumCookieDecryptor,
+    now: OffsetDateTime,
+) -> Result<Vec<WebSession>, ClassifiedError> {
+    let allowlist = BrowserCookieDomainAllowlist::new([BrowserCookieDomainRule {
+        domain: "ampcode.com",
+        policy: BrowserCookieDomainPolicy::DomainAndSubdomains,
+    }])
+    .map_err(|_| parse_error(()))?;
+    let target = ValidatedCookieUrl::parse(SETTINGS_ENDPOINT, CookieUrlPolicy::HttpsOnly)
+        .map_err(|_| api_error())?;
+    let report = discovery.discover();
+    if report.profiles().len() > MAX_BROWSER_PROFILES {
+        return Err(parse_error(()));
+    }
+    let mut sessions = Vec::new();
+    let mut seen = HashSet::<[u8; 32]>::new();
+    for (index, profile) in report.profiles().iter().enumerate() {
+        let first = index
+            .checked_mul(2)
+            .and_then(|value| value.checked_add(1))
+            .and_then(|value| u16::try_from(value).ok())
+            .ok_or_else(|| parse_error(()))?;
+        let store_sources = [CookieSourceId::new(first), CookieSourceId::new(first + 1)];
+        let Ok(imports) = import_browser_cookie_stores_with_decryptor(
+            profile,
+            store_sources,
+            &allowlist,
+            decryptor,
+        ) else {
+            continue;
+        };
+        let order = CookieImportOrder::new(store_sources).map_err(|_| parse_error(()))?;
+        for import in imports {
+            let jar = CookieJar::from_imports(&order, [import]).map_err(|_| parse_error(()))?;
+            let Some(header) = jar.header_for(&target, now).map_err(|_| parse_error(()))? else {
+                continue;
+            };
+            let Ok(cookie) = session_cookie_header(header.expose()) else {
+                continue;
+            };
+            let digest: [u8; 32] = Sha256::digest(cookie.as_bytes()).into();
+            if seen.insert(digest) {
+                sessions.push(WebSession { cookie });
+                if sessions.len() > MAX_BROWSER_SESSIONS {
+                    return Err(parse_error(()));
+                }
+            }
+            break;
+        }
+    }
+    if sessions.is_empty() {
+        Err(missing_credential())
+    } else {
+        Ok(sessions)
+    }
+}
+
+fn session_cookie_header(raw: &str) -> Result<Zeroizing<String>, ClassifiedError> {
+    if raw.len() > MAX_COOKIE_HEADER_BYTES || raw.contains(['\r', '\n']) {
+        return Err(parse_error(()));
+    }
+    let mut output = Zeroizing::new(String::new());
+    for part in raw.split(';') {
+        let Some((name, value)) = part.trim().split_once('=') else {
+            return Err(parse_error(()));
+        };
+        let name = name.trim();
+        let value = value.trim();
+        if name != "session" {
+            continue;
+        }
+        if value.is_empty() || value.len() > MAX_TOKEN_BYTES {
+            return Err(missing_credential());
+        }
+        if !output.is_empty() {
+            output.push_str("; ");
+        }
+        output.push_str("session=");
+        output.push_str(value);
+    }
+    if output.is_empty() {
+        return Err(missing_credential());
+    }
+    sensitive_header(output.as_str())?;
+    Ok(output)
 }
 
 /// Parses Amp's complete CLI/API display-text format into the shared domain.
@@ -494,6 +1047,53 @@ pub fn parse_display_text(
     };
     let parsed = ParsedUsage::parse(display_text, fetched_at)?;
     parsed.normalize(scope, fetched_at, strategy)
+}
+
+/// Parses Amp's settings-page Svelte payload into the shared usage domain.
+///
+/// The pinned page exposes either `freeTierUsage` or the prefetched
+/// `getFreeTierUsage` key. Parsing is bounded and does not execute page code.
+///
+/// # Errors
+///
+/// Returns stable scope, source, signed-out, or bounded parse failures. Only
+/// manual-cookie and browser-session sources are accepted.
+pub fn parse_html(
+    scope: AccountScope,
+    fetched_at: Timestamp,
+    html: &str,
+    source: ProviderSource,
+) -> Result<UsageSample, ClassifiedError> {
+    validate_scope(&scope)?;
+    let strategy = match source {
+        ProviderSource::ManualCookie => "manual_cookie",
+        ProviderSource::BrowserSession => "browser_session",
+        ProviderSource::ApiKey
+        | ProviderSource::ConfigurableEndpoint
+        | ProviderSource::OAuth
+        | ProviderSource::Cli
+        | ProviderSource::LocalData
+        | ProviderSource::CloudCredentials => return Err(api_error()),
+    };
+    if html.len() > MAX_RESPONSE_BYTES {
+        return Err(parse_error(()));
+    }
+    let Some(free) = parse_html_free_usage(html)? else {
+        return Err(if looks_signed_out(html) {
+            authentication_expired()
+        } else {
+            parse_error(())
+        });
+    };
+    ParsedUsage {
+        free: Some(free),
+        subscription: None,
+        individual_credits: None,
+        workspaces: Vec::new(),
+        email: None,
+        organization: None,
+    }
+    .normalize(scope, fetched_at, strategy)
 }
 
 #[derive(Deserialize)]
@@ -598,7 +1198,9 @@ impl ParsedUsage {
                 individual_credits = parse_remaining_amount(body);
                 continue;
             }
-            if let Some(body) = strip_prefix_ascii_case(line, "Workspace ") {
+            if let Some(body) =
+                strip_prefix_ascii_case(line, "Workspace").and_then(strip_required_ascii_whitespace)
+            {
                 if workspaces.len() == MAX_WORKSPACES {
                     return Err(ClassifiedError::new(ErrorKind::Parse));
                 }
@@ -762,25 +1364,195 @@ impl FreeUsage {
     }
 }
 
+fn parse_html_free_usage(html: &str) -> Result<Option<FreeUsage>, ClassifiedError> {
+    for token in ["freeTierUsage", "getFreeTierUsage"] {
+        let Some(object) = extract_html_object(token, html)? else {
+            continue;
+        };
+        let Some(quota) = html_number_for("quota", object)? else {
+            continue;
+        };
+        let Some(used) = html_number_for("used", object)? else {
+            continue;
+        };
+        let Some(hourly_replenishment) = html_number_for("hourlyReplenishment", object)? else {
+            continue;
+        };
+        let duration_seconds = html_number_for("windowHours", object)?
+            .filter(|hours| *hours > Decimal::ZERO)
+            .map(|hours| {
+                (hours * Decimal::from(60_u8))
+                    .round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero)
+                    .to_u64()
+                    .and_then(|minutes| minutes.checked_mul(60))
+                    .ok_or_else(|| parse_error(()))
+            })
+            .transpose()?;
+        return Ok(Some(FreeUsage {
+            quota,
+            used,
+            hourly_replenishment,
+            duration_seconds,
+            reset_kind: if hourly_replenishment > Decimal::ZERO {
+                FreeReset::Rolling
+            } else {
+                FreeReset::None
+            },
+        }));
+    }
+    Ok(None)
+}
+
+fn extract_html_object<'a>(token: &str, html: &'a str) -> Result<Option<&'a str>, ClassifiedError> {
+    let Some(token_start) = html.find(token) else {
+        return Ok(None);
+    };
+    let search_start = token_start
+        .checked_add(token.len())
+        .ok_or_else(|| parse_error(()))?;
+    let Some(relative_brace) = html[search_start..].find('{') else {
+        return Ok(None);
+    };
+    let brace = search_start
+        .checked_add(relative_brace)
+        .ok_or_else(|| parse_error(()))?;
+    let bytes = html.as_bytes();
+    let mut depth = 0_usize;
+    let mut fields = 0_usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut string_bytes = 0_usize;
+    for (index, byte) in bytes.iter().copied().enumerate().skip(brace) {
+        if in_string {
+            string_bytes = string_bytes
+                .checked_add(1)
+                .filter(|length| *length <= MAX_HTML_STRING_BYTES)
+                .ok_or_else(|| parse_error(()))?;
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+                string_bytes = 0;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => {
+                in_string = true;
+                string_bytes = 0;
+            }
+            b'{' => {
+                depth = depth
+                    .checked_add(1)
+                    .filter(|depth| *depth <= MAX_HTML_OBJECT_DEPTH)
+                    .ok_or_else(|| parse_error(()))?;
+            }
+            b'}' => {
+                depth = depth.checked_sub(1).ok_or_else(|| parse_error(()))?;
+                if depth == 0 {
+                    return Ok(Some(&html[brace..=index]));
+                }
+            }
+            b':' => {
+                fields = fields
+                    .checked_add(1)
+                    .filter(|fields| *fields <= MAX_HTML_FIELDS)
+                    .ok_or_else(|| parse_error(()))?;
+            }
+            _ => {}
+        }
+    }
+    if in_string || depth != 0 {
+        return Err(parse_error(()));
+    }
+    Ok(None)
+}
+
+fn html_number_for(key: &str, object: &str) -> Result<Option<Decimal>, ClassifiedError> {
+    let mut offset = 0_usize;
+    while let Some(relative) = object[offset..].find(key) {
+        let start = offset
+            .checked_add(relative)
+            .ok_or_else(|| parse_error(()))?;
+        let end = start
+            .checked_add(key.len())
+            .ok_or_else(|| parse_error(()))?;
+        let left_is_word = start > 0 && is_html_word_byte(object.as_bytes()[start - 1]);
+        let right_is_word = object
+            .as_bytes()
+            .get(end)
+            .is_some_and(|byte| is_html_word_byte(*byte));
+        if !left_is_word && !right_is_word {
+            let suffix = object[end..].trim_start_matches(char::is_whitespace);
+            if let Some(suffix) = suffix.strip_prefix(':') {
+                let suffix = suffix.trim_start_matches(char::is_whitespace);
+                let digit_count = suffix.bytes().take_while(u8::is_ascii_digit).count();
+                if digit_count > 0 {
+                    let mut number_end = digit_count;
+                    if suffix.as_bytes().get(number_end) == Some(&b'.') {
+                        let fraction = suffix[number_end + 1..]
+                            .bytes()
+                            .take_while(u8::is_ascii_digit)
+                            .count();
+                        if fraction == 0 {
+                            return Ok(None);
+                        }
+                        number_end = number_end
+                            .checked_add(1 + fraction)
+                            .ok_or_else(|| parse_error(()))?;
+                    }
+                    if number_end > 64 {
+                        return Err(parse_error(()));
+                    }
+                    return Decimal::from_str(&suffix[..number_end])
+                        .map(Some)
+                        .map_err(parse_error);
+                }
+            }
+        }
+        offset = end;
+    }
+    Ok(None)
+}
+
+const fn is_html_word_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
 fn parse_identity(line: &str) -> Result<Option<(String, Option<String>)>, ClassifiedError> {
-    let Some(body) = strip_prefix_ascii_case(line, "Signed in as ") else {
+    let Some(body) =
+        strip_prefix_ascii_case(line, "Signed in as").and_then(strip_required_ascii_whitespace)
+    else {
         return Ok(None);
     };
     let body = body.trim();
     if body.is_empty() {
         return Ok(None);
     }
-    let (email, organization) = if body.ends_with(')') {
-        if let Some(open) = body.rfind(" (") {
-            (&body[..open], body[open + 2..body.len() - 1].trim())
-        } else {
-            (body, "")
+    let (email, organization) = if body.ends_with(')') && body.contains('(') {
+        let Some(open) = body.rfind('(') else {
+            return Ok(None);
+        };
+        let email_with_space = &body[..open];
+        let email = trim_ascii_whitespace_end(email_with_space);
+        if email.len() == email_with_space.len() {
+            return Ok(None);
         }
+        let organization = body[open + 1..body.len() - 1].trim();
+        if organization.contains(')') {
+            return Ok(None);
+        }
+        (email, organization)
     } else {
+        if body.contains('(') {
+            return Ok(None);
+        }
         (body, "")
     };
     let email = clean_parser_text(email, MAX_IDENTITY_BYTES)?;
-    if email.split_whitespace().count() != 1 {
+    if email.split_whitespace().count() != 1 || email.contains('(') {
         return Ok(None);
     }
     let organization = if organization.is_empty() {
@@ -795,21 +1567,19 @@ fn parse_legacy_free(body: &str) -> Result<Option<FreeUsage>, ClassifiedError> {
     let Some((remaining, rest)) = take_amount(body) else {
         return Ok(None);
     };
-    let Some(rest) = rest.trim_start().strip_prefix('/') else {
+    let Some(rest) = trim_ascii_whitespace_start(rest).strip_prefix('/') else {
         return Ok(None);
     };
     let Some((quota, rest)) = take_amount(rest) else {
         return Ok(None);
     };
-    let Some(after_remaining) = strip_prefix_ascii_case(rest.trim_start(), "remaining") else {
+    let Some(after_remaining) = strip_required_ascii_token(rest, "remaining") else {
         return Ok(None);
     };
-    let hourly = find_ascii_case_insensitive(after_remaining, "replenishes")
-        .and_then(|index| take_amount(&after_remaining[index + "replenishes".len()..]))
-        .map_or(Decimal::ZERO, |(value, _)| value);
+    let hourly = parse_hourly_replenishment(after_remaining).unwrap_or(Decimal::ZERO);
     let duration_seconds = if hourly > Decimal::ZERO {
         let hours = (quota / hourly)
-            .round()
+            .round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero)
             .to_u64()
             .ok_or_else(|| ClassifiedError::new(ErrorKind::Parse))?
             .max(1);
@@ -834,17 +1604,32 @@ fn parse_legacy_free(body: &str) -> Result<Option<FreeUsage>, ClassifiedError> {
     }))
 }
 
+fn parse_hourly_replenishment(after_remaining: &str) -> Option<Decimal> {
+    let metadata = trim_ascii_whitespace_start(after_remaining).strip_prefix('(')?;
+    let metadata = trim_ascii_whitespace_start(strip_prefix_ascii_case(metadata, "replenishes")?);
+    let metadata = metadata.strip_prefix('+')?;
+    let metadata = metadata.strip_prefix('$').unwrap_or(metadata);
+    if metadata.len() != trim_ascii_whitespace_start(metadata).len() {
+        return None;
+    }
+    let (hourly, metadata) = take_decimal(metadata)?;
+    let metadata = trim_ascii_whitespace_start(metadata).strip_prefix('/')?;
+    let metadata = trim_ascii_whitespace_start(metadata);
+    let metadata = strip_prefix_ascii_case(metadata, "hour")?;
+    metadata.starts_with(')').then_some(hourly)
+}
+
 fn parse_daily_free(body: &str) -> Option<FreeUsage> {
     let (remaining, rest) = take_decimal(body)?;
-    let rest = rest.trim_start().strip_prefix('%')?;
-    let rest = strip_prefix_ascii_case(rest.trim_start(), "remaining")?;
+    let rest = trim_ascii_whitespace_start(rest).strip_prefix('%')?;
+    let rest = strip_required_ascii_token(rest, "remaining")?;
     let remaining = remaining.clamp(Decimal::ZERO, Decimal::from(100_u8));
     Some(FreeUsage {
         quota: Decimal::from(100_u8),
         used: Decimal::from(100_u8) - remaining,
         hourly_replenishment: Decimal::ZERO,
         duration_seconds: Some(24 * 60 * 60),
-        reset_kind: if contains_ascii_case_insensitive(rest, "resets daily") {
+        reset_kind: if has_exact_daily_reset(rest) {
             FreeReset::Daily
         } else {
             FreeReset::None
@@ -852,20 +1637,44 @@ fn parse_daily_free(body: &str) -> Option<FreeUsage> {
     })
 }
 
+fn has_exact_daily_reset(after_remaining: &str) -> bool {
+    let mut metadata = after_remaining;
+    if let Some(after_space) = strip_required_ascii_whitespace(metadata)
+        && let Some(after_today) = strip_prefix_ascii_case(after_space, "today")
+    {
+        metadata = after_today;
+    }
+    let metadata = trim_ascii_whitespace_start(metadata);
+    let Some(metadata) = metadata.strip_prefix('(') else {
+        return false;
+    };
+    let Some(metadata) = strip_prefix_ascii_case(metadata, "resets") else {
+        return false;
+    };
+    let Some(metadata) = strip_required_ascii_whitespace(metadata) else {
+        return false;
+    };
+    strip_prefix_ascii_case(metadata, "daily)").is_some()
+}
+
 fn parse_subscription(
     line: &str,
     fetched_at: Timestamp,
 ) -> Result<Option<SubscriptionUsage>, ClassifiedError> {
-    let (plan, suffix) = if let Some(body) = strip_prefix_ascii_case(line, "Subscription ") {
+    let (plan, suffix) = if let Some(body) =
+        strip_prefix_ascii_case(line, "Subscription").and_then(strip_required_ascii_whitespace)
+    {
         let Some(colon) = body.find(':') else {
             return Ok(None);
         };
         (&body[..colon], &body[colon + 1..])
-    } else if let Some(body) = strip_prefix_ascii_case(line, "Amp ") {
-        let Some(index) = find_ascii_case_insensitive(body, " Subscription:") else {
+    } else if let Some(body) =
+        strip_prefix_ascii_case(line, "Amp").and_then(strip_required_ascii_whitespace)
+    {
+        let Some((plan, suffix)) = split_before_required_ascii_token(body, "Subscription:") else {
             return Ok(None);
         };
-        (&body[..index], &body[index + " Subscription:".len()..])
+        (plan, suffix)
     } else {
         return Ok(None);
     };
@@ -873,26 +1682,44 @@ fn parse_subscription(
     let Some((other_remaining, rest)) = take_decimal(suffix) else {
         return Ok(None);
     };
-    let Some(rest) = strip_prefix_ascii_case(rest.trim_start(), "% other usage and ") else {
+    let Some(rest) = trim_ascii_whitespace_start(rest).strip_prefix('%') else {
+        return Ok(None);
+    };
+    let Some(rest) = strip_required_ascii_token(rest, "other")
+        .and_then(|rest| strip_required_ascii_token(rest, "usage"))
+        .and_then(|rest| strip_required_ascii_token(rest, "and"))
+        .and_then(strip_required_ascii_whitespace)
+    else {
         return Ok(None);
     };
     let Some((orb_remaining, rest)) = take_decimal(rest) else {
         return Ok(None);
     };
-    let Some(rest) = strip_prefix_ascii_case(rest.trim_start(), "% orb usage remaining") else {
+    let Some(rest) = trim_ascii_whitespace_start(rest).strip_prefix('%') else {
         return Ok(None);
     };
-    let Some(index) = find_ascii_case_insensitive(rest, "resets upon renewal in ") else {
+    let Some(rest) = strip_required_ascii_token(rest, "orb")
+        .and_then(|rest| strip_required_ascii_token(rest, "usage"))
+        .and_then(|rest| strip_required_ascii_token(rest, "remaining"))
+    else {
         return Ok(None);
     };
-    let renewal = &rest[index + "resets upon renewal in ".len()..];
-    let Some((value, unit)) = take_unsigned_integer(renewal) else {
+    let Some(rest) = strip_subscription_reset_prefix(rest) else {
         return Ok(None);
     };
-    let unit = unit.trim_start();
-    let (resets_at, singular) = if starts_with_ascii_case(unit, "month") {
-        (add_calendar_months(fetched_at, value)?, "month")
-    } else if starts_with_ascii_case(unit, "day") {
+    let Some((value, unit)) = take_unsigned_integer(rest) else {
+        return Ok(None);
+    };
+    let Some(unit) = strip_required_ascii_whitespace(unit) else {
+        return Ok(None);
+    };
+    let (resets_at, singular, suffix) = if let Some(suffix) =
+        strip_prefix_ascii_case(unit, "months").or_else(|| strip_prefix_ascii_case(unit, "month"))
+    {
+        (add_calendar_months(fetched_at, value)?, "month", suffix)
+    } else if let Some(suffix) =
+        strip_prefix_ascii_case(unit, "days").or_else(|| strip_prefix_ascii_case(unit, "day"))
+    {
         let days = i64::from(value);
         let at = fetched_at
             .as_offset_date_time()
@@ -901,10 +1728,14 @@ fn parse_subscription(
         (
             Timestamp::new(at).map_err(|_| ClassifiedError::new(ErrorKind::Parse))?,
             "day",
+            suffix,
         )
     } else {
         return Ok(None);
     };
+    if !valid_subscription_link_suffix(suffix) {
+        return Ok(None);
+    }
     let other_remaining = decimal_percent(other_remaining)?;
     let orb_remaining = decimal_percent(orb_remaining)?;
     Ok(Some(SubscriptionUsage {
@@ -919,9 +1750,41 @@ fn parse_subscription(
     }))
 }
 
+fn strip_subscription_reset_prefix(rest: &str) -> Option<&str> {
+    let rest = trim_ascii_whitespace_start(rest).strip_prefix('-')?;
+    let rest = trim_ascii_whitespace_start(rest);
+    let rest = strip_prefix_ascii_case(rest, "resets")?;
+    let rest = strip_required_ascii_whitespace(rest)?;
+    let rest = strip_prefix_ascii_case(rest, "upon")?;
+    let rest = strip_required_ascii_whitespace(rest)?;
+    let rest = strip_prefix_ascii_case(rest, "renewal")?;
+    let rest = strip_required_ascii_whitespace(rest)?;
+    let rest = strip_prefix_ascii_case(rest, "in")?;
+    strip_required_ascii_whitespace(rest)
+}
+
+fn valid_subscription_link_suffix(suffix: &str) -> bool {
+    if suffix.trim().is_empty() {
+        return true;
+    }
+    let Some(suffix) = strip_required_ascii_whitespace(suffix) else {
+        return false;
+    };
+    let Some(suffix) = suffix.strip_prefix('-') else {
+        return false;
+    };
+    let Some(url) = strip_required_ascii_whitespace(suffix) else {
+        return false;
+    };
+    let url = url.trim_end();
+    let target = strip_prefix_ascii_case(url, "https://")
+        .or_else(|| strip_prefix_ascii_case(url, "http://"));
+    target.is_some_and(|target| !target.is_empty() && !url.chars().any(char::is_whitespace))
+}
+
 fn parse_remaining_amount(body: &str) -> Option<Decimal> {
     let (value, rest) = take_amount(body)?;
-    strip_prefix_ascii_case(rest.trim_start(), "remaining").map(|_| value)
+    strip_required_ascii_token(rest, "remaining").map(|_| value)
 }
 
 fn parse_workspace(body: &str) -> Result<Option<(String, Decimal)>, ClassifiedError> {
@@ -961,13 +1824,12 @@ fn decimal_percent(value: Decimal) -> Result<f64, ClassifiedError> {
 }
 
 fn take_amount(value: &str) -> Option<(Decimal, &str)> {
-    let value = value.trim_start();
-    let value = value.strip_prefix('+').unwrap_or(value).trim_start();
+    let value = trim_ascii_whitespace_start(value);
     take_decimal(value.strip_prefix('$').unwrap_or(value))
 }
 
 fn take_decimal(value: &str) -> Option<(Decimal, &str)> {
-    let value = value.trim_start();
+    let value = trim_ascii_whitespace_start(value);
     let end = value
         .bytes()
         .take_while(|byte| byte.is_ascii_digit() || matches!(byte, b',' | b'.'))
@@ -1006,7 +1868,7 @@ fn valid_grouping(raw: &str) -> bool {
 }
 
 fn take_unsigned_integer(value: &str) -> Option<(u32, &str)> {
-    let value = value.trim_start();
+    let value = trim_ascii_whitespace_start(value);
     let end = value
         .bytes()
         .take_while(|byte| byte.is_ascii_digit() || *byte == b',')
@@ -1222,6 +2084,46 @@ fn strip_prefix_ascii_case<'a>(value: &'a str, prefix: &str) -> Option<&'a str> 
     starts_with_ascii_case(value, prefix).then(|| &value[prefix.len()..])
 }
 
+fn trim_ascii_whitespace_start(value: &str) -> &str {
+    let whitespace = value.bytes().take_while(u8::is_ascii_whitespace).count();
+    &value[whitespace..]
+}
+
+fn trim_ascii_whitespace_end(value: &str) -> &str {
+    let whitespace = value
+        .bytes()
+        .rev()
+        .take_while(u8::is_ascii_whitespace)
+        .count();
+    &value[..value.len() - whitespace]
+}
+
+fn strip_required_ascii_whitespace(value: &str) -> Option<&str> {
+    let trimmed = trim_ascii_whitespace_start(value);
+    (trimmed.len() < value.len()).then_some(trimmed)
+}
+
+fn strip_required_ascii_token<'a>(value: &'a str, token: &str) -> Option<&'a str> {
+    strip_prefix_ascii_case(strip_required_ascii_whitespace(value)?, token)
+}
+
+fn split_before_required_ascii_token<'a>(
+    value: &'a str,
+    token: &str,
+) -> Option<(&'a str, &'a str)> {
+    let mut offset = 0_usize;
+    while let Some(relative) = find_ascii_case_insensitive(&value[offset..], token) {
+        let start = offset.checked_add(relative)?;
+        let plan_with_space = &value[..start];
+        let plan = trim_ascii_whitespace_end(plan_with_space);
+        if !plan.is_empty() && plan.len() < plan_with_space.len() {
+            return Some((plan, &value[start + token.len()..]));
+        }
+        offset = start.checked_add(1)?;
+    }
+    None
+}
+
 fn find_ascii_case_insensitive(value: &str, needle: &str) -> Option<usize> {
     value
         .as_bytes()
@@ -1229,8 +2131,39 @@ fn find_ascii_case_insensitive(value: &str, needle: &str) -> Option<usize> {
         .position(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
 }
 
-fn contains_ascii_case_insensitive(value: &str, needle: &str) -> bool {
-    find_ascii_case_insensitive(value, needle).is_some()
+fn api_error() -> ClassifiedError {
+    ClassifiedError::new(ErrorKind::Api)
+}
+
+fn missing_credential() -> ClassifiedError {
+    ClassifiedError::new(ErrorKind::MissingCredential)
+}
+
+fn authentication_expired() -> ClassifiedError {
+    ClassifiedError::new(ErrorKind::AuthenticationExpired)
+}
+
+fn network_error() -> ClassifiedError {
+    ClassifiedError::new(ErrorKind::Network)
+}
+
+fn classify_capture_error(error: ManualCaptureError) -> ClassifiedError {
+    let kind = match error {
+        ManualCaptureError::MissingSecret
+        | ManualCaptureError::InvalidSecret
+        | ManualCaptureError::DisallowedHeader => ErrorKind::MissingCredential,
+        ManualCaptureError::InputTooLarge
+        | ManualCaptureError::InvalidSyntax
+        | ManualCaptureError::UnsafeSyntax
+        | ManualCaptureError::UnsafeOption
+        | ManualCaptureError::TooManyTokens
+        | ManualCaptureError::TooManyHeaders
+        | ManualCaptureError::DuplicateSecret
+        | ManualCaptureError::ConflictingHeader
+        | ManualCaptureError::DisallowedUrl => ErrorKind::Parse,
+        ManualCaptureError::InvalidPolicy => ErrorKind::Api,
+    };
+    ClassifiedError::new(kind)
 }
 
 fn map_subprocess_error(error: SubprocessError) -> ClassifiedError {
@@ -1252,7 +2185,14 @@ fn map_subprocess_error(error: SubprocessError) -> ClassifiedError {
 }
 
 fn resolve_amp(environment: &BTreeMap<String, String>) -> Result<ExecutablePath, ClassifiedError> {
-    let configured = environment.get(CLI_OVERRIDE).map(String::as_str);
+    let configured = environment
+        .get(CLI_OVERRIDE)
+        .and_then(|value| clean_setting(value))
+        .or_else(|| {
+            environment
+                .get(PINNED_CLI_OVERRIDE)
+                .and_then(|value| clean_setting(value))
+        });
     let path = environment.get("PATH").map(String::as_ref);
     let mut fallbacks = Vec::new();
     if let Some(home) = environment
@@ -1272,7 +2212,7 @@ fn resolve_amp(environment: &BTreeMap<String, String>) -> Result<ExecutablePath,
     let resolved = resolve_executable("amp", configured, path, &fallbacks)
         .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
     resolved.ok_or_else(|| {
-        if configured.and_then(clean_setting).is_some() {
+        if configured.is_some() {
             ClassifiedError::new(ErrorKind::Api)
         } else {
             ClassifiedError::new(ErrorKind::MissingCredential)
@@ -1284,7 +2224,7 @@ fn sanitized_cli_environment(
     source: &BTreeMap<String, String>,
     executable: &Path,
 ) -> Result<Vec<(String, String)>, ClassifiedError> {
-    const ALLOWED: [&str; 18] = [
+    const ALLOWED: [&str; 19] = [
         "HOME",
         "XDG_CONFIG_HOME",
         "XDG_DATA_HOME",
@@ -1295,6 +2235,7 @@ fn sanitized_cli_environment(
         "LC_ALL",
         "SSL_CERT_FILE",
         "SSL_CERT_DIR",
+        "NODE_EXTRA_CA_CERTS",
         "HTTP_PROXY",
         "HTTPS_PROXY",
         "ALL_PROXY",

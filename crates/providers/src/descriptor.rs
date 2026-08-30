@@ -230,7 +230,11 @@ const fn sources_for(id: ProviderId) -> SourceSet {
             .with(Source::ApiKey)
             .with(Source::Cli),
         Id::Codebuff => SourceSet::one(Source::ApiKey).with(Source::LocalData),
-        Id::Amp | Id::Kilo => SourceSet::one(Source::ApiKey).with(Source::Cli),
+        Id::Amp => SourceSet::one(Source::ApiKey)
+            .with(Source::ManualCookie)
+            .with(Source::BrowserSession)
+            .with(Source::Cli),
+        Id::Kilo => SourceSet::one(Source::ApiKey).with(Source::Cli),
         Id::Kiro => SourceSet::one(Source::Cli),
         Id::JetBrains => SourceSet::one(Source::LocalData),
         Id::T3Chat

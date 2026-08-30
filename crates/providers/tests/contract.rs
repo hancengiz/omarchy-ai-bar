@@ -153,13 +153,25 @@ fn signed_cloud_provider_sources_are_exact_and_actionable() {
 
 #[test]
 fn linux_cli_and_local_provider_sources_are_exact_and_actionable() {
-    for id in [ProviderId::Amp, ProviderId::Kilo] {
-        assert_eq!(
-            descriptor_for(id).sources().iter().collect::<Vec<_>>(),
-            [ProviderSource::ApiKey, ProviderSource::Cli],
-            "source drift for {id:?}"
-        );
-    }
+    assert_eq!(
+        descriptor_for(ProviderId::Amp)
+            .sources()
+            .iter()
+            .collect::<Vec<_>>(),
+        [
+            ProviderSource::ApiKey,
+            ProviderSource::ManualCookie,
+            ProviderSource::BrowserSession,
+            ProviderSource::Cli,
+        ]
+    );
+    assert_eq!(
+        descriptor_for(ProviderId::Kilo)
+            .sources()
+            .iter()
+            .collect::<Vec<_>>(),
+        [ProviderSource::ApiKey, ProviderSource::Cli]
+    );
     assert_eq!(
         descriptor_for(ProviderId::Kiro)
             .sources()
@@ -189,6 +201,11 @@ fn linux_cli_and_local_provider_sources_are_exact_and_actionable() {
             "missing login action for {id:?}"
         );
     }
+    assert!(
+        descriptor_for(ProviderId::Amp)
+            .capabilities()
+            .contains(ProviderCapability::BrowserAuth)
+    );
     for id in [ProviderId::Amp, ProviderId::Codebuff] {
         assert!(
             descriptor_for(id)

@@ -312,6 +312,46 @@ pub fn import_browser_cookies_merging_chromium_stores_with_decryptor(
     }
 }
 
+/// Imports each validated browser cookie store in provider-selection order.
+///
+/// Firefox and Zen return one store. Chromium-family profiles return each
+/// present store separately in `Network/Cookies`, root `Cookies` order. Both
+/// Chromium stores are fully read before this function returns, under one
+/// aggregate row/byte budget, so an unsafe or malformed lower-priority store
+/// still fails the whole import closed. `store_sources[0]` identifies Network
+/// (or Gecko) and `store_sources[1]` identifies root Cookies. Callers retain the
+/// imports as separate candidates and select the first store with an applicable
+/// provider credential; they must not merge the records across stores.
+///
+/// # Errors
+///
+/// Returns a stable redacted snapshot, schema, data, size, encryption, or
+/// shared-cookie validation error.
+pub fn import_browser_cookie_stores_with_decryptor(
+    profile: &BrowserProfile,
+    store_sources: [CookieSourceId; 2],
+    allowlist: &BrowserCookieDomainAllowlist,
+    decryptor: &dyn ChromiumCookieDecryptor,
+) -> Result<Vec<CookieImport>, BrowserCookieImportError> {
+    if store_sources[0] == store_sources[1] {
+        return Err(BrowserCookieImportError::Cookie(
+            CookieError::InvalidImportOrder,
+        ));
+    }
+    match profile.browser() {
+        BrowserKind::Firefox | BrowserKind::Zen => {
+            import_gecko(profile, store_sources[0], allowlist).map(|import| vec![import])
+        }
+        BrowserKind::Chromium
+        | BrowserKind::GoogleChrome
+        | BrowserKind::Brave
+        | BrowserKind::BraveOrigin
+        | BrowserKind::MicrosoftEdge => {
+            import_ordered_chromium_stores(profile, store_sources, allowlist, decryptor)
+        }
+    }
+}
+
 struct CanonicalDomainRule {
     domain: Zeroizing<String>,
     policy: BrowserCookieDomainPolicy,
@@ -393,6 +433,61 @@ fn import_merged_chromium(
     allowlist: &BrowserCookieDomainAllowlist,
     decryptor: &dyn ChromiumCookieDecryptor,
 ) -> Result<CookieImport, BrowserCookieImportError> {
+    let (network, primary) = read_chromium_stores(profile, allowlist, decryptor)?;
+    let saw_unavailable_encryption =
+        stores_saw_unavailable_encryption(network.as_ref(), primary.as_ref());
+    let records = merge_chromium_records(
+        network.map_or_else(Vec::new, |store| store.records),
+        primary.map_or_else(Vec::new, |store| store.records),
+    );
+    if records.is_empty() && saw_unavailable_encryption {
+        return Err(BrowserCookieImportError::EncryptedCookiesUnavailable);
+    }
+    CookieImport::new(source, records).map_err(BrowserCookieImportError::Cookie)
+}
+
+fn import_ordered_chromium_stores(
+    profile: &BrowserProfile,
+    store_sources: [CookieSourceId; 2],
+    allowlist: &BrowserCookieDomainAllowlist,
+    decryptor: &dyn ChromiumCookieDecryptor,
+) -> Result<Vec<CookieImport>, BrowserCookieImportError> {
+    let (network, primary) = read_chromium_stores(profile, allowlist, decryptor)?;
+    let saw_unavailable_encryption =
+        stores_saw_unavailable_encryption(network.as_ref(), primary.as_ref());
+    let has_records = network
+        .as_ref()
+        .is_some_and(|store| !store.records.is_empty())
+        || primary
+            .as_ref()
+            .is_some_and(|store| !store.records.is_empty());
+    if !has_records && saw_unavailable_encryption {
+        return Err(BrowserCookieImportError::EncryptedCookiesUnavailable);
+    }
+    [network, primary]
+        .into_iter()
+        .zip(store_sources)
+        .filter_map(|(store, source)| store.map(|store| (store, source)))
+        .map(|(store, source)| {
+            CookieImport::new(
+                source,
+                store
+                    .records
+                    .into_iter()
+                    .map(|record| record.record)
+                    .collect(),
+            )
+            .map_err(BrowserCookieImportError::Cookie)
+        })
+        .collect()
+}
+
+fn read_chromium_stores(
+    profile: &BrowserProfile,
+    allowlist: &BrowserCookieDomainAllowlist,
+    decryptor: &dyn ChromiumCookieDecryptor,
+) -> Result<(Option<ChromiumStoreRecords>, Option<ChromiumStoreRecords>), BrowserCookieImportError>
+{
     let mut budget = QueryBudget::default();
     let network = read_chromium_store(
         profile,
@@ -407,21 +502,15 @@ fn import_merged_chromium(
             SqliteSnapshotError::Missing,
         ));
     }
+    Ok((network, primary))
+}
 
-    let saw_unavailable_encryption = network
-        .as_ref()
-        .is_some_and(|store| store.saw_unavailable_encryption)
-        || primary
-            .as_ref()
-            .is_some_and(|store| store.saw_unavailable_encryption);
-    let records = merge_chromium_records(
-        network.map_or_else(Vec::new, |store| store.records),
-        primary.map_or_else(Vec::new, |store| store.records),
-    );
-    if records.is_empty() && saw_unavailable_encryption {
-        return Err(BrowserCookieImportError::EncryptedCookiesUnavailable);
-    }
-    CookieImport::new(source, records).map_err(BrowserCookieImportError::Cookie)
+fn stores_saw_unavailable_encryption(
+    network: Option<&ChromiumStoreRecords>,
+    primary: Option<&ChromiumStoreRecords>,
+) -> bool {
+    network.is_some_and(|store| store.saw_unavailable_encryption)
+        || primary.is_some_and(|store| store.saw_unavailable_encryption)
 }
 
 fn read_chromium_store(
