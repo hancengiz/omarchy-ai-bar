@@ -1,0 +1,17 @@
+{
+  "quota_usage": {
+    "daily_quota": {
+      "used": 3,
+      "limit": 10,
+      "reset_at": "2026-06-01T08:00:00Z"
+    },
+    "weekly_quota": {
+      "remaining_percent": 0.25,
+      "next_reset_at": 1780560000
+    }
+  },
+  "subscription": {
+    "tier": "team_plan"
+  },
+  "overage_balance_cents": 7087
+}

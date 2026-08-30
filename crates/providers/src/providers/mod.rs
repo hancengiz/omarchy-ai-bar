@@ -14,6 +14,7 @@ pub mod copilot;
 pub mod crof;
 pub mod deepgram;
 pub mod deepinfra;
+pub mod devin;
 pub mod doubao;
 pub mod elevenlabs;
 pub mod fireworks;

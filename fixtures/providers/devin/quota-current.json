@@ -1,0 +1,11 @@
+{
+  "is_quota_plan": true,
+  "has_quota_allocation": true,
+  "daily_percentage": 0.12,
+  "weekly_percentage": 42,
+  "daily_reset_at": "2026-06-11T00:00:00-08:00",
+  "weekly_reset_at": "2026-06-14T00:00:00-08:00",
+  "hide_daily_quota": false,
+  "plan_name": "pro",
+  "overage_balance": 70.87
+}
