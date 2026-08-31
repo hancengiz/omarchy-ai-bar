@@ -287,7 +287,9 @@ const fn sources_for(id: ProviderId) -> SourceSet {
             .with(Source::ApiKey)
             .with(Source::LocalData),
         Id::Factory => SourceSet::one(Source::OAuth).with(Source::BrowserSession),
-        Id::Ollama => SourceSet::one(Source::ConfigurableEndpoint).with(Source::LocalData),
+        Id::Ollama => SourceSet::one(Source::ApiKey)
+            .with(Source::ConfigurableEndpoint)
+            .with(Source::BrowserSession),
         Id::Zed => SourceSet::one(Source::LocalData).with(Source::ApiKey),
         Id::Augment | Id::Cursor | Id::Windsurf => SourceSet::one(Source::Cli)
             .with(Source::LocalData)

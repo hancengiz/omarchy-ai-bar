@@ -34,11 +34,13 @@ use oab_providers::providers::copilot::CopilotProvider;
 use oab_providers::providers::crof::CrofProvider;
 use oab_providers::providers::deepgram::{DeepgramProvider, DeepgramSettings};
 use oab_providers::providers::deepinfra::DeepInfraProvider;
+use oab_providers::providers::deepseek::DeepSeekProvider;
 use oab_providers::providers::devin::DevinProvider;
 use oab_providers::providers::doubao::DoubaoProvider;
 use oab_providers::providers::elevenlabs::ElevenLabsProvider;
 use oab_providers::providers::fireworks::{FireworksCredential, FireworksProvider};
 use oab_providers::providers::grok::{GrokProvider, GrokSettings};
+use oab_providers::providers::groq::{GroqProvider, GroqSettings};
 use oab_providers::providers::ibmbob::{IBMBobProvider, IBMBobSettings};
 use oab_providers::providers::jetbrains::{JetBrainsProvider, JetBrainsSettings};
 use oab_providers::providers::kilo::{KiloProvider, KiloUsageScope};
@@ -54,6 +56,7 @@ use oab_providers::providers::mistral::MistralProvider;
 use oab_providers::providers::moonshot::{MoonshotProvider, MoonshotSettings};
 use oab_providers::providers::neuralwatt::{NeuralWattProvider, NeuralWattSettings};
 use oab_providers::providers::notion::NotionProvider;
+use oab_providers::providers::ollama::{OllamaProvider, OllamaSettings};
 use oab_providers::providers::openai::{OpenAiCredential, OpenAiProvider};
 use oab_providers::providers::opencode::OpenCodeProvider;
 use oab_providers::providers::openrouter::{OpenRouterProvider, OpenRouterSettings};
@@ -90,7 +93,7 @@ struct LazyRegistrationSpec {
     builder: LazyAdapterBuilder,
 }
 
-const LAZY_PROVIDER_SPECS: [LazyRegistrationSpec; 47] = [
+const LAZY_PROVIDER_SPECS: [LazyRegistrationSpec; 49] = [
     lazy_spec(ProviderId::Zai, ProviderSource::ApiKey, build_zai),
     lazy_spec(ProviderId::OpenAi, ProviderSource::ApiKey, build_openai),
     lazy_spec(
@@ -254,6 +257,8 @@ const LAZY_PROVIDER_SPECS: [LazyRegistrationSpec; 47] = [
         build_zoommate,
     ),
     lazy_spec(ProviderId::Copilot, ProviderSource::OAuth, build_copilot),
+    lazy_spec(ProviderId::DeepSeek, ProviderSource::ApiKey, build_deepseek),
+    lazy_spec(ProviderId::Groq, ProviderSource::ApiKey, build_groq),
 ];
 
 const fn lazy_spec(
@@ -268,7 +273,7 @@ const fn lazy_spec(
     }
 }
 
-fn selected_lazy_specs(environment: &BTreeMap<String, String>) -> [LazyRegistrationSpec; 8] {
+fn selected_lazy_specs(environment: &BTreeMap<String, String>) -> [LazyRegistrationSpec; 9] {
     [
         lazy_spec(
             ProviderId::Codebuff,
@@ -325,6 +330,15 @@ fn selected_lazy_specs(environment: &BTreeMap<String, String>) -> [LazyRegistrat
                 ProviderSource::LocalData,
             ),
             build_mimo,
+        ),
+        lazy_spec(
+            ProviderId::Ollama,
+            choose_source(
+                environment_has_value(environment, "OLLAMA_API_URL"),
+                ProviderSource::ConfigurableEndpoint,
+                ProviderSource::ApiKey,
+            ),
+            build_ollama,
         ),
     ]
 }
@@ -716,6 +730,26 @@ fn build_deepinfra(
     Ok(Box::new(DeepInfraProvider::new(
         scope,
         DeepInfraProvider::resolve_credential(environment)?,
+    )?))
+}
+
+fn build_deepseek(
+    scope: AccountScope,
+    environment: &BTreeMap<String, String>,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(DeepSeekProvider::new(
+        scope,
+        DeepSeekProvider::resolve_credential(environment)?,
+    )?))
+}
+
+fn build_groq(
+    scope: AccountScope,
+    environment: &BTreeMap<String, String>,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(GroqProvider::new(
+        scope,
+        GroqSettings::resolve(environment)?,
     )?))
 }
 
@@ -1125,6 +1159,16 @@ fn build_mimo(
         )?));
     }
     Ok(Box::new(MiMoLocalProvider::resolve(scope, environment)?))
+}
+
+fn build_ollama(
+    scope: AccountScope,
+    environment: &BTreeMap<String, String>,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(OllamaProvider::new(
+        scope,
+        OllamaSettings::resolve(environment)?,
+    )?))
 }
 
 fn environment_has_value(environment: &BTreeMap<String, String>, name: &str) -> bool {
