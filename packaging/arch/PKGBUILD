@@ -7,6 +7,7 @@ pkgdesc='Omarchy-native AI provider usage, quota, cost, and session monitoring'
 arch=('x86_64')
 url='https://github.com/hancengiz/omarchy-ai-bar'
 license=('MIT')
+options=('!lto' '!debug')
 depends=(
   'dbus'
   'gcc-libs'
@@ -19,8 +20,7 @@ depends=(
 makedepends=('cargo')
 install=omarchy-ai-bar.install
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-# Release automation replaces SKIP with the published archive checksum.
-sha256sums=('SKIP')
+sha256sums=('12cea3c1638d24609fb885f0dba7a70654074db1bcc2fa4dddb858256688a34a')
 
 prepare() {
   cd "$pkgname-$pkgver"

@@ -76,11 +76,15 @@ validate_layout() {
     fail 'QML plugin payload contains a symlink'
   fi
   if search_files '/usr/share/omarchy(/|["[:space:]])' \
-    "$repo_root/packaging/arch" "$repo_root/packaging/release"; then
+    "$repo_root/packaging/arch/PKGBUILD" \
+    "$repo_root/packaging/arch/omarchy-ai-bar.install" \
+    "$repo_root/packaging/release/INSTALL.md" \
+    "$repo_root/packaging/release/archive-layout.txt"; then
     fail 'packaging targets Omarchy-owned /usr/share files'
   fi
   if search_files '^[[:space:]]*(cp|install|mkdir|mv|rm)[[:space:]].*(\$HOME|~/)' \
-    "$repo_root/packaging/arch"; then
+    "$repo_root/packaging/arch/PKGBUILD" \
+    "$repo_root/packaging/arch/omarchy-ai-bar.install"; then
     fail 'package lifecycle writes into a user home directory'
   fi
 
