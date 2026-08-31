@@ -14,6 +14,36 @@ require_file() {
   [[ -f $repo_root/$1 ]] || fail "missing $1"
 }
 
+search_files() {
+  local pattern=$1
+  shift
+  if command -v rg >/dev/null 2>&1; then
+    rg --no-config -n "$pattern" "$@"
+  else
+    grep -ERn -- "$pattern" "$@"
+  fi
+}
+
+search_quiet() {
+  local pattern=$1
+  shift
+  if command -v rg >/dev/null 2>&1; then
+    rg --no-config -q "$pattern" "$@"
+  else
+    grep -Eq -- "$pattern" "$@"
+  fi
+}
+
+search_count() {
+  local pattern=$1
+  shift
+  if command -v rg >/dev/null 2>&1; then
+    rg --no-config -c "$pattern" "$@"
+  else
+    grep -Ec -- "$pattern" "$@"
+  fi
+}
+
 validate_layout() {
   local required=(
     packaging/arch/PKGBUILD
@@ -45,43 +75,43 @@ validate_layout() {
   if find "$repo_root/qml/omarchy-plugin" -type l -print -quit | grep -q .; then
     fail 'QML plugin payload contains a symlink'
   fi
-  if rg -n '/usr/share/omarchy(/|["[:space:]])' \
+  if search_files '/usr/share/omarchy(/|["[:space:]])' \
     "$repo_root/packaging/arch" "$repo_root/packaging/release"; then
     fail 'packaging targets Omarchy-owned /usr/share files'
   fi
-  if rg -n '^[[:space:]]*(cp|install|mkdir|mv|rm)[[:space:]].*(\$HOME|~/)' \
+  if search_files '^[[:space:]]*(cp|install|mkdir|mv|rm)[[:space:]].*(\$HOME|~/)' \
     "$repo_root/packaging/arch"; then
     fail 'package lifecycle writes into a user home directory'
   fi
 
   local binary_install_count
-  binary_install_count=$(rg -c 'target/release/omarchy-ai-bar' \
+  binary_install_count=$(search_count 'target/release/omarchy-ai-bar' \
     "$repo_root/packaging/arch/PKGBUILD")
   [[ $binary_install_count == 1 ]] || fail 'PKGBUILD must install exactly one project executable'
-  rg -q "^pkgname=omarchy-ai-bar$" "$repo_root/packaging/arch/PKGBUILD" \
+  search_quiet "^pkgname=omarchy-ai-bar$" "$repo_root/packaging/arch/PKGBUILD" \
     || fail 'source AUR package name drifted'
-  ! rg -q 'pkgname=.*-bin' "$repo_root/packaging/arch/PKGBUILD" \
+  ! search_quiet 'pkgname=.*-bin' "$repo_root/packaging/arch/PKGBUILD" \
     || fail 'prebuilt AUR package is not part of the source-package skeleton'
   for shell in bash fish zsh; do
-    rg -q "completion $shell" "$repo_root/packaging/arch/PKGBUILD" \
+    search_quiet "completion $shell" "$repo_root/packaging/arch/PKGBUILD" \
       || fail "PKGBUILD does not generate $shell completion"
   done
 
-  rg -q '^ExecStart=/usr/bin/omarchy-ai-bar daemon$' \
+  search_quiet '^ExecStart=/usr/bin/omarchy-ai-bar daemon$' \
     "$repo_root/packaging/systemd/omarchy-ai-bar.service" \
     || fail 'systemd unit does not start the single executable'
-  rg -q '^Exec=omarchy-ai-bar dashboard$' \
+  search_quiet '^Exec=omarchy-ai-bar dashboard$' \
     "$repo_root/packaging/desktop/org.omarchy_ai_bar.App.desktop" \
     || fail 'desktop launcher does not use the single executable'
-  rg -q '<id>org.omarchy_ai_bar.App</id>' \
+  search_quiet '<id>org.omarchy_ai_bar.App</id>' \
     "$repo_root/packaging/metainfo/org.omarchy_ai_bar.App.metainfo.xml" \
     || fail 'metainfo application id drifted'
-  rg -q '"id": "local.omarchy-ai-bar"' "$repo_root/qml/omarchy-plugin/manifest.json" \
+  search_quiet '"id": "local.omarchy-ai-bar"' "$repo_root/qml/omarchy-plugin/manifest.json" \
     || fail 'Omarchy plugin id drifted'
-  rg -q 'CURRENT_BRIDGE_PROTOCOL_MAJOR: u16 = 1' \
+  search_quiet 'CURRENT_BRIDGE_PROTOCOL_MAJOR: u16 = 1' \
     "$repo_root/crates/cli/src/commands/bridge.rs" \
     || fail 'bridge protocol marker drifted'
-  rg -q 'MINIMUM_BRIDGE_PROTOCOL_MAJOR: u16 = CURRENT_BRIDGE_PROTOCOL_MAJOR - 1' \
+  search_quiet 'MINIMUM_BRIDGE_PROTOCOL_MAJOR: u16 = CURRENT_BRIDGE_PROTOCOL_MAJOR - 1' \
     "$repo_root/crates/cli/src/commands/bridge.rs" \
     || fail 'previous-major compatibility window is missing'
 
@@ -113,7 +143,7 @@ validate_package_root() {
   local elf_count=0
   local file
   while IFS= read -r -d '' file; do
-    if file --brief "$file" | rg -q '^ELF '; then
+    if file --brief "$file" | search_quiet '^ELF '; then
       elf_count=$((elf_count + 1))
       [[ $file == "$package_root/usr/bin/omarchy-ai-bar" ]] \
         || fail "unexpected project ELF: $file"
