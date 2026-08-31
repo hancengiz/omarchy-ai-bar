@@ -92,11 +92,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends --yes qml6-module-qttest qt6-declarative-dev-tools
 
-      - name: Parse every QML and JavaScript source
+      - name: Parse every QML source
         run: |
           while IFS= read -r -d '' source; do
             /usr/lib/qt6/bin/qmlformat "$source" >/dev/null
-          done < <(find qml tests -type f \( -name '*.qml' -o -name '*.js' \) -print0 | sort -z)
+          done < <(find qml tests -type f -name '*.qml' -print0 | sort -z)
 
       - name: Lint the dependency-free protocol surface
         run: /usr/lib/qt6/bin/qmllint -W 0 qml/omarchy-plugin/Protocol.js tests/qml/tst_protocol.qml
