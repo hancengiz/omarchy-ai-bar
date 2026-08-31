@@ -46,7 +46,6 @@ fn every_unimplemented_handler_returns_stable_unavailable() {
     let cases: &[&[&str]] = &[
         &["usage"],
         &["cards"],
-        &["dashboard"],
         &["cost"],
         &["serve"],
         &["config"],
@@ -57,7 +56,6 @@ fn every_unimplemented_handler_returns_stable_unavailable() {
         &["plugins"],
         &["sessions"],
         &["diagnose"],
-        &["completion"],
     ];
 
     for arguments in cases {
@@ -69,6 +67,20 @@ fn every_unimplemented_handler_returns_stable_unavailable() {
         assert_eq!(output.status.code(), Some(UNAVAILABLE), "{arguments:?}");
         assert!(output.stdout.is_empty(), "{arguments:?}");
         assert!(!output.stderr.is_empty(), "{arguments:?}");
+    }
+}
+
+#[test]
+fn packaged_shell_completions_are_generated_from_the_cli_tree() {
+    for shell in ["bash", "zsh", "fish"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_omarchy-ai-bar"))
+            .args(["completion", shell])
+            .output()
+            .expect("generate completion");
+        assert!(output.status.success(), "{shell}");
+        assert!(output.stderr.is_empty(), "{shell}");
+        let completion = String::from_utf8(output.stdout).expect("UTF-8 completion");
+        assert!(completion.contains("omarchy-ai-bar"), "{shell}");
     }
 }
 

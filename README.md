@@ -24,6 +24,45 @@ CodexBar-style multi-provider panel are connected for:
 Providers without configured credentials remain visible with a safe setup
 status instead of disappearing. Credentials are never sent over the QML IPC.
 
+## Install
+
+On Omarchy, install the AUR package and activate the per-user plugin and
+service:
+
+```sh
+omarchy pkg aur add omarchy-ai-bar
+omarchy-ai-bar bridge install
+systemctl --user enable --now omarchy-ai-bar.service
+```
+
+Package upgrades remain under pacman/AUR control. After an upgrade, refresh
+the user-owned QML copy without changing its bar placement or settings:
+
+```sh
+omarchy-ai-bar bridge update
+```
+
+Direct release archives contain the same single executable and support files.
+See [`packaging/release/INSTALL.md`](packaging/release/INSTALL.md) for the
+system-wide copy and removal commands.
+
+## Use
+
+Click the `AI` bar widget to open the provider panel. Middle- or right-click
+refreshes every provider. Display mode, selected bar provider, used/remaining
+direction, reset visibility, setup rows, and warning threshold use Omarchy's
+native bar-widget settings.
+
+The same live daemon state is scriptable:
+
+```sh
+omarchy-ai-bar usage
+omarchy-ai-bar cards --format json
+omarchy-ai-bar usage --format toon
+omarchy-ai-bar diagnose --format json
+omarchy-ai-bar dashboard
+```
+
 ## Build and visually test on Omarchy
 
 Build the single Rust executable:
@@ -65,3 +104,8 @@ The daemon/display integration is also covered without live credentials:
 ```sh
 cargo test -p omarchy-ai-bar --test daemon_display_e2e
 ```
+
+Security, platform compatibility, and release maintenance are documented in
+[`docs/security.md`](docs/security.md),
+[`docs/compatibility.md`](docs/compatibility.md), and
+[`docs/releasing.md`](docs/releasing.md).

@@ -26,6 +26,13 @@ validate_layout() {
     packaging/release/archive-layout.txt
     packaging/release/org.omarchy_ai_bar.App.svg
     qml/omarchy-plugin/manifest.json
+    scripts/build-release.sh
+    scripts/verify-archive.sh
+    scripts/upstream-diff.sh
+    docs/security.md
+    docs/compatibility.md
+    docs/unsupported-apple-semantics.md
+    docs/releasing.md
   )
   local path
   for path in "${required[@]}"; do
@@ -55,6 +62,10 @@ validate_layout() {
     || fail 'source AUR package name drifted'
   ! rg -q 'pkgname=.*-bin' "$repo_root/packaging/arch/PKGBUILD" \
     || fail 'prebuilt AUR package is not part of the source-package skeleton'
+  for shell in bash fish zsh; do
+    rg -q "completion $shell" "$repo_root/packaging/arch/PKGBUILD" \
+      || fail "PKGBUILD does not generate $shell completion"
+  done
 
   rg -q '^ExecStart=/usr/bin/omarchy-ai-bar daemon$' \
     "$repo_root/packaging/systemd/omarchy-ai-bar.service" \

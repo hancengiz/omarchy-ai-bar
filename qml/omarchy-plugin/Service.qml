@@ -141,6 +141,53 @@ Item {
             root.scheduleReconnect("ipc_restart");
             return "ok";
         }
+
+        function open(): string {
+            return root.openFromIpc() ? "ok" : "unavailable";
+        }
+
+        function close(): string {
+            return root.closeFromIpc() ? "ok" : "unavailable";
+        }
+
+        function toggle(): string {
+            return root.toggleFromIpc() ? "ok" : "unavailable";
+        }
+    }
+
+    function ipcPanelOwner() {
+        if (activePanelOwner)
+            return activePanelOwner;
+        for (var index = 0; index < panelGeometrySources.length; index++) {
+            var source = panelGeometrySources[index];
+            if (source && typeof source.open === "function")
+                return source;
+        }
+        return null;
+    }
+
+    function openFromIpc() {
+        var owner = ipcPanelOwner();
+        if (!owner || typeof owner.open !== "function")
+            return false;
+        owner.open();
+        return true;
+    }
+
+    function closeFromIpc() {
+        var owner = ipcPanelOwner();
+        if (!owner || typeof owner.close !== "function")
+            return false;
+        owner.close();
+        return true;
+    }
+
+    function toggleFromIpc() {
+        var owner = ipcPanelOwner();
+        if (!owner || typeof owner.togglePanel !== "function")
+            return false;
+        owner.togglePanel();
+        return true;
     }
 
     function selectProviderSnapshot(envelope) {

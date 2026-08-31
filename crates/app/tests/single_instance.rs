@@ -43,12 +43,12 @@ fn safe_command_uses_daemon_state_when_present() {
         .args(["usage", "--format", "json"])
         .output()
         .expect("run daemon-backed safe command");
-    assert_eq!(output.status.code(), Some(69));
-    assert!(output.stdout.is_empty());
-    assert_eq!(
-        output.stderr,
-        b"omarchy-ai-bar: requested feature is not available from the running daemon\n"
-    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let payload: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("daemon usage JSON");
+    assert_eq!(payload["schema_version"], 1);
+    assert_eq!(payload["snapshots"].as_array().map(Vec::len), Some(4));
     assert!(daemon.try_wait().expect("poll daemon").is_none());
 
     terminate(&daemon);

@@ -14,11 +14,6 @@ pkgbase = omarchy-ai-bar
 	depends = qt6-declarative
 	depends = quickshell
 	depends = sqlite
-	optdepends = ampcode: Amp CLI usage source (the package provides the amp executable)
-	optdepends = aws-cli-v2: AWS profile, SSO, assume-role, and credential_process authentication for Bedrock
-	optdepends = google-cloud-cli: Vertex AI application-default login and access-token acquisition
-	optdepends = kilo-cli-git: Kilo login helper that can populate the local CLI auth file
-	optdepends = kiro-cli: Kiro usage, login, and profile discovery
 	source = omarchy-ai-bar-0.1.0.tar.gz::https://github.com/hancengiz/omarchy-ai-bar/archive/refs/tags/v0.1.0.tar.gz
 	sha256sums = SKIP
 

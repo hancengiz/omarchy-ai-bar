@@ -16,13 +16,6 @@ depends=(
   'quickshell'
   'sqlite'
 )
-optdepends=(
-  'ampcode: Amp CLI usage source (the package provides the amp executable)'
-  'aws-cli-v2: AWS profile, SSO, assume-role, and credential_process authentication for Bedrock'
-  'google-cloud-cli: Vertex AI application-default login and access-token acquisition'
-  'kilo-cli-git: Kilo login helper that can populate the local CLI auth file'
-  'kiro-cli: Kiro usage, login, and profile discovery'
-)
 makedepends=('cargo')
 install=omarchy-ai-bar.install
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
@@ -66,4 +59,15 @@ package() {
     "$pkgdir/usr/share/doc/omarchy-ai-bar/INSTALL.md"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/omarchy-ai-bar/LICENSE"
   install -Dm644 NOTICE "$pkgdir/usr/share/licenses/omarchy-ai-bar/NOTICE"
+
+  install -dm755 \
+    "$pkgdir/usr/share/bash-completion/completions" \
+    "$pkgdir/usr/share/fish/vendor_completions.d" \
+    "$pkgdir/usr/share/zsh/site-functions"
+  "$pkgdir/usr/bin/omarchy-ai-bar" completion bash \
+    >"$pkgdir/usr/share/bash-completion/completions/omarchy-ai-bar"
+  "$pkgdir/usr/bin/omarchy-ai-bar" completion fish \
+    >"$pkgdir/usr/share/fish/vendor_completions.d/omarchy-ai-bar.fish"
+  "$pkgdir/usr/bin/omarchy-ai-bar" completion zsh \
+    >"$pkgdir/usr/share/zsh/site-functions/_omarchy-ai-bar"
 }

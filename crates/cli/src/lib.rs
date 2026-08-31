@@ -2,5 +2,6 @@
 
 pub mod args;
 pub mod commands;
+pub mod completion;
 pub mod exit_code;
 pub mod output;

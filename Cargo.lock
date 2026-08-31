@@ -351,6 +351,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "clap_complete"
+version = "4.5.67"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1248e420506b523e97ebd7b610656114abadbe73b04279a86768a12ce1860837"
+dependencies = [
+ "clap",
+]
+
+[[package]]
 name = "clap_derive"
 version = "4.5.61"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1334,6 +1343,7 @@ name = "oab-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "clap_complete",
  "nix",
  "serde",
  "serde_json",

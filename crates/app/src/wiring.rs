@@ -2,11 +2,12 @@
 
 use std::collections::BTreeMap;
 use std::env;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io::{self, Write};
 use std::path::PathBuf;
+use std::process::Command as ProcessCommand;
 
-use oab_cli::args::{BridgeTransport, Cli, Command, OutputArgs};
+use oab_cli::args::{BridgeTransport, Cli, Command, CompletionShell, OutputArgs};
 use oab_cli::commands::bridge::{
     BridgeError, BridgeManager, BridgeStatus, PACKAGED_PLUGIN_PATH, SystemOmarchyCommands,
 };
@@ -33,7 +34,7 @@ pub(crate) fn run(cli: Cli) -> AppExitCode {
         None | Some(Command::Daemon) => run_daemon_or_forward(),
         Some(Command::Usage(arguments)) => run_safe(ControlAction::Usage, arguments),
         Some(Command::Cards(arguments)) => run_safe(ControlAction::Cards, arguments),
-        Some(Command::Dashboard(arguments)) => run_safe(ControlAction::Dashboard, arguments),
+        Some(Command::Dashboard(arguments)) => run_dashboard(arguments),
         Some(Command::Cost(arguments)) => run_safe(ControlAction::Cost, arguments),
         Some(Command::Sessions(arguments)) => run_safe(ControlAction::Sessions, arguments),
         Some(Command::Diagnose(arguments)) => run_safe(ControlAction::Diagnose, arguments),
@@ -81,6 +82,7 @@ pub(crate) fn run(cli: Cli) -> AppExitCode {
             transport: BridgeTransport::Uninstall,
         }) => run_bridge(BridgeLifecycleAction::Uninstall),
         Some(Command::Version { json }) => write_version(json),
+        Some(Command::Completion { shell }) => run_completion(shell),
         Some(
             Command::Serve
             | Command::Config
@@ -88,10 +90,58 @@ pub(crate) fn run(cli: Cli) -> AppExitCode {
             | Command::Guard
             | Command::Cookie
             | Command::Cache
-            | Command::Plugins
-            | Command::Completion { .. },
+            | Command::Plugins,
         ) => unavailable(),
     }
+}
+
+fn run_completion(requested: Option<CompletionShell>) -> AppExitCode {
+    let shell = requested.or_else(|| {
+        env::var_os("SHELL")
+            .as_deref()
+            .and_then(oab_cli::completion::detect)
+    });
+    let Some(shell) = shell else {
+        eprintln!("omarchy-ai-bar: specify bash, zsh, or fish");
+        return AppExitCode::Usage;
+    };
+    let mut completion = Vec::new();
+    oab_cli::completion::write(shell, &mut completion);
+    if io::stdout().lock().write_all(&completion).is_err() {
+        eprintln!("{INTERNAL_MESSAGE}");
+        return AppExitCode::Internal;
+    }
+    AppExitCode::Success
+}
+
+fn run_dashboard(arguments: OutputArgs) -> AppExitCode {
+    let installed = std::path::Path::new("/usr/share/omarchy/bin/omarchy");
+    let executable = if installed.is_file() {
+        installed.as_os_str()
+    } else {
+        OsStr::new("omarchy")
+    };
+    let status = ProcessCommand::new(executable)
+        .args(["shell", "-q", "omarchy-ai-bar", "open"])
+        .status();
+    if !status.is_ok_and(|status| status.success()) {
+        eprintln!("{UNAVAILABLE_MESSAGE}");
+        return AppExitCode::Unavailable;
+    }
+    if arguments.format.is_machine_readable() {
+        let stdout = io::stdout();
+        let mut output = stdout.lock();
+        let result = match arguments.format {
+            OutputFormat::Json => write_json_line(&mut output, &json!({"opened": true})),
+            OutputFormat::Toon => write_toon(&mut output, &json!({"opened": true})),
+            OutputFormat::Human => unreachable!("human output was excluded"),
+        };
+        if result.is_err() {
+            eprintln!("{INTERNAL_MESSAGE}");
+            return AppExitCode::Internal;
+        }
+    }
+    AppExitCode::Success
 }
 
 #[derive(Clone, Copy)]
