@@ -6049,7 +6049,7 @@ temporary_binary_full_identity=$(stat -Lc '%D:%i:%u:%g:%f:%s:%Y:%Z:%W:%h' \
 /usr/bin/env -i "$temporary_binary" version --json >"$evidence_dir/binary-version.json"
 jq -e '
   .name == "omarchy-ai-bar"
-  and .version == "0.1.0"
+  and .version == "0.2.0"
   and (keys | sort) == ["name", "version"]
 ' "$evidence_dir/binary-version.json" >/dev/null || die "release binary identity is unexpected"
 [[ $(file_identity "$temporary_binary") == "$temporary_binary_identity" &&

@@ -1,7 +1,7 @@
 # Maintainer: Omarchy AI Bar contributors
 
 pkgname=omarchy-ai-bar
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='Omarchy-native AI provider usage, quota, cost, and session monitoring'
 arch=('x86_64')

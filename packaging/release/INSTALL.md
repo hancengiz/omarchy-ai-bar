@@ -9,9 +9,9 @@ Verify the adjacent checksum, extract the archive, then copy its `bin`, `lib`,
 and `share` trees into `/usr`:
 
 ```sh
-sha256sum --check omarchy-ai-bar-0.1.0-linux-x86_64.tar.gz.sha256
-tar -xzf omarchy-ai-bar-0.1.0-linux-x86_64.tar.gz
-cd omarchy-ai-bar-0.1.0
+sha256sum --check omarchy-ai-bar-0.2.0-linux-x86_64.tar.gz.sha256
+tar -xzf omarchy-ai-bar-0.2.0-linux-x86_64.tar.gz
+cd omarchy-ai-bar-0.2.0
 sudo cp -a bin lib share /usr/
 systemctl --user daemon-reload
 ```

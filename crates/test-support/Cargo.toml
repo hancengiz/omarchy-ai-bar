@@ -9,7 +9,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-oab-domain = { path = "../domain", version = "=0.1.0" }
+oab-domain = { path = "../domain", version = "=0.2.0" }
 tokio.workspace = true
 tokio-util.workspace = true
 url.workspace = true

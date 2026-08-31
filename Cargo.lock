@@ -1342,7 +1342,7 @@ dependencies = [
 
 [[package]]
 name = "oab-auth"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "nix",
  "oab-storage",
@@ -1357,7 +1357,7 @@ dependencies = [
 
 [[package]]
 name = "oab-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -1370,11 +1370,11 @@ dependencies = [
 
 [[package]]
 name = "oab-cost"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "oab-domain"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "hmac",
  "rust_decimal",
@@ -1387,7 +1387,7 @@ dependencies = [
 
 [[package]]
 name = "oab-ipc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "futures-util",
  "getrandom 0.2.17",
@@ -1404,7 +1404,7 @@ dependencies = [
 
 [[package]]
 name = "oab-plugins"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "rquickjs",
  "serde",
@@ -1414,7 +1414,7 @@ dependencies = [
 
 [[package]]
 name = "oab-providers"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes",
  "base64",
@@ -1445,7 +1445,7 @@ dependencies = [
 
 [[package]]
 name = "oab-runtime"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "notify-rust",
  "oab-domain",
@@ -1458,11 +1458,11 @@ dependencies = [
 
 [[package]]
 name = "oab-sessions"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "oab-storage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "getrandom 0.2.17",
  "nix",
@@ -1477,7 +1477,7 @@ dependencies = [
 
 [[package]]
 name = "oab-test-support"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "oab-domain",
  "tokio",
@@ -1526,7 +1526,7 @@ dependencies = [
 
 [[package]]
 name = "omarchy-ai-bar"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "nix",

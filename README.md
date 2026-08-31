@@ -2,9 +2,6 @@
 
 Omarchy-native AI provider usage, quota, cost, and session monitoring.
 
-The project is under active development against the approved design in
-[`docs/superpowers/specs/2026-08-29-omarchy-ai-bar-design.md`](docs/superpowers/specs/2026-08-29-omarchy-ai-bar-design.md).
-
 Omarchy AI Bar is a Rust/Quickshell port inspired by
 [CodexBar](https://github.com/steipete/CodexBar), used under the MIT License.
 
@@ -95,7 +92,13 @@ omarchy-ai-bar cards --format json
 omarchy-ai-bar usage --format toon
 omarchy-ai-bar diagnose --format json
 omarchy-ai-bar dashboard
+omarchy-ai-bar guard --max-used 90
 ```
+
+Configuration validation, Secret Service credentials, cache management,
+hooks, local JavaScript providers, and the loopback JSON API are documented in
+[`docs/operations.md`](docs/operations.md). Run `omarchy-ai-bar --help` or any
+subcommand with `--help` for the complete command reference.
 
 ## Build and visually test on Omarchy
 
@@ -141,5 +144,6 @@ cargo test -p omarchy-ai-bar --test daemon_display_e2e
 
 Security, platform compatibility, and release maintenance are documented in
 [`docs/security.md`](docs/security.md),
-[`docs/compatibility.md`](docs/compatibility.md), and
+[`docs/compatibility.md`](docs/compatibility.md),
+[`docs/operations.md`](docs/operations.md), and
 [`docs/releasing.md`](docs/releasing.md).
