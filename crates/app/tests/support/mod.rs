@@ -19,12 +19,13 @@ use nix::unistd::Pid;
 const PROCESS_DEADLINE: Duration = Duration::from_secs(5);
 static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-pub const EXPECTED_PROVIDER_IDS: [&str; 65] = [
+pub const EXPECTED_PROVIDER_IDS: [&str; 69] = [
     "abacus",
     "aiand",
     "alibaba",
     "alibabatokenplan",
     "amp",
+    "antigravity",
     "azureopenai",
     "augment",
     "bedrock",
@@ -37,12 +38,14 @@ pub const EXPECTED_PROVIDER_IDS: [&str; 65] = [
     "commandcode",
     "copilot",
     "crof",
+    "cursor",
     "deepgram",
     "deepinfra",
     "deepseek",
     "devin",
     "doubao",
     "elevenlabs",
+    "factory",
     "fireworks",
     "gemini",
     "grok",
@@ -80,6 +83,7 @@ pub const EXPECTED_PROVIDER_IDS: [&str; 65] = [
     "vertexai",
     "warp",
     "wayfinder",
+    "windsurf",
     "xai",
     "zai",
     "zed",

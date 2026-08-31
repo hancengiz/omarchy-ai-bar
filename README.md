@@ -11,7 +11,7 @@ Omarchy AI Bar is a Rust/Quickshell port inspired by
 ## Current end-to-end providers
 
 The daemon, private display socket, Rust-to-QML bridge, refresh actions, and
-CodexBar-style multi-provider panel are connected for 65 native providers:
+CodexBar-style multi-provider panel are connected for all 69 native providers:
 
 - Codex: native Codex credential files, HTTP usage, and `codex app-server`
   fallback.
@@ -46,6 +46,14 @@ CodexBar-style multi-provider panel are connected for 65 native providers:
   current and legacy credit-report formats.
 - Gemini through the Cloud Code quota API using an explicit OAuth access token,
   with Pro, Flash, and Flash Lite tiers grouped like CodexBar.
+- Factory (Droid) through `FACTORY_API_KEY`, including authenticated account,
+  organization, plan, Standard-token, and Premium-token state.
+- Cursor through an explicit `OMARCHY_AI_BAR_CURSOR_COOKIE` session, including
+  Total, Auto/Composer, and named-model usage from `/api/usage-summary`.
+- Antigravity through its remote Google quota endpoint, grouping Gemini and
+  Claude/GPT quota families from an explicit OAuth access token.
+- Windsurf through the Omarchy/Linux VS Code-compatible state database,
+  including daily/weekly quota percentages and legacy message/flow counters.
 
 Providers without configured credentials remain visible with a safe setup
 status instead of disappearing. Credentials are never sent over the QML IPC.

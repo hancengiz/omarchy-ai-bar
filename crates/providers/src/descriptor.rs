@@ -195,6 +195,10 @@ const fn capabilities_for(id: ProviderId) -> CapabilitySet {
     capabilities
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the closed provider/source registry is clearer as one exhaustive match"
+)]
 const fn sources_for(id: ProviderId) -> SourceSet {
     use ProviderId as Id;
     use ProviderSource as Source;
@@ -286,7 +290,9 @@ const fn sources_for(id: ProviderId) -> SourceSet {
         Id::Zai | Id::OpenCodeGo => SourceSet::one(Source::ConfigurableEndpoint)
             .with(Source::ApiKey)
             .with(Source::LocalData),
-        Id::Factory => SourceSet::one(Source::OAuth).with(Source::BrowserSession),
+        Id::Factory => SourceSet::one(Source::ApiKey)
+            .with(Source::OAuth)
+            .with(Source::BrowserSession),
         Id::Ollama => SourceSet::one(Source::ApiKey)
             .with(Source::ConfigurableEndpoint)
             .with(Source::BrowserSession),

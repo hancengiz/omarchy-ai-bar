@@ -17,6 +17,7 @@ use oab_providers::providers::alibabatokenplan::{
     AlibabaTokenPlanCliSettings, AlibabaTokenPlanProvider, AlibabaTokenPlanRegion,
 };
 use oab_providers::providers::amp::AmpProvider;
+use oab_providers::providers::antigravity::{AntigravityProvider, AntigravitySettings};
 use oab_providers::providers::augment::{AugmentCliSettings, AugmentProvider};
 use oab_providers::providers::azureopenai::{AzureOpenAiProvider, AzureOpenAiSettings};
 use oab_providers::providers::bedrock::{BedrockProvider, BedrockSettings};
@@ -33,12 +34,14 @@ use oab_providers::providers::codex_provider::{
 use oab_providers::providers::commandcode::CommandCodeProvider;
 use oab_providers::providers::copilot::CopilotProvider;
 use oab_providers::providers::crof::CrofProvider;
+use oab_providers::providers::cursor::CursorProvider;
 use oab_providers::providers::deepgram::{DeepgramProvider, DeepgramSettings};
 use oab_providers::providers::deepinfra::DeepInfraProvider;
 use oab_providers::providers::deepseek::DeepSeekProvider;
 use oab_providers::providers::devin::DevinProvider;
 use oab_providers::providers::doubao::DoubaoProvider;
 use oab_providers::providers::elevenlabs::ElevenLabsProvider;
+use oab_providers::providers::factory::FactoryProvider;
 use oab_providers::providers::fireworks::{FireworksCredential, FireworksProvider};
 use oab_providers::providers::gemini::{GeminiProvider, GeminiSettings};
 use oab_providers::providers::grok::{GrokProvider, GrokSettings};
@@ -76,6 +79,7 @@ use oab_providers::providers::venice::VeniceProvider;
 use oab_providers::providers::vertexai::{VertexAiProvider, VertexSettings};
 use oab_providers::providers::warp::WarpProvider;
 use oab_providers::providers::wayfinder::{WayfinderProvider, WayfinderSettings};
+use oab_providers::providers::windsurf::{WindsurfProvider, WindsurfSettings};
 use oab_providers::providers::xai::{XaiCredential, XaiProvider};
 use oab_providers::providers::zai::{ZaiProvider, ZaiSettings};
 use oab_providers::providers::zed::{ZedProvider, ZedSettings};
@@ -97,7 +101,7 @@ struct LazyRegistrationSpec {
     builder: LazyAdapterBuilder,
 }
 
-const LAZY_PROVIDER_SPECS: [LazyRegistrationSpec; 53] = [
+const LAZY_PROVIDER_SPECS: [LazyRegistrationSpec; 57] = [
     lazy_spec(ProviderId::Zai, ProviderSource::ApiKey, build_zai),
     lazy_spec(ProviderId::OpenAi, ProviderSource::ApiKey, build_openai),
     lazy_spec(
@@ -271,6 +275,22 @@ const LAZY_PROVIDER_SPECS: [LazyRegistrationSpec; 53] = [
     lazy_spec(ProviderId::Zed, ProviderSource::ApiKey, build_zed),
     lazy_spec(ProviderId::Augment, ProviderSource::Cli, build_augment),
     lazy_spec(ProviderId::Gemini, ProviderSource::OAuth, build_gemini),
+    lazy_spec(ProviderId::Factory, ProviderSource::ApiKey, build_factory),
+    lazy_spec(
+        ProviderId::Cursor,
+        ProviderSource::ManualCookie,
+        build_cursor,
+    ),
+    lazy_spec(
+        ProviderId::Antigravity,
+        ProviderSource::OAuth,
+        build_antigravity,
+    ),
+    lazy_spec(
+        ProviderId::Windsurf,
+        ProviderSource::LocalData,
+        build_windsurf,
+    ),
 ];
 
 const fn lazy_spec(
@@ -803,6 +823,46 @@ fn build_gemini(
         scope,
         GeminiSettings::resolve(environment)?,
     )?))
+}
+
+fn build_factory(
+    scope: AccountScope,
+    environment: &BTreeMap<String, String>,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(FactoryProvider::new(
+        scope,
+        FactoryProvider::resolve_credential(environment)?,
+    )?))
+}
+
+fn build_cursor(
+    scope: AccountScope,
+    environment: &BTreeMap<String, String>,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(CursorProvider::new_manual(
+        scope,
+        required_environment_value(environment, "OMARCHY_AI_BAR_CURSOR_COOKIE")?,
+    )?))
+}
+
+fn build_antigravity(
+    scope: AccountScope,
+    environment: &BTreeMap<String, String>,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(AntigravityProvider::new(
+        scope,
+        AntigravitySettings::resolve(environment)?,
+    )?))
+}
+
+fn build_windsurf(
+    scope: AccountScope,
+    environment: &BTreeMap<String, String>,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(WindsurfProvider::new(
+        scope,
+        WindsurfSettings::resolve(environment)?,
+    )))
 }
 
 fn build_venice(
