@@ -10,10 +10,10 @@ use oab_ipc::protocol::{
     RequestId, RuntimeAction, V1_PROTOCOL,
 };
 use serde_json::Value;
-use support::{DaemonFixture, terminate, wait_for_exit};
+use support::{DaemonFixture, EXPECTED_PROVIDER_IDS, terminate, wait_for_exit};
 
 #[test]
-fn daemon_publishes_four_provider_slice_and_completes_refresh_action() {
+fn daemon_publishes_production_provider_slice_and_completes_refresh_action() {
     let fixture = DaemonFixture::new("display-e2e");
     let mut daemon = fixture.spawn_daemon();
     fixture.wait_until_listening(&mut daemon);
@@ -51,10 +51,7 @@ fn daemon_publishes_four_provider_slice_and_completes_refresh_action() {
         .iter()
         .map(|entry| entry["scope"]["provider"].as_str().expect("provider ID"))
         .collect::<std::collections::BTreeSet<_>>();
-    assert_eq!(
-        providers,
-        std::collections::BTreeSet::from(["claude", "codex", "grok", "zai"])
-    );
+    assert_eq!(providers, EXPECTED_PROVIDER_IDS.into_iter().collect());
 
     let action = ClientMessage::Action {
         request_id: RequestId::new(1).expect("request ID"),

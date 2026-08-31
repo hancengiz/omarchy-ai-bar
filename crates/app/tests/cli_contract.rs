@@ -4,7 +4,7 @@ use std::process::Command;
 
 use serde_json::Value;
 
-use support::{DaemonFixture, terminate, wait_for_exit};
+use support::{DaemonFixture, EXPECTED_PROVIDER_IDS, terminate, wait_for_exit};
 
 const UNAVAILABLE: i32 = 69;
 
@@ -157,7 +157,10 @@ fn running_daemon_serves_usage_cards_and_redacted_diagnostics() {
     assert!(usage.stderr.is_empty());
     let usage: Value = serde_json::from_slice(&usage.stdout).expect("usage JSON");
     assert_eq!(usage["schema_version"], 1);
-    assert_eq!(usage["snapshots"].as_array().map(Vec::len), Some(4));
+    assert_eq!(
+        usage["snapshots"].as_array().map(Vec::len),
+        Some(EXPECTED_PROVIDER_IDS.len())
+    );
 
     let cards = fixture
         .command()
@@ -167,7 +170,10 @@ fn running_daemon_serves_usage_cards_and_redacted_diagnostics() {
     assert!(cards.status.success());
     assert!(cards.stderr.is_empty());
     let cards: Value = serde_json::from_slice(&cards.stdout).expect("cards JSON");
-    assert_eq!(cards.as_array().map(Vec::len), Some(4));
+    assert_eq!(
+        cards.as_array().map(Vec::len),
+        Some(EXPECTED_PROVIDER_IDS.len())
+    );
     assert!(cards.as_array().is_some_and(|items| {
         items
             .iter()
@@ -183,17 +189,17 @@ fn running_daemon_serves_usage_cards_and_redacted_diagnostics() {
     assert!(diagnose.stderr.is_empty());
     let diagnose: Value = serde_json::from_slice(&diagnose.stdout).expect("diagnostics JSON");
     assert_eq!(diagnose["daemon"], "running");
-    assert_eq!(diagnose["providers"].as_array().map(Vec::len), Some(4));
+    assert_eq!(
+        diagnose["providers"].as_array().map(Vec::len),
+        Some(EXPECTED_PROVIDER_IDS.len())
+    );
     let diagnosed = diagnose["providers"]
         .as_array()
         .expect("diagnosed providers")
         .iter()
         .filter_map(|provider| provider["provider"].as_str())
         .collect::<std::collections::BTreeSet<_>>();
-    assert_eq!(
-        diagnosed,
-        std::collections::BTreeSet::from(["claude", "codex", "grok", "zai"])
-    );
+    assert_eq!(diagnosed, EXPECTED_PROVIDER_IDS.into_iter().collect());
     let encoded = serde_json::to_string(&diagnose).expect("encode diagnostics");
     for private_field in [
         "email",

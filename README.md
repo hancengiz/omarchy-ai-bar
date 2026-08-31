@@ -8,10 +8,10 @@ The project is under active development against the approved design in
 Omarchy AI Bar is a Rust/Quickshell port inspired by
 [CodexBar](https://github.com/steipete/CodexBar), used under the MIT License.
 
-## Current end-to-end provider slice
+## Current end-to-end providers
 
 The daemon, private display socket, Rust-to-QML bridge, refresh actions, and
-CodexBar-style multi-provider panel are connected for:
+CodexBar-style multi-provider panel are connected for 58 native providers:
 
 - Codex: native Codex credential files, HTTP usage, and `codex app-server`
   fallback.
@@ -20,6 +20,22 @@ CodexBar-style multi-provider panel are connected for:
 - Grok: `grok agent stdio` and its `x.ai/billing` RPC. Run `grok login` first.
 - z.ai Coding Plan: `Z_AI_API_KEY`; the adapter also supports its existing
   region, team, endpoint, and BigModel environment options.
+- OpenAI, Azure OpenAI, Fireworks, Moonshot, OpenRouter, Deepgram, Chutes,
+  Neuralwatt, IBM Bob, xAI, LiteLLM, LLM Proxy, and sub2api through their
+  native API-key or configured-endpoint adapters.
+- Synthetic, DeepInfra, Venice, Poe, ZenMux, ai&, Warp, ClinePass, and
+  ElevenLabs through native fixed-origin API adapters.
+- AWS Bedrock, Vertex AI, JetBrains AI, Wayfinder, ClawRouter, Crof, and
+  Codebuff through native cloud, local-data, API, or gateway adapters.
+- Amp, Doubao, Kilo, Kiro, and Alibaba Token Plan through source-aware native
+  API, cloud-credential, local-session, or shell-free CLI adapters.
+- Abacus, Alibaba Coding Plan, Command Code, Devin, LongCat, Manus, MiniMax,
+  Mistral, Notion AI, OpenCode, Perplexity, Qoder, Qwen Cloud, Sakana, StepFun,
+  T3 Chat, and ZoomMate through native API-key or explicit manual-session
+  adapters. Manual-session values use provider-specific
+  `OMARCHY_AI_BAR_*_COOKIE` variables and never cross the QML IPC boundary.
+- GitHub Copilot, Kimi, and Xiaomi MiMo through OAuth, source-aware
+  API/CLI/manual-session selection, and bounded local usage data.
 
 Providers without configured credentials remain visible with a safe setup
 status instead of disappearing. Credentials are never sent over the QML IPC.
@@ -89,8 +105,8 @@ environment variables to this command if needed):
 target/release/omarchy-ai-bar daemon
 ```
 
-The `AI` widget should appear in the Omarchy bar. Left-click opens all four
-provider rows; middle/right-click refreshes them. To remove the development
+The `AI` widget should appear in the Omarchy bar. Left-click opens the provider
+rows; middle/right-click refreshes them. To remove the development
 bridge afterward:
 
 ```sh

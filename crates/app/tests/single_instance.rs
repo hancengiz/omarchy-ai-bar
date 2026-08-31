@@ -2,7 +2,7 @@ mod support;
 
 use std::os::unix::fs::MetadataExt;
 
-use support::{DaemonFixture, assert_removed, terminate, wait_for_exit};
+use support::{DaemonFixture, EXPECTED_PROVIDER_IDS, assert_removed, terminate, wait_for_exit};
 
 #[test]
 fn second_invocation_forwards_activation_without_replacing_the_owner() {
@@ -48,7 +48,10 @@ fn safe_command_uses_daemon_state_when_present() {
     let payload: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("daemon usage JSON");
     assert_eq!(payload["schema_version"], 1);
-    assert_eq!(payload["snapshots"].as_array().map(Vec::len), Some(4));
+    assert_eq!(
+        payload["snapshots"].as_array().map(Vec::len),
+        Some(EXPECTED_PROVIDER_IDS.len())
+    );
     assert!(daemon.try_wait().expect("poll daemon").is_none());
 
     terminate(&daemon);

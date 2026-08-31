@@ -1,5 +1,6 @@
 //! Generic bridge from one configured provider adapter to runtime refresh work.
 
+use std::collections::BTreeMap;
 use std::fmt::{self, Debug, Formatter};
 use std::sync::Arc;
 
@@ -8,6 +9,7 @@ use oab_providers::context::{ProviderAdapter, ProviderContext};
 use oab_providers::descriptor::ProviderSource;
 use oab_providers::normalize::system_timestamp;
 use oab_providers::providers::codex_provider::{CodexCoordinator, CodexCoordinatorError};
+use oab_providers::registry::descriptor_for;
 use oab_runtime::actor::{RefreshFuture, RefreshSource};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
@@ -85,6 +87,84 @@ pub struct ProviderRefreshSource {
     scope: AccountScope,
     source: ProviderSource,
     adapter: Arc<dyn BoundProviderAdapter>,
+}
+
+pub(crate) type LazyAdapterBuilder = fn(
+    AccountScope,
+    &BTreeMap<String, String>,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError>;
+
+/// Constructs one native adapter only when its account is refreshed.
+///
+/// Keeping construction lazy lets the daemon advertise setup rows for
+/// providers whose credentials are not configured yet. Discovery remains
+/// side-effect free: no secret parsing, network access, or child process is
+/// attempted until the runtime explicitly refreshes the account.
+pub(crate) struct LazyProviderRefreshSource {
+    scope: AccountScope,
+    source: ProviderSource,
+    environment: Arc<BTreeMap<String, String>>,
+    builder: LazyAdapterBuilder,
+}
+
+impl LazyProviderRefreshSource {
+    pub(crate) fn new(
+        scope: AccountScope,
+        source: ProviderSource,
+        environment: Arc<BTreeMap<String, String>>,
+        builder: LazyAdapterBuilder,
+    ) -> Result<Self, ProviderRefreshBuildError> {
+        if !descriptor_for(scope.provider()).sources().contains(source) {
+            return Err(ProviderRefreshBuildError::UnsupportedSource);
+        }
+        Ok(Self {
+            scope,
+            source,
+            environment,
+            builder,
+        })
+    }
+}
+
+impl RefreshSource for LazyProviderRefreshSource {
+    fn fetch_required(
+        &self,
+        scope: AccountScope,
+        cancellation: CancellationToken,
+    ) -> RefreshFuture<Result<UsageSample, ClassifiedError>> {
+        if scope != self.scope {
+            return Box::pin(async { Err(ClassifiedError::new(ErrorKind::Api)) });
+        }
+        if cancellation.is_cancelled() {
+            return Box::pin(async { Err(ClassifiedError::new(ErrorKind::Network)) });
+        }
+
+        let environment = Arc::clone(&self.environment);
+        let source = self.source;
+        let builder = self.builder;
+        Box::pin(async move {
+            let adapter = builder(scope.clone(), environment.as_ref())?;
+            if adapter.descriptor().id != scope.provider()
+                || !adapter.descriptor().sources().contains(source)
+            {
+                return Err(ClassifiedError::new(ErrorKind::Api));
+            }
+            let context = ProviderContext::new(scope, source, cancellation);
+            adapter.fetch(&context).await
+        })
+    }
+}
+
+impl Debug for LazyProviderRefreshSource {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LazyProviderRefreshSource")
+            .field("scope", &"<redacted>")
+            .field("source", &self.source)
+            .field("environment", &"<redacted>")
+            .field("builder", &"<function>")
+            .finish()
+    }
 }
 
 impl ProviderRefreshSource {
@@ -233,6 +313,8 @@ mod tests {
     use tokio::sync::Notify;
 
     use super::*;
+
+    static LAZY_BUILDS: AtomicUsize = AtomicUsize::new(0);
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     struct ObservedContext {
@@ -397,6 +479,60 @@ mod tests {
 
     fn erase(adapter: &Arc<FakeAdapter>) -> Arc<dyn BoundProviderAdapter> {
         Arc::clone(adapter) as Arc<dyn BoundProviderAdapter>
+    }
+
+    fn build_lazy_fake(
+        exact_scope: AccountScope,
+        environment: &BTreeMap<String, String>,
+    ) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+        if environment.is_empty() {
+            return Err(ClassifiedError::new(ErrorKind::MissingCredential));
+        }
+        LAZY_BUILDS.fetch_add(1, Ordering::SeqCst);
+        Ok(Box::new(FakeAdapter::success(
+            exact_scope.clone(),
+            ProviderSource::ApiKey,
+            sample(exact_scope),
+        )))
+    }
+
+    #[tokio::test]
+    async fn lazy_source_defers_adapter_construction_and_redacts_environment() {
+        LAZY_BUILDS.store(0, Ordering::SeqCst);
+        let exact_scope = scope(ProviderId::OpenAi, "openai-primary", "lazy-account");
+        let environment = Arc::new(BTreeMap::from([(
+            "OPENAI_API_KEY".to_owned(),
+            "environment-secret-canary".to_owned(),
+        )]));
+        let bridge = LazyProviderRefreshSource::new(
+            exact_scope.clone(),
+            ProviderSource::ApiKey,
+            environment,
+            build_lazy_fake,
+        )
+        .expect("valid lazy source");
+
+        assert_eq!(LAZY_BUILDS.load(Ordering::SeqCst), 0);
+        let debug = format!("{bridge:?}");
+        assert!(!debug.contains("environment-secret-canary"));
+        assert!(!debug.contains("lazy-account"));
+
+        let wrong_scope = bridge
+            .fetch_required(
+                scope(ProviderId::OpenAi, "openai-primary", "wrong-account"),
+                CancellationToken::new(),
+            )
+            .await
+            .expect_err("wrong account must fail closed");
+        assert_eq!(wrong_scope.kind(), ErrorKind::Api);
+        assert_eq!(LAZY_BUILDS.load(Ordering::SeqCst), 0);
+
+        let fetched = bridge
+            .fetch_required(exact_scope.clone(), CancellationToken::new())
+            .await
+            .expect("lazy adapter fetch");
+        assert_eq!(fetched, sample(exact_scope));
+        assert_eq!(LAZY_BUILDS.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

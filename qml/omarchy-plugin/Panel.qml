@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import qs.Commons
 import qs.Ui
 
@@ -89,7 +90,7 @@ Panel {
         open: root.opened
         focusTarget: keyCatcher
         contentWidth: popup.fittedContentWidth(Style.space(390))
-        contentHeight: popup.fittedContentHeight(content.implicitHeight)
+        contentHeight: popup.fittedContentHeight(content.implicitHeight, Style.space(640))
 
         PanelKeyCatcher {
             id: keyCatcher
@@ -98,148 +99,166 @@ Panel {
             onTabRequested: function (direction) {
                 root.switchPanel(direction);
             }
+            onMoveRequested: function (dx, dy) {
+                if (dy !== 0)
+                    providerScroll.contentY = Math.max(0, Math.min(providerScroll.contentHeight - providerScroll.height, providerScroll.contentY + dy * Style.space(56)));
+            }
             onTextKey: function (text) {
                 if ((text === "r" || text === "R") && root.service)
                     root.service.refreshAll();
             }
 
-            Column {
-                id: content
-                width: parent.width
-                spacing: Style.space(12)
-
-                Row {
-                    width: parent.width
-                    spacing: Style.space(10)
-
-                    Column {
-                        width: parent.width - statusBadge.width - parent.spacing
-                        spacing: Style.space(2)
-
-                        Text {
-                            width: parent.width
-                            text: "Omarchy AI Bar"
-                            color: root.bar ? root.bar.foreground : Color.foreground
-                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                            font.pixelSize: Style.font.subtitle
-                            font.bold: true
-                            elide: Text.ElideRight
-                        }
-
-                        Text {
-                            width: parent.width
-                            text: root.visibleProviderRows.length + " providers · " + String(root.setting("usageDirection", "Used")).toLowerCase() + " quota"
-                            color: Color.muted
-                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                            font.pixelSize: Style.font.bodySmall
-                            elide: Text.ElideRight
-                        }
-                    }
-
-                    Text {
-                        id: statusBadge
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: root.statusText
-                        color: root.service && root.service.compatibilityFailure !== "" ? Color.urgent : (root.bar ? root.bar.foreground : Color.foreground)
-                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                        font.pixelSize: Style.font.caption
-                    }
-                }
-
-                PanelSeparator {
-                    width: parent.width
-                    foreground: root.bar ? root.bar.foreground : Color.foreground
+            Flickable {
+                id: providerScroll
+                anchors.fill: parent
+                contentWidth: width
+                contentHeight: content.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                flickableDirection: Flickable.VerticalFlick
+                interactive: contentHeight > height
+                ScrollBar.vertical: ScrollBar {
+                    policy: ScrollBar.AsNeeded
                 }
 
                 Column {
-                    width: parent.width
-                    spacing: Style.space(10)
+                    id: content
+                    width: providerScroll.width
+                    spacing: Style.space(12)
 
-                    Repeater {
-                        model: root.visibleProviderRows
+                    Row {
+                        width: parent.width
+                        spacing: Style.space(10)
 
-                        delegate: Column {
-                            required property var modelData
-                            width: parent.width
-                            spacing: Style.space(5)
+                        Column {
+                            width: parent.width - statusBadge.width - parent.spacing
+                            spacing: Style.space(2)
 
-                            Row {
+                            Text {
                                 width: parent.width
-
-                                Text {
-                                    width: parent.width - providerUsage.width
-                                    text: modelData.label
-                                    color: root.bar ? root.bar.foreground : Color.foreground
-                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                    font.pixelSize: Style.font.body
-                                    font.bold: true
-                                    elide: Text.ElideRight
-                                }
-
-                                Text {
-                                    id: providerUsage
-                                    text: modelData.ready ? root.usageLabel(modelData) : modelData.status
-                                    color: modelData.ready ? (root.bar ? root.bar.foreground : Color.foreground) : Color.muted
-                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                    font.pixelSize: Style.font.bodySmall
-                                }
-                            }
-
-                            Rectangle {
-                                width: parent.width
-                                height: Style.space(7)
-                                radius: height / 2
-                                color: Style.normalFillFor(root.bar ? root.bar.foreground : Color.foreground, Color.accent)
-
-                                Rectangle {
-                                    width: parent.width * root.displayPercent(modelData) / 100
-                                    height: parent.height
-                                    radius: parent.radius
-                                    color: Number(modelData.percent || 0) >= Number(root.setting("warningThreshold", 90)) ? Color.urgent : Color.accent
-                                }
+                                text: "Omarchy AI Bar"
+                                color: root.bar ? root.bar.foreground : Color.foreground
+                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                font.pixelSize: Style.font.subtitle
+                                font.bold: true
+                                elide: Text.ElideRight
                             }
 
                             Text {
                                 width: parent.width
-                                visible: root.setting("showResetTimes", true) === true && modelData.reset !== ""
-                                text: modelData.reset
+                                text: root.visibleProviderRows.length + " providers · " + String(root.setting("usageDirection", "Used")).toLowerCase() + " quota"
                                 color: Color.muted
                                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                font.pixelSize: Style.font.caption
+                                font.pixelSize: Style.font.bodySmall
                                 elide: Text.ElideRight
                             }
                         }
-                    }
-                }
 
-                Text {
-                    width: parent.width
-                    visible: root.service && root.service.compatibilityFailure !== ""
-                    text: "Bridge compatibility: " + root.service.compatibilityFailure
-                    color: Color.urgent
-                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                    font.pixelSize: Style.font.bodySmall
-                    wrapMode: Text.Wrap
-                }
-
-                Row {
-                    anchors.right: parent.right
-                    spacing: Style.space(6)
-
-                    Button {
-                        text: "Refresh"
-                        iconText: "󰑐"
-                        foreground: root.bar ? root.bar.foreground : Color.foreground
-                        focusable: true
-                        onClicked: if (root.service)
-                            root.service.refreshAll()
+                        Text {
+                            id: statusBadge
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: root.statusText
+                            color: root.service && root.service.compatibilityFailure !== "" ? Color.urgent : (root.bar ? root.bar.foreground : Color.foreground)
+                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.caption
+                        }
                     }
 
-                    Button {
-                        text: "Close"
+                    PanelSeparator {
+                        width: parent.width
                         foreground: root.bar ? root.bar.foreground : Color.foreground
-                        focusable: true
-                        onClicked: root.requestClose()
+                    }
+
+                    Column {
+                        width: parent.width
+                        spacing: Style.space(10)
+
+                        Repeater {
+                            model: root.visibleProviderRows
+
+                            delegate: Column {
+                                required property var modelData
+                                width: parent.width
+                                spacing: Style.space(5)
+
+                                Row {
+                                    width: parent.width
+
+                                    Text {
+                                        width: parent.width - providerUsage.width
+                                        text: modelData.label
+                                        color: root.bar ? root.bar.foreground : Color.foreground
+                                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                        font.pixelSize: Style.font.body
+                                        font.bold: true
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Text {
+                                        id: providerUsage
+                                        text: modelData.ready ? root.usageLabel(modelData) : modelData.status
+                                        color: modelData.ready ? (root.bar ? root.bar.foreground : Color.foreground) : Color.muted
+                                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                        font.pixelSize: Style.font.bodySmall
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: parent.width
+                                    height: Style.space(7)
+                                    radius: height / 2
+                                    color: Style.normalFillFor(root.bar ? root.bar.foreground : Color.foreground, Color.accent)
+
+                                    Rectangle {
+                                        width: parent.width * root.displayPercent(modelData) / 100
+                                        height: parent.height
+                                        radius: parent.radius
+                                        color: Number(modelData.percent || 0) >= Number(root.setting("warningThreshold", 90)) ? Color.urgent : Color.accent
+                                    }
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    visible: root.setting("showResetTimes", true) === true && modelData.reset !== ""
+                                    text: modelData.reset
+                                    color: Color.muted
+                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                    font.pixelSize: Style.font.caption
+                                    elide: Text.ElideRight
+                                }
+                            }
+                        }
+                    }
+
+                    Text {
+                        width: parent.width
+                        visible: root.service && root.service.compatibilityFailure !== ""
+                        text: "Bridge compatibility: " + root.service.compatibilityFailure
+                        color: Color.urgent
+                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                        font.pixelSize: Style.font.bodySmall
+                        wrapMode: Text.Wrap
+                    }
+
+                    Row {
+                        anchors.right: parent.right
+                        spacing: Style.space(6)
+
+                        Button {
+                            text: "Refresh"
+                            iconText: "󰑐"
+                            foreground: root.bar ? root.bar.foreground : Color.foreground
+                            focusable: true
+                            onClicked: if (root.service)
+                                root.service.refreshAll()
+                        }
+
+                        Button {
+                            text: "Close"
+                            foreground: root.bar ? root.bar.foreground : Color.foreground
+                            focusable: true
+                            onClicked: root.requestClose()
+                        }
                     }
                 }
             }
