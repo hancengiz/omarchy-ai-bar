@@ -8,8 +8,11 @@ version=${1:-$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$repo_root/Cargo.toml" | 
   exit 2
 }
 
-cargo_bin=${CARGO:-/home/hancengiz/.cargo/bin/cargo}
-command -v "$cargo_bin" >/dev/null 2>&1 || cargo_bin=cargo
+cargo_bin=${CARGO:-cargo}
+command -v "$cargo_bin" >/dev/null 2>&1 || {
+  echo "build-release: cargo executable not found" >&2
+  exit 1
+}
 dist_dir="$repo_root/dist"
 archive_name="omarchy-ai-bar-$version-linux-x86_64.tar.gz"
 temporary_root=$(mktemp -d)
