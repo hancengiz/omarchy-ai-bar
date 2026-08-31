@@ -99,7 +99,7 @@ jobs:
           done < <(find qml tests -type f -name '*.qml' -print0 | sort -z)
 
       - name: Lint the dependency-free protocol surface
-        run: /usr/lib/qt6/bin/qmllint qml/omarchy-plugin/Protocol.js tests/qml/tst_protocol.qml
+        run: /usr/lib/qt6/bin/qmllint qml/omarchy-plugin/Protocol.js
 
   release-binary:
     name: Release binary
