@@ -3,12 +3,21 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::ffi::{OsStr, OsString};
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Read, Write};
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::PathBuf;
 use std::process::Command as ProcessCommand;
+use std::process::Stdio;
+use std::thread;
+use std::time::{Duration, Instant};
 
+use oab_auth::secret_store::{
+    MAX_SECRET_BYTES, SecretKey, SecretServiceStore, SecretStore, SecretValue,
+};
 use oab_cli::args::{
-    BridgeTransport, Cli, Command, CompletionShell, ConfigAction, ConfigArgs, GuardArgs, OutputArgs,
+    BridgeTransport, CacheAction, CacheArgs, Cli, Command, CompletionShell, ConfigAction,
+    ConfigArgs, CookieAction, CookieArgs, GuardArgs, HooksAction, HooksArgs, OutputArgs,
+    PluginsAction, PluginsArgs,
 };
 use oab_cli::commands::bridge::{
     BridgeError, BridgeManager, BridgeStatus, PACKAGED_PLUGIN_PATH, SystemOmarchyCommands,
@@ -31,6 +40,13 @@ const DAEMON_UNAVAILABLE_MESSAGE: &str =
     "omarchy-ai-bar: requested feature is not available from the running daemon";
 const ONESHOT_UNAVAILABLE_MESSAGE: &str =
     "omarchy-ai-bar: requested feature is not available in isolated one-shot mode";
+const HOOK_EVENTS: [&str; 5] = [
+    "daemon-started",
+    "provider-updated",
+    "refresh-completed",
+    "warning",
+    "session-detected",
+];
 
 /// Runs one parsed process mode and returns its stable exit class.
 pub(crate) fn run(cli: Cli) -> AppExitCode {
@@ -43,6 +59,11 @@ pub(crate) fn run(cli: Cli) -> AppExitCode {
         Some(Command::Sessions(arguments)) => run_safe(ControlAction::Sessions, arguments),
         Some(Command::Guard(arguments)) => run_guard(&arguments),
         Some(Command::Config(arguments)) => run_config(&arguments),
+        Some(Command::Serve(arguments)) => run_server(&arguments),
+        Some(Command::Cache(arguments)) => run_cache(&arguments),
+        Some(Command::Cookie(arguments)) => run_cookie(&arguments),
+        Some(Command::Hooks(arguments)) => run_hooks(&arguments),
+        Some(Command::Plugins(arguments)) => run_plugins(&arguments),
         Some(Command::Diagnose(arguments)) => run_safe(ControlAction::Diagnose, arguments),
         Some(Command::Bridge {
             transport: BridgeTransport::Stdio { socket },
@@ -89,10 +110,556 @@ pub(crate) fn run(cli: Cli) -> AppExitCode {
         }) => run_bridge(BridgeLifecycleAction::Uninstall),
         Some(Command::Version { json }) => write_version(json),
         Some(Command::Completion { shell }) => run_completion(shell),
-        Some(
-            Command::Serve | Command::Hooks | Command::Cookie | Command::Cache | Command::Plugins,
-        ) => unavailable(),
     }
+}
+
+fn run_server(arguments: &oab_cli::args::ServeArgs) -> AppExitCode {
+    if !arguments.listen.ip().is_loopback() {
+        eprintln!("omarchy-ai-bar: the local server may only listen on a loopback address");
+        return AppExitCode::Usage;
+    }
+    let Some(paths) = resolved_paths() else {
+        return AppExitCode::Internal;
+    };
+    match crate::server::run(arguments, paths.socket_path()) {
+        Ok(()) => AppExitCode::Success,
+        Err(error) => {
+            eprintln!("omarchy-ai-bar: {error}");
+            AppExitCode::Internal
+        }
+    }
+}
+
+fn run_cache(arguments: &CacheArgs) -> AppExitCode {
+    let Some(paths) = resolved_paths() else {
+        return AppExitCode::Internal;
+    };
+    match arguments.action.as_ref() {
+        None | Some(CacheAction::Status(_)) => {
+            let format = match arguments.action.as_ref() {
+                Some(CacheAction::Status(output)) => output.format,
+                _ => OutputFormat::Human,
+            };
+            show_cache_status(paths.cache_dir(), format)
+        }
+        Some(CacheAction::Clear) => clear_cache(paths.cache_dir()),
+    }
+}
+
+fn run_cookie(arguments: &CookieArgs) -> AppExitCode {
+    match arguments.action.as_ref() {
+        None | Some(CookieAction::List(_)) => {
+            let format = match arguments.action.as_ref() {
+                Some(CookieAction::List(output)) => output.format,
+                _ => OutputFormat::Human,
+            };
+            list_manual_credentials(format)
+        }
+        Some(CookieAction::Set { provider, account }) => {
+            let Some(key) = manual_secret_key(provider, account) else {
+                return AppExitCode::Usage;
+            };
+            if io::stdin().is_terminal() {
+                eprintln!(
+                    "omarchy-ai-bar: pipe the manual session credential on standard input; interactive echo is refused"
+                );
+                return AppExitCode::Usage;
+            }
+            let mut bytes = Vec::new();
+            if io::stdin()
+                .lock()
+                .take(u64::try_from(MAX_SECRET_BYTES).unwrap_or(u64::MAX) + 1)
+                .read_to_end(&mut bytes)
+                .is_err()
+            {
+                eprintln!("{INTERNAL_MESSAGE}");
+                return AppExitCode::Internal;
+            }
+            while bytes
+                .last()
+                .is_some_and(|byte| matches!(byte, b'\r' | b'\n'))
+            {
+                bytes.pop();
+            }
+            let Ok(secret) = SecretValue::new(bytes) else {
+                eprintln!("omarchy-ai-bar: credential is empty or exceeds the size limit");
+                return AppExitCode::Usage;
+            };
+            run_secret_service(SecretOperation::Set { key, secret })
+        }
+        Some(CookieAction::Status { provider, account }) => {
+            let Some(key) = manual_secret_key(provider, account) else {
+                return AppExitCode::Usage;
+            };
+            run_secret_service(SecretOperation::Status { key })
+        }
+        Some(CookieAction::Delete { provider, account }) => {
+            let Some(key) = manual_secret_key(provider, account) else {
+                return AppExitCode::Usage;
+            };
+            run_secret_service(SecretOperation::Delete { key })
+        }
+    }
+}
+
+fn run_hooks(arguments: &HooksArgs) -> AppExitCode {
+    let Some(paths) = resolved_paths() else {
+        return AppExitCode::Internal;
+    };
+    let hook_directory = paths.config_dir().join("hooks.d");
+    match arguments.action.as_ref() {
+        Some(HooksAction::Path) => {
+            println!("{}", hook_directory.display());
+            AppExitCode::Success
+        }
+        None | Some(HooksAction::List(_)) => {
+            let format = match arguments.action.as_ref() {
+                Some(HooksAction::List(output)) => output.format,
+                _ => OutputFormat::Human,
+            };
+            list_hooks(&hook_directory, format)
+        }
+        Some(HooksAction::Run { event }) => run_hook(&hook_directory, event),
+    }
+}
+
+fn run_plugins(arguments: &PluginsArgs) -> AppExitCode {
+    let Some(paths) = resolved_paths() else {
+        return AppExitCode::Internal;
+    };
+    let plugin_directory = paths.config_dir().join("plugins");
+    match arguments.action.as_ref() {
+        Some(PluginsAction::Path) => {
+            println!("{}", plugin_directory.display());
+            AppExitCode::Success
+        }
+        None | Some(PluginsAction::List(_)) => {
+            let format = match arguments.action.as_ref() {
+                Some(PluginsAction::List(output)) => output.format,
+                _ => OutputFormat::Human,
+            };
+            list_plugins(&plugin_directory, format)
+        }
+        Some(PluginsAction::Validate { path }) => match evaluate_plugin_file(path) {
+            Ok(evaluation) => {
+                println!(
+                    "Plugin {} ({}) is valid.",
+                    evaluation.manifest.name, evaluation.manifest.id
+                );
+                AppExitCode::Success
+            }
+            Err(code) => code,
+        },
+        Some(PluginsAction::Run { path, output }) => match evaluate_plugin_file(path) {
+            Ok(evaluation) => match output.format {
+                OutputFormat::Human => {
+                    println!("{} ({})", evaluation.manifest.name, evaluation.manifest.id);
+                    match serde_json::to_string_pretty(&evaluation.sample) {
+                        Ok(sample) => {
+                            println!("{sample}");
+                            AppExitCode::Success
+                        }
+                        Err(_error) => AppExitCode::Internal,
+                    }
+                }
+                OutputFormat::Json | OutputFormat::Toon => {
+                    let value = serde_json::to_value(evaluation).unwrap_or(Value::Null);
+                    write_local_value(output.format, &value)
+                }
+            },
+            Err(code) => code,
+        },
+    }
+}
+
+fn list_plugins(directory: &std::path::Path, format: OutputFormat) -> AppExitCode {
+    let entries = match std::fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return render_plugin_list(directory, format, &[]);
+        }
+        Err(_error) => {
+            eprintln!("omarchy-ai-bar: plugin directory could not be read safely");
+            return AppExitCode::Internal;
+        }
+    };
+    let mut sources = Vec::new();
+    for entry in entries.take(129) {
+        let Ok(entry) = entry else {
+            return AppExitCode::Internal;
+        };
+        let path = entry.path();
+        let is_javascript = path.extension().and_then(OsStr::to_str) == Some("js");
+        if is_javascript && safe_owned_regular_file(&path).is_ok() {
+            sources.push(path);
+        }
+    }
+    if sources.len() > 128 {
+        eprintln!("omarchy-ai-bar: plugin directory exceeds the source-file limit");
+        return AppExitCode::Usage;
+    }
+    sources.sort();
+    render_plugin_list(directory, format, &sources)
+}
+
+fn render_plugin_list(
+    directory: &std::path::Path,
+    format: OutputFormat,
+    sources: &[PathBuf],
+) -> AppExitCode {
+    let rows = sources
+        .iter()
+        .map(|path| {
+            json!({
+                "file": path.file_name().and_then(OsStr::to_str).unwrap_or("unknown"),
+                "path": path,
+            })
+        })
+        .collect::<Vec<_>>();
+    match format {
+        OutputFormat::Human => {
+            println!("Plugins: {}", directory.display());
+            if rows.is_empty() {
+                println!("No user-provider plugin sources are installed.");
+            } else {
+                for row in rows {
+                    println!("{}", row["file"].as_str().unwrap_or("unknown"));
+                }
+            }
+            AppExitCode::Success
+        }
+        OutputFormat::Json | OutputFormat::Toon => write_local_value(format, &Value::Array(rows)),
+    }
+}
+
+fn evaluate_plugin_file(
+    path: &std::path::Path,
+) -> Result<oab_plugins::PluginEvaluation, AppExitCode> {
+    if safe_owned_regular_file(path).is_err() {
+        eprintln!("omarchy-ai-bar: plugin source is missing or unsafe");
+        return Err(AppExitCode::Unavailable);
+    }
+    let mut file = std::fs::File::open(path).map_err(|_error| AppExitCode::Unavailable)?;
+    let mut source = Vec::new();
+    Read::by_ref(&mut file)
+        .take(u64::try_from(oab_plugins::MAX_PLUGIN_SOURCE_BYTES).unwrap_or(u64::MAX) + 1)
+        .read_to_end(&mut source)
+        .map_err(|_error| AppExitCode::Internal)?;
+    match oab_plugins::evaluate(&source) {
+        Ok(evaluation) => Ok(evaluation),
+        Err(error) => {
+            eprintln!("omarchy-ai-bar: {error}");
+            Err(AppExitCode::Usage)
+        }
+    }
+}
+
+fn safe_owned_regular_file(path: &std::path::Path) -> io::Result<()> {
+    let metadata = path.symlink_metadata()?;
+    if !metadata.file_type().is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.uid() != nix::unistd::geteuid().as_raw()
+        || metadata.permissions().mode() & 0o022 != 0
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "unsafe source file",
+        ));
+    }
+    Ok(())
+}
+
+fn list_hooks(directory: &std::path::Path, format: OutputFormat) -> AppExitCode {
+    let rows = HOOK_EVENTS
+        .into_iter()
+        .map(|event| {
+            json!({
+                "event": event,
+                "installed": validate_hook_executable(&directory.join(event)).is_ok(),
+            })
+        })
+        .collect::<Vec<_>>();
+    match format {
+        OutputFormat::Human => {
+            println!("Hooks: {}", directory.display());
+            for row in &rows {
+                let event = row["event"].as_str().unwrap_or("unknown");
+                let state = if row["installed"].as_bool() == Some(true) {
+                    "installed"
+                } else {
+                    "not installed"
+                };
+                println!("{event}: {state}");
+            }
+            AppExitCode::Success
+        }
+        OutputFormat::Json | OutputFormat::Toon => write_local_value(format, &Value::Array(rows)),
+    }
+}
+
+fn run_hook(directory: &std::path::Path, event: &str) -> AppExitCode {
+    if !HOOK_EVENTS.contains(&event) {
+        eprintln!("omarchy-ai-bar: unsupported hook event");
+        return AppExitCode::Usage;
+    }
+    let executable = directory.join(event);
+    if validate_hook_executable(&executable).is_err() {
+        eprintln!("omarchy-ai-bar: hook executable is missing or unsafe");
+        return AppExitCode::Unavailable;
+    }
+    let mut command = ProcessCommand::new(&executable);
+    command
+        .env_clear()
+        .env("OMARCHY_AI_BAR_EVENT", event)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(path) = env::var_os("PATH") {
+        command.env("PATH", path);
+    }
+    let Ok(mut child) = command.spawn() else {
+        eprintln!("omarchy-ai-bar: hook could not be started");
+        return AppExitCode::Internal;
+    };
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => {
+                println!("Hook {event} completed.");
+                return AppExitCode::Success;
+            }
+            Ok(Some(_status)) => {
+                eprintln!("omarchy-ai-bar: hook reported failure");
+                return AppExitCode::Unavailable;
+            }
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
+            Ok(None) => {
+                let _ignored = child.kill();
+                let _ignored = child.wait();
+                eprintln!("omarchy-ai-bar: hook exceeded the 30 second limit");
+                return AppExitCode::Unavailable;
+            }
+            Err(_error) => {
+                let _ignored = child.kill();
+                let _ignored = child.wait();
+                eprintln!("omarchy-ai-bar: hook status could not be read");
+                return AppExitCode::Internal;
+            }
+        }
+    }
+}
+
+fn validate_hook_executable(path: &std::path::Path) -> io::Result<()> {
+    let metadata = path.symlink_metadata()?;
+    if !metadata.file_type().is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.uid() != nix::unistd::geteuid().as_raw()
+        || metadata.permissions().mode() & 0o111 == 0
+        || metadata.permissions().mode() & 0o022 != 0
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "unsafe hook executable",
+        ));
+    }
+    Ok(())
+}
+
+fn list_manual_credentials(format: OutputFormat) -> AppExitCode {
+    let rows = crate::credentials::MANUAL_CREDENTIALS
+        .iter()
+        .map(|entry| {
+            json!({
+                "provider": entry.provider,
+                "environment_override": entry.environment,
+                "managed_store": "Secret Service",
+            })
+        })
+        .collect::<Vec<_>>();
+    match format {
+        OutputFormat::Human => {
+            println!("Managed manual-session providers:");
+            for entry in crate::credentials::MANUAL_CREDENTIALS {
+                println!("{} ({})", entry.provider, entry.environment);
+            }
+            AppExitCode::Success
+        }
+        OutputFormat::Json | OutputFormat::Toon => write_local_value(format, &Value::Array(rows)),
+    }
+}
+
+fn manual_secret_key(provider: &str, account: &str) -> Option<SecretKey> {
+    if crate::credentials::credential_for(provider).is_none() {
+        eprintln!("omarchy-ai-bar: provider does not accept a managed manual session");
+        return None;
+    }
+    match SecretKey::new(
+        provider,
+        account,
+        crate::credentials::MANUAL_SESSION_PURPOSE,
+    ) {
+        Ok(key) => Some(key),
+        Err(_error) => {
+            eprintln!("omarchy-ai-bar: provider or account identifier is invalid");
+            None
+        }
+    }
+}
+
+enum SecretOperation {
+    Set { key: SecretKey, secret: SecretValue },
+    Status { key: SecretKey },
+    Delete { key: SecretKey },
+}
+
+fn run_secret_service(operation: SecretOperation) -> AppExitCode {
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(_error) => return AppExitCode::Internal,
+    };
+    runtime.block_on(async move {
+        let store = match SecretServiceStore::connect().await {
+            Ok(store) => store,
+            Err(_error) => {
+                eprintln!("omarchy-ai-bar: desktop Secret Service is unavailable or locked");
+                return AppExitCode::Authentication;
+            }
+        };
+        match operation {
+            SecretOperation::Set { key, secret } => match store.put(&key, secret).await {
+                Ok(()) => {
+                    println!("Stored the manual session in desktop Secret Service.");
+                    AppExitCode::Success
+                }
+                Err(_error) => secret_service_failure(),
+            },
+            SecretOperation::Status { key } => match store.get(&key).await {
+                Ok(Some(_secret)) => {
+                    println!("Managed manual session: configured");
+                    AppExitCode::Success
+                }
+                Ok(None) => {
+                    println!("Managed manual session: not configured");
+                    AppExitCode::Unavailable
+                }
+                Err(_error) => secret_service_failure(),
+            },
+            SecretOperation::Delete { key } => match store.delete(&key).await {
+                Ok(()) => {
+                    println!("Deleted the managed manual session.");
+                    AppExitCode::Success
+                }
+                Err(_error) => secret_service_failure(),
+            },
+        }
+    })
+}
+
+fn secret_service_failure() -> AppExitCode {
+    eprintln!("omarchy-ai-bar: desktop Secret Service operation failed");
+    AppExitCode::Authentication
+}
+
+fn show_cache_status(path: &std::path::Path, format: OutputFormat) -> AppExitCode {
+    let (entries, bytes) = match cache_stats(path) {
+        Ok(stats) => stats,
+        Err(_error) => {
+            eprintln!("omarchy-ai-bar: application cache could not be inspected safely");
+            return AppExitCode::Internal;
+        }
+    };
+    match format {
+        OutputFormat::Human => {
+            println!("Cache: {}", path.display());
+            println!("Entries: {entries}");
+            println!("Bytes: {bytes}");
+            AppExitCode::Success
+        }
+        OutputFormat::Json | OutputFormat::Toon => write_local_value(
+            format,
+            &json!({"path": path, "entries": entries, "bytes": bytes}),
+        ),
+    }
+}
+
+fn cache_stats(path: &std::path::Path) -> io::Result<(u64, u64)> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok((0, 0)),
+        Err(error) => return Err(error),
+    };
+    if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "unsafe cache root",
+        ));
+    }
+    cache_directory_stats(path, 0)
+}
+
+fn cache_directory_stats(path: &std::path::Path, depth: u8) -> io::Result<(u64, u64)> {
+    if depth > 16 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "cache nesting"));
+    }
+    let mut entries = 0_u64;
+    let mut bytes = 0_u64;
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        let metadata = entry.path().symlink_metadata()?;
+        entries = entries.saturating_add(1);
+        if entries > 100_000 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "cache entries"));
+        }
+        if metadata.file_type().is_file() {
+            bytes = bytes.saturating_add(metadata.len());
+        } else if metadata.file_type().is_dir() {
+            let (nested_entries, nested_bytes) = cache_directory_stats(&entry.path(), depth + 1)?;
+            entries = entries.saturating_add(nested_entries);
+            bytes = bytes.saturating_add(nested_bytes);
+        }
+    }
+    Ok((entries, bytes))
+}
+
+fn clear_cache(path: &std::path::Path) -> AppExitCode {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            println!("Application cache is already empty.");
+            return AppExitCode::Success;
+        }
+        Ok(_) | Err(_) => {
+            eprintln!("omarchy-ai-bar: application cache root is unsafe");
+            return AppExitCode::Internal;
+        }
+    }
+    let entries = match std::fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(_error) => return AppExitCode::Internal,
+    };
+    for entry in entries {
+        let Ok(entry) = entry else {
+            return AppExitCode::Internal;
+        };
+        let entry_path = entry.path();
+        let Ok(metadata) = entry_path.symlink_metadata() else {
+            return AppExitCode::Internal;
+        };
+        let result = if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+            std::fs::remove_dir_all(&entry_path)
+        } else {
+            std::fs::remove_file(&entry_path)
+        };
+        if result.is_err() {
+            eprintln!("omarchy-ai-bar: application cache could not be cleared");
+            return AppExitCode::Internal;
+        }
+    }
+    println!("Cleared {}", path.display());
+    AppExitCode::Success
 }
 
 fn run_config(arguments: &ConfigArgs) -> AppExitCode {

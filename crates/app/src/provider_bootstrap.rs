@@ -465,8 +465,9 @@ pub(crate) enum ProviderBootstrapError {
     Grok,
 }
 
-/// Discovers production providers without reading credentials,
-/// accessing the network, or starting provider child processes.
+/// Discovers production providers without accessing provider networks or
+/// starting provider child processes. Explicit environment credentials win;
+/// missing manual-session values may be hydrated from desktop Secret Service.
 pub(crate) fn discover() -> Result<ProductionProviders, ProviderBootstrapError> {
     let home = env::var_os("HOME")
         .filter(|value| !value.is_empty())
@@ -499,7 +500,8 @@ pub(crate) fn discover() -> Result<ProductionProviders, ProviderBootstrapError> 
         None,
     )
     .map_err(|_| ProviderBootstrapError::Coordinator)?;
-    let child_environment = unicode_environment();
+    let mut child_environment = unicode_environment();
+    crate::credentials::hydrate_environment(&mut child_environment);
     let coordinator = CodexCoordinator::production(
         scope.clone(),
         settings,

@@ -9,8 +9,10 @@ license.workspace = true
 clap.workspace = true
 nix.workspace = true
 oab-cli = { path = "../cli", version = "=0.1.0" }
+oab-auth = { path = "../auth", version = "=0.1.0" }
 oab-domain = { path = "../domain", version = "=0.1.0" }
 oab-ipc = { path = "../ipc", version = "=0.1.0" }
+oab-plugins = { path = "../plugins", version = "=0.1.0" }
 oab-providers = { path = "../providers", version = "=0.1.0" }
 oab-runtime = { path = "../runtime", version = "=0.1.0" }
 oab-storage = { path = "../storage", version = "=0.1.0" }

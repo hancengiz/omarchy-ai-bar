@@ -1,5 +1,6 @@
 //! Complete top-level command registry and typed argument models.
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -30,19 +31,19 @@ pub enum Command {
     /// Print cost and token history.
     Cost(OutputArgs),
     /// Run the local HTTP server.
-    Serve,
+    Serve(ServeArgs),
     /// Inspect or modify configuration.
     Config(ConfigArgs),
     /// Inspect or modify external hooks.
-    Hooks,
+    Hooks(HooksArgs),
     /// Evaluate a noninteractive quota guard.
     Guard(GuardArgs),
     /// Manage explicit cookie input.
-    Cookie,
+    Cookie(CookieArgs),
     /// Inspect or clear application caches.
-    Cache,
+    Cache(CacheArgs),
     /// Manage user-provider plugins.
-    Plugins,
+    Plugins(PluginsArgs),
     /// Inspect and focus agent sessions.
     Sessions(OutputArgs),
     /// Print redacted diagnostics.
@@ -73,6 +74,17 @@ pub struct OutputArgs {
     /// Select human, JSON, or TOON output.
     #[arg(long, value_enum, default_value_t)]
     pub format: OutputFormat,
+}
+
+/// Loopback-only JSON API server options.
+#[derive(Debug, Clone, Args)]
+pub struct ServeArgs {
+    /// Loopback address to listen on.
+    #[arg(long, value_name = "ADDRESS", default_value = "127.0.0.1:43129")]
+    pub listen: SocketAddr,
+    /// Exit after serving this many connections; zero runs until signalled.
+    #[arg(long, default_value_t = 0, hide = true)]
+    pub max_requests: u64,
 }
 
 /// Noninteractive quota-policy evaluation.
@@ -115,6 +127,114 @@ pub enum ConfigAction {
         /// Replace an existing application configuration.
         #[arg(long)]
         force: bool,
+    },
+}
+
+/// Application-owned cache operations.
+#[derive(Debug, Clone, Args)]
+pub struct CacheArgs {
+    /// Cache operation. Omitting it prints status.
+    #[command(subcommand)]
+    pub action: Option<CacheAction>,
+}
+
+/// Cache operation.
+#[derive(Debug, Clone, Subcommand)]
+pub enum CacheAction {
+    /// Print the cache path, entry count, and byte count.
+    Status(OutputArgs),
+    /// Remove only the contents of the application-owned cache directory.
+    Clear,
+}
+
+/// Secure manual-session credential operations.
+#[derive(Debug, Clone, Args)]
+pub struct CookieArgs {
+    /// Credential operation. Omitting it lists supported providers.
+    #[command(subcommand)]
+    pub action: Option<CookieAction>,
+}
+
+/// Manual-session credential operation.
+#[derive(Debug, Clone, Subcommand)]
+pub enum CookieAction {
+    /// List providers that accept a managed manual session.
+    List(OutputArgs),
+    /// Read a credential from standard input and store it in Secret Service.
+    Set {
+        /// Canonical provider ID.
+        provider: String,
+        /// Account routing ID.
+        #[arg(long, default_value = "ambient")]
+        account: String,
+    },
+    /// Report whether an exact managed credential exists without revealing it.
+    Status {
+        /// Canonical provider ID.
+        provider: String,
+        /// Account routing ID.
+        #[arg(long, default_value = "ambient")]
+        account: String,
+    },
+    /// Delete an exact managed credential from Secret Service.
+    Delete {
+        /// Canonical provider ID.
+        provider: String,
+        /// Account routing ID.
+        #[arg(long, default_value = "ambient")]
+        account: String,
+    },
+}
+
+/// Shell-free external hook operations.
+#[derive(Debug, Clone, Args)]
+pub struct HooksArgs {
+    /// Hook operation. Omitting it lists hook status.
+    #[command(subcommand)]
+    pub action: Option<HooksAction>,
+}
+
+/// Hook operation.
+#[derive(Debug, Clone, Subcommand)]
+pub enum HooksAction {
+    /// List supported events and installed executables.
+    List(OutputArgs),
+    /// Print the private hook executable directory.
+    Path,
+    /// Run the exact installed executable for one supported event.
+    Run {
+        /// Event name such as warning or refresh-completed.
+        event: String,
+    },
+}
+
+/// Sandboxed user-provider plugin operations.
+#[derive(Debug, Clone, Args)]
+pub struct PluginsArgs {
+    /// Plugin operation. Omitting it lists installed source files.
+    #[command(subcommand)]
+    pub action: Option<PluginsAction>,
+}
+
+/// Plugin operation.
+#[derive(Debug, Clone, Subcommand)]
+pub enum PluginsAction {
+    /// List installed local JavaScript source files without executing them.
+    List(OutputArgs),
+    /// Print the private plugin source directory.
+    Path,
+    /// Validate one source file in the `QuickJS` sandbox.
+    Validate {
+        /// JavaScript source file.
+        path: PathBuf,
+    },
+    /// Evaluate one source file and print its JSON-compatible sample.
+    Run {
+        /// JavaScript source file.
+        path: PathBuf,
+        /// Output format.
+        #[command(flatten)]
+        output: OutputArgs,
     },
 }
 

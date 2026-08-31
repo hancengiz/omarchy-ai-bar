@@ -22,10 +22,12 @@ use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Number, Value};
 
+mod credentials;
 mod daemon;
 mod hyprland_events;
 mod provider_bootstrap;
 pub mod provider_refresh;
+mod server;
 mod single_instance;
 mod wiring;
 

@@ -8,3 +8,8 @@ license.workspace = true
 [lints]
 workspace = true
 
+[dependencies]
+rquickjs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

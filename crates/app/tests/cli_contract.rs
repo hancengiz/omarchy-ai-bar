@@ -1,6 +1,9 @@
 mod support;
 
-use std::process::Command;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::os::unix::fs::PermissionsExt;
+use std::process::{Command, Stdio};
 
 use serde_json::Value;
 
@@ -47,12 +50,7 @@ fn unavailable_handlers_and_daemon_commands_without_a_daemon_are_stable() {
         &["usage"],
         &["cards"],
         &["cost"],
-        &["serve"],
-        &["hooks"],
         &["guard"],
-        &["cookie"],
-        &["cache"],
-        &["plugins"],
         &["sessions"],
         &["diagnose"],
     ];
@@ -67,6 +65,67 @@ fn unavailable_handlers_and_daemon_commands_without_a_daemon_are_stable() {
         assert!(output.stdout.is_empty(), "{arguments:?}");
         assert!(!output.stderr.is_empty(), "{arguments:?}");
     }
+}
+
+#[test]
+fn local_server_is_loopback_only_and_projects_daemon_json() {
+    let fixture = DaemonFixture::new("local-server");
+    let rejected = fixture
+        .command()
+        .args(["serve", "--listen", "0.0.0.0:43129"])
+        .output()
+        .expect("reject non-loopback listener");
+    assert_eq!(rejected.status.code(), Some(2));
+
+    let mut daemon = fixture.spawn_daemon();
+    fixture.wait_until_listening(&mut daemon);
+    let reservation = TcpListener::bind("127.0.0.1:0").expect("reserve loopback port");
+    let address = reservation.local_addr().expect("reserved address");
+    drop(reservation);
+    let mut server = fixture
+        .command()
+        .args([
+            "serve",
+            "--listen",
+            &address.to_string(),
+            "--max-requests",
+            "2",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn local server");
+    let mut announcement = String::new();
+    BufReader::new(server.stdout.take().expect("server stdout"))
+        .read_line(&mut announcement)
+        .expect("read server announcement");
+    assert!(announcement.contains(&address.to_string()));
+
+    let health = http_get(address, "/health");
+    assert!(health.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(health.contains("\r\nCache-Control: no-store\r\n"));
+    assert!(health.ends_with("{\"daemon\":\"running\",\"status\":\"ok\"}"));
+    let usage = http_get(address, "/v1/usage");
+    assert!(usage.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(usage.contains("\"snapshots\":"));
+    assert!(server.wait().expect("wait for local server").success());
+
+    terminate(&daemon);
+    assert!(wait_for_exit(&mut daemon).success());
+}
+
+fn http_get(address: std::net::SocketAddr, path: &str) -> String {
+    let mut stream = TcpStream::connect(address).expect("connect to local server");
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+    )
+    .expect("write HTTP request");
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("read HTTP response");
+    response
 }
 
 #[test]
@@ -107,6 +166,167 @@ fn config_init_show_and_validate_use_the_private_xdg_file() {
         .expect("validate config");
     assert!(validated.status.success());
     assert_eq!(validated.stdout, b"Configuration is valid.\n");
+}
+
+#[test]
+fn cache_status_and_clear_are_scoped_to_the_application_cache() {
+    let fixture = DaemonFixture::new("cache-cli");
+    let empty = fixture
+        .command()
+        .args(["cache", "status", "--format", "json"])
+        .output()
+        .expect("inspect empty cache");
+    assert!(empty.status.success());
+    let empty: Value = serde_json::from_slice(&empty.stdout).expect("empty cache JSON");
+    assert_eq!(empty["entries"], 0);
+    let cache_path = std::path::PathBuf::from(empty["path"].as_str().expect("cache path"));
+    std::fs::create_dir_all(cache_path.join("pricing")).expect("create cache fixture");
+    std::fs::write(cache_path.join("pricing/models.json"), b"model-data")
+        .expect("write cache fixture");
+
+    let populated = fixture
+        .command()
+        .args(["cache", "status", "--format", "json"])
+        .output()
+        .expect("inspect populated cache");
+    let populated: Value = serde_json::from_slice(&populated.stdout).expect("populated JSON");
+    assert_eq!(populated["entries"], 2);
+    assert_eq!(populated["bytes"], 10);
+
+    let cleared = fixture
+        .command()
+        .args(["cache", "clear"])
+        .output()
+        .expect("clear cache");
+    assert!(cleared.status.success());
+    assert!(cache_path.is_dir());
+    assert_eq!(
+        std::fs::read_dir(cache_path).expect("read cache").count(),
+        0
+    );
+}
+
+#[test]
+fn cookie_registry_is_machine_readable_and_never_echoes_credentials() {
+    let fixture = DaemonFixture::new("cookie-cli");
+    let listed = fixture
+        .command()
+        .args(["cookie", "list", "--format", "json"])
+        .output()
+        .expect("list manual credentials");
+    assert!(listed.status.success());
+    assert!(listed.stderr.is_empty());
+    let listed: Value = serde_json::from_slice(&listed.stdout).expect("credential registry JSON");
+    let entries = listed.as_array().expect("credential entries");
+    assert!(entries.len() >= 20);
+    assert!(entries.iter().all(|entry| {
+        entry["provider"].is_string()
+            && entry["environment_override"].is_string()
+            && entry.get("value").is_none()
+    }));
+
+    let unsupported = fixture
+        .command()
+        .args(["cookie", "status", "unknown-provider"])
+        .output()
+        .expect("reject unsupported credential provider");
+    assert_eq!(unsupported.status.code(), Some(2));
+    assert!(unsupported.stdout.is_empty());
+}
+
+#[test]
+fn hooks_are_shell_free_bounded_and_owned_by_the_user() {
+    let fixture = DaemonFixture::new("hooks-cli");
+    let path = fixture
+        .command()
+        .args(["hooks", "path"])
+        .output()
+        .expect("resolve hooks path");
+    assert!(path.status.success());
+    let path = std::path::PathBuf::from(
+        String::from_utf8(path.stdout)
+            .expect("UTF-8 hook path")
+            .trim(),
+    );
+    std::fs::create_dir_all(&path).expect("create hook directory");
+    let executable = path.join("warning");
+    std::fs::write(&executable, b"#!/bin/sh\nexit 0\n").expect("write hook");
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
+        .expect("secure hook");
+
+    let listed = fixture
+        .command()
+        .args(["hooks", "list", "--format", "json"])
+        .output()
+        .expect("list hooks");
+    assert!(listed.status.success());
+    let listed: Value = serde_json::from_slice(&listed.stdout).expect("hooks JSON");
+    assert!(listed.as_array().is_some_and(|rows| {
+        rows.iter()
+            .any(|row| row["event"] == "warning" && row["installed"] == true)
+    }));
+
+    let run = fixture
+        .command()
+        .args(["hooks", "run", "warning"])
+        .output()
+        .expect("run hook");
+    assert!(run.status.success());
+    assert_eq!(run.stdout, b"Hook warning completed.\n");
+}
+
+#[test]
+fn plugins_run_inside_the_embedded_bounded_javascript_contract() {
+    let fixture = DaemonFixture::new("plugins-cli");
+    let path = fixture
+        .command()
+        .args(["plugins", "path"])
+        .output()
+        .expect("resolve plugins path");
+    let directory = std::path::PathBuf::from(
+        String::from_utf8(path.stdout)
+            .expect("UTF-8 plugin path")
+            .trim(),
+    );
+    std::fs::create_dir_all(&directory).expect("create plugin directory");
+    let source = directory.join("fixture.js");
+    std::fs::write(
+        &source,
+        br#"
+            globalThis.omarchyAiBarPlugin = {
+                id: "fixture-provider",
+                name: "Fixture Provider",
+                version: 1,
+                collect() { return { used_percent: 17, node: typeof process }; }
+            };
+        "#,
+    )
+    .expect("write plugin source");
+
+    let validated = fixture
+        .command()
+        .args(["plugins", "validate", source.to_str().expect("plugin path")])
+        .output()
+        .expect("validate plugin");
+    assert!(validated.status.success());
+
+    let run = fixture
+        .command()
+        .args([
+            "plugins",
+            "run",
+            source.to_str().expect("plugin path"),
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("run plugin");
+    assert!(run.status.success());
+    assert!(run.stderr.is_empty());
+    let run: Value = serde_json::from_slice(&run.stdout).expect("plugin JSON");
+    assert_eq!(run["manifest"]["id"], "fixture-provider");
+    assert_eq!(run["sample"]["used_percent"], 17);
+    assert_eq!(run["sample"]["node"], "undefined");
 }
 
 #[test]
