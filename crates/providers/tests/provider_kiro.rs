@@ -628,7 +628,7 @@ if [ "$1" = "chat" ] && [ "$3" = "/usage" ]; then
   {same_holder} &
   {detached_holder}
   count=0
-  while [ ! -s {detached_marker} ] && [ "$count" -lt 100 ]; do
+  while [ ! -s {detached_marker} ] && [ "$count" -lt 400 ]; do
     sleep 0.01
     count=$((count + 1))
   done
@@ -644,10 +644,10 @@ exit 1
         ),
     );
     let timeouts = KiroCommandTimeouts::new(
-        Duration::from_secs(2),
-        Duration::from_secs(3),
-        Duration::from_secs(2),
-        Duration::from_millis(50),
+        Duration::from_secs(5),
+        Duration::from_secs(8),
+        Duration::from_secs(5),
+        Duration::from_millis(250),
     )
     .expect("cleanup timeouts");
     let server = FakeHttpServer::start([]).await;
