@@ -11,7 +11,7 @@ Omarchy AI Bar is a Rust/Quickshell port inspired by
 ## Current end-to-end providers
 
 The daemon, private display socket, Rust-to-QML bridge, refresh actions, and
-CodexBar-style multi-provider panel are connected for 63 native providers:
+CodexBar-style multi-provider panel are connected for 65 native providers:
 
 - Codex: native Codex credential files, HTTP usage, and `codex app-server`
   fallback.
@@ -42,6 +42,10 @@ CodexBar-style multi-provider panel are connected for 63 native providers:
   monthly usage API.
 - Zed through its cloud account API, including limited or unlimited edit
   predictions, billing-cycle state, plan identity, and invoice warnings.
+- Augment through the shell-free `auggie account status` CLI path, including
+  current and legacy credit-report formats.
+- Gemini through the Cloud Code quota API using an explicit OAuth access token,
+  with Pro, Flash, and Flash Lite tiers grouped like CodexBar.
 
 Providers without configured credentials remain visible with a safe setup
 status instead of disappearing. Credentials are never sent over the QML IPC.

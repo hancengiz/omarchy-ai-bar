@@ -17,6 +17,7 @@ use oab_providers::providers::alibabatokenplan::{
     AlibabaTokenPlanCliSettings, AlibabaTokenPlanProvider, AlibabaTokenPlanRegion,
 };
 use oab_providers::providers::amp::AmpProvider;
+use oab_providers::providers::augment::{AugmentCliSettings, AugmentProvider};
 use oab_providers::providers::azureopenai::{AzureOpenAiProvider, AzureOpenAiSettings};
 use oab_providers::providers::bedrock::{BedrockProvider, BedrockSettings};
 use oab_providers::providers::chutes::{ChutesProvider, ChutesSettings};
@@ -39,6 +40,7 @@ use oab_providers::providers::devin::DevinProvider;
 use oab_providers::providers::doubao::DoubaoProvider;
 use oab_providers::providers::elevenlabs::ElevenLabsProvider;
 use oab_providers::providers::fireworks::{FireworksCredential, FireworksProvider};
+use oab_providers::providers::gemini::{GeminiProvider, GeminiSettings};
 use oab_providers::providers::grok::{GrokProvider, GrokSettings};
 use oab_providers::providers::groq::{GroqProvider, GroqSettings};
 use oab_providers::providers::ibmbob::{IBMBobProvider, IBMBobSettings};
@@ -95,7 +97,7 @@ struct LazyRegistrationSpec {
     builder: LazyAdapterBuilder,
 }
 
-const LAZY_PROVIDER_SPECS: [LazyRegistrationSpec; 51] = [
+const LAZY_PROVIDER_SPECS: [LazyRegistrationSpec; 53] = [
     lazy_spec(ProviderId::Zai, ProviderSource::ApiKey, build_zai),
     lazy_spec(ProviderId::OpenAi, ProviderSource::ApiKey, build_openai),
     lazy_spec(
@@ -267,6 +269,8 @@ const LAZY_PROVIDER_SPECS: [LazyRegistrationSpec; 51] = [
         build_opencodego,
     ),
     lazy_spec(ProviderId::Zed, ProviderSource::ApiKey, build_zed),
+    lazy_spec(ProviderId::Augment, ProviderSource::Cli, build_augment),
+    lazy_spec(ProviderId::Gemini, ProviderSource::OAuth, build_gemini),
 ];
 
 const fn lazy_spec(
@@ -778,6 +782,26 @@ fn build_zed(
     Ok(Box::new(ZedProvider::new(
         scope,
         ZedSettings::resolve(environment)?,
+    )?))
+}
+
+fn build_augment(
+    scope: AccountScope,
+    environment: &BTreeMap<String, String>,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(AugmentProvider::new(
+        scope,
+        AugmentCliSettings::resolve(environment)?,
+    )))
+}
+
+fn build_gemini(
+    scope: AccountScope,
+    environment: &BTreeMap<String, String>,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(GeminiProvider::new(
+        scope,
+        GeminiSettings::resolve(environment)?,
     )?))
 }
 
