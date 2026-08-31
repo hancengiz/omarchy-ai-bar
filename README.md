@@ -11,7 +11,7 @@ Omarchy AI Bar is a Rust/Quickshell port inspired by
 ## Current end-to-end providers
 
 The daemon, private display socket, Rust-to-QML bridge, refresh actions, and
-CodexBar-style multi-provider panel are connected for 61 native providers:
+CodexBar-style multi-provider panel are connected for 63 native providers:
 
 - Codex: native Codex credential files, HTTP usage, and `codex app-server`
   fallback.
@@ -38,6 +38,10 @@ CodexBar-style multi-provider panel are connected for 61 native providers:
   API/CLI/manual-session selection, and bounded local usage data.
 - DeepSeek wallet balance, Groq Prometheus usage rates, and Ollama Cloud
   credential/catalog status through their native APIs.
+- OpenCode Go through its public bearer-authenticated rolling, weekly, and
+  monthly usage API.
+- Zed through its cloud account API, including limited or unlimited edit
+  predictions, billing-cycle state, plan identity, and invoice warnings.
 
 Providers without configured credentials remain visible with a safe setup
 status instead of disappearing. Credentials are never sent over the QML IPC.

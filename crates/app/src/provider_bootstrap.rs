@@ -59,6 +59,7 @@ use oab_providers::providers::notion::NotionProvider;
 use oab_providers::providers::ollama::{OllamaProvider, OllamaSettings};
 use oab_providers::providers::openai::{OpenAiCredential, OpenAiProvider};
 use oab_providers::providers::opencode::OpenCodeProvider;
+use oab_providers::providers::opencodego::OpenCodeGoProvider;
 use oab_providers::providers::openrouter::{OpenRouterProvider, OpenRouterSettings};
 use oab_providers::providers::perplexity::PerplexityProvider;
 use oab_providers::providers::poe::PoeProvider;
@@ -75,6 +76,7 @@ use oab_providers::providers::warp::WarpProvider;
 use oab_providers::providers::wayfinder::{WayfinderProvider, WayfinderSettings};
 use oab_providers::providers::xai::{XaiCredential, XaiProvider};
 use oab_providers::providers::zai::{ZaiProvider, ZaiSettings};
+use oab_providers::providers::zed::{ZedProvider, ZedSettings};
 use oab_providers::providers::zenmux::ZenMuxProvider;
 use oab_providers::providers::zoommate::ZoomMateProvider;
 use oab_runtime::actor::RefreshRegistration;
@@ -93,7 +95,7 @@ struct LazyRegistrationSpec {
     builder: LazyAdapterBuilder,
 }
 
-const LAZY_PROVIDER_SPECS: [LazyRegistrationSpec; 49] = [
+const LAZY_PROVIDER_SPECS: [LazyRegistrationSpec; 51] = [
     lazy_spec(ProviderId::Zai, ProviderSource::ApiKey, build_zai),
     lazy_spec(ProviderId::OpenAi, ProviderSource::ApiKey, build_openai),
     lazy_spec(
@@ -259,6 +261,12 @@ const LAZY_PROVIDER_SPECS: [LazyRegistrationSpec; 49] = [
     lazy_spec(ProviderId::Copilot, ProviderSource::OAuth, build_copilot),
     lazy_spec(ProviderId::DeepSeek, ProviderSource::ApiKey, build_deepseek),
     lazy_spec(ProviderId::Groq, ProviderSource::ApiKey, build_groq),
+    lazy_spec(
+        ProviderId::OpenCodeGo,
+        ProviderSource::ApiKey,
+        build_opencodego,
+    ),
+    lazy_spec(ProviderId::Zed, ProviderSource::ApiKey, build_zed),
 ];
 
 const fn lazy_spec(
@@ -750,6 +758,26 @@ fn build_groq(
     Ok(Box::new(GroqProvider::new(
         scope,
         GroqSettings::resolve(environment)?,
+    )?))
+}
+
+fn build_opencodego(
+    scope: AccountScope,
+    environment: &BTreeMap<String, String>,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(OpenCodeGoProvider::new(
+        scope,
+        OpenCodeGoProvider::resolve_credential(environment)?,
+    )?))
+}
+
+fn build_zed(
+    scope: AccountScope,
+    environment: &BTreeMap<String, String>,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(ZedProvider::new(
+        scope,
+        ZedSettings::resolve(environment)?,
     )?))
 }
 
