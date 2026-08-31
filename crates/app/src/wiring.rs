@@ -7,12 +7,16 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command as ProcessCommand;
 
-use oab_cli::args::{BridgeTransport, Cli, Command, CompletionShell, OutputArgs};
+use oab_cli::args::{
+    BridgeTransport, Cli, Command, CompletionShell, ConfigAction, ConfigArgs, GuardArgs, OutputArgs,
+};
 use oab_cli::commands::bridge::{
     BridgeError, BridgeManager, BridgeStatus, PACKAGED_PLUGIN_PATH, SystemOmarchyCommands,
 };
 use oab_cli::exit_code::AppExitCode;
 use oab_cli::output::{OutputFormat, write_json_line, write_toon};
+use oab_storage::atomic_file::{atomic_write, read_private_file};
+use oab_storage::config::{CURRENT_SCHEMA_VERSION, MAX_CONFIG_BYTES, load_config_bytes};
 use oab_storage::paths::AppPaths;
 use serde_json::{Value, json};
 
@@ -37,6 +41,8 @@ pub(crate) fn run(cli: Cli) -> AppExitCode {
         Some(Command::Dashboard(arguments)) => run_dashboard(arguments),
         Some(Command::Cost(arguments)) => run_safe(ControlAction::Cost, arguments),
         Some(Command::Sessions(arguments)) => run_safe(ControlAction::Sessions, arguments),
+        Some(Command::Guard(arguments)) => run_guard(&arguments),
+        Some(Command::Config(arguments)) => run_config(&arguments),
         Some(Command::Diagnose(arguments)) => run_safe(ControlAction::Diagnose, arguments),
         Some(Command::Bridge {
             transport: BridgeTransport::Stdio { socket },
@@ -84,14 +90,164 @@ pub(crate) fn run(cli: Cli) -> AppExitCode {
         Some(Command::Version { json }) => write_version(json),
         Some(Command::Completion { shell }) => run_completion(shell),
         Some(
-            Command::Serve
-            | Command::Config
-            | Command::Hooks
-            | Command::Guard
-            | Command::Cookie
-            | Command::Cache
-            | Command::Plugins,
+            Command::Serve | Command::Hooks | Command::Cookie | Command::Cache | Command::Plugins,
         ) => unavailable(),
+    }
+}
+
+fn run_config(arguments: &ConfigArgs) -> AppExitCode {
+    let Some(paths) = resolved_paths() else {
+        return AppExitCode::Internal;
+    };
+    match arguments.action.as_ref() {
+        Some(ConfigAction::Path) => {
+            println!("{}", paths.config_file().display());
+            AppExitCode::Success
+        }
+        None | Some(ConfigAction::Show(_)) => {
+            let format = match arguments.action.as_ref() {
+                Some(ConfigAction::Show(output)) => output.format,
+                _ => OutputFormat::Human,
+            };
+            show_config(&paths, format)
+        }
+        Some(ConfigAction::Validate { path }) => {
+            let active_path = paths.config_file();
+            validate_config_path(path.as_deref().unwrap_or(&active_path))
+        }
+        Some(ConfigAction::Init { force }) => initialize_config(&paths, *force),
+    }
+}
+
+fn show_config(paths: &AppPaths, format: OutputFormat) -> AppExitCode {
+    let file = paths.config_file();
+    let bytes = match std::fs::symlink_metadata(&file) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(_error) => {
+            eprintln!("omarchy-ai-bar: active configuration could not be inspected safely");
+            return AppExitCode::Internal;
+        }
+        Ok(_) => match read_private_file(&file, MAX_CONFIG_BYTES) {
+            Ok(bytes) => bytes,
+            Err(_error) => {
+                eprintln!("omarchy-ai-bar: active configuration could not be read safely");
+                return AppExitCode::Internal;
+            }
+        },
+    };
+    let value = match bytes {
+        Some(bytes) => match load_config_bytes(&bytes) {
+            Ok(config) => serde_json::to_value(config).ok(),
+            Err(error) => {
+                eprintln!("omarchy-ai-bar: invalid configuration ({})", error.code());
+                return AppExitCode::Usage;
+            }
+        },
+        None => None,
+    };
+    match format {
+        OutputFormat::Human => {
+            println!("Configuration: {}", file.display());
+            match value {
+                Some(value) => match serde_json::to_string_pretty(&value) {
+                    Ok(rendered) => println!("{rendered}"),
+                    Err(_error) => return AppExitCode::Internal,
+                },
+                None => {
+                    println!(
+                        "State: not initialized (environment provider settings remain active)"
+                    );
+                }
+            }
+            AppExitCode::Success
+        }
+        OutputFormat::Json | OutputFormat::Toon => write_local_value(
+            format,
+            &json!({
+                "path": file,
+                "initialized": value.is_some(),
+                "config": value,
+            }),
+        ),
+    }
+}
+
+fn validate_config_path(path: &std::path::Path) -> AppExitCode {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) if bytes.len() <= MAX_CONFIG_BYTES => bytes,
+        Ok(_) => {
+            eprintln!("omarchy-ai-bar: invalid configuration (config_too_large)");
+            return AppExitCode::Usage;
+        }
+        Err(_error) => {
+            eprintln!("omarchy-ai-bar: configuration file could not be read");
+            return AppExitCode::Unavailable;
+        }
+    };
+    match load_config_bytes(&bytes) {
+        Ok(_config) => {
+            println!("Configuration is valid.");
+            AppExitCode::Success
+        }
+        Err(error) => {
+            eprintln!("omarchy-ai-bar: invalid configuration ({})", error.code());
+            AppExitCode::Usage
+        }
+    }
+}
+
+fn initialize_config(paths: &AppPaths, force: bool) -> AppExitCode {
+    if paths.create_private_directories().is_err() {
+        eprintln!("{INTERNAL_MESSAGE}");
+        return AppExitCode::Internal;
+    }
+    let file = paths.config_file();
+    if !force {
+        match read_private_file(&file, MAX_CONFIG_BYTES) {
+            Ok(Some(_)) => {
+                eprintln!(
+                    "omarchy-ai-bar: configuration already exists; use --force to replace it"
+                );
+                return AppExitCode::Usage;
+            }
+            Ok(None) => {}
+            Err(_error) => {
+                eprintln!("{INTERNAL_MESSAGE}");
+                return AppExitCode::Internal;
+            }
+        }
+    }
+    let document = json!({
+        "schema_version": CURRENT_SCHEMA_VERSION,
+        "providers": [],
+        "provider_order": [],
+    });
+    let mut bytes = match serde_json::to_vec_pretty(&document) {
+        Ok(bytes) => bytes,
+        Err(_error) => return AppExitCode::Internal,
+    };
+    bytes.push(b'\n');
+    if atomic_write(&file, &bytes).is_err() {
+        eprintln!("{INTERNAL_MESSAGE}");
+        return AppExitCode::Internal;
+    }
+    println!("Initialized {}", file.display());
+    AppExitCode::Success
+}
+
+fn write_local_value(format: OutputFormat, value: &Value) -> AppExitCode {
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    let result = match format {
+        OutputFormat::Json => write_json_line(&mut output, value),
+        OutputFormat::Toon => write_toon(&mut output, value),
+        OutputFormat::Human => unreachable!("human values are rendered by their command"),
+    };
+    if result.is_ok() {
+        AppExitCode::Success
+    } else {
+        eprintln!("{INTERNAL_MESSAGE}");
+        AppExitCode::Internal
     }
 }
 
@@ -294,6 +450,76 @@ fn run_safe(action: ControlAction, arguments: OutputArgs) -> AppExitCode {
     }
 }
 
+fn run_guard(arguments: &GuardArgs) -> AppExitCode {
+    let Some(paths) = resolved_paths() else {
+        return AppExitCode::Internal;
+    };
+    let payload = match forward(&paths.socket_path(), ControlAction::Usage) {
+        Ok(ForwardOutcome::Response(response)) if response.status() == ControlStatus::Accepted => {
+            response.payload().cloned()
+        }
+        Ok(ForwardOutcome::Response(_) | ForwardOutcome::NoDaemon) => None,
+        Err(_error) => {
+            eprintln!("{INTERNAL_MESSAGE}");
+            return AppExitCode::Internal;
+        }
+    };
+    let Some(payload) = payload else {
+        eprintln!("{DAEMON_UNAVAILABLE_MESSAGE}");
+        return AppExitCode::Unavailable;
+    };
+    let snapshots = payload
+        .get("snapshots")
+        .and_then(Value::as_array)
+        .map_or(&[][..], Vec::as_slice);
+    let mut evaluated = 0_usize;
+    let mut denied = Vec::new();
+    for snapshot in snapshots {
+        let provider = provider_id(snapshot);
+        if arguments
+            .provider
+            .as_deref()
+            .is_some_and(|requested| requested != provider)
+        {
+            continue;
+        }
+        let Some(percent) = snapshot
+            .pointer("/last_known_good/primary/usage/used_percent")
+            .and_then(Value::as_f64)
+        else {
+            continue;
+        };
+        evaluated += 1;
+        if percent >= f64::from(arguments.max_used) {
+            denied.push((provider.to_owned(), percent));
+        }
+    }
+    if arguments.provider.is_some() && evaluated == 0 {
+        eprintln!("omarchy-ai-bar: requested provider has no available quota sample");
+        return AppExitCode::Unavailable;
+    }
+    if !denied.is_empty() {
+        if !arguments.quiet {
+            for (provider, percent) in denied {
+                println!(
+                    "DENY {}: {}% used (limit {}%)",
+                    provider_label(&provider),
+                    format_percent(percent),
+                    arguments.max_used
+                );
+            }
+        }
+        return AppExitCode::GuardDenied;
+    }
+    if !arguments.quiet {
+        println!(
+            "ALLOW: {evaluated} available provider sample(s) below {}% used",
+            arguments.max_used
+        );
+    }
+    AppExitCode::Success
+}
+
 fn write_control_output(
     action: ControlAction,
     format: OutputFormat,
@@ -329,11 +555,59 @@ fn write_human_output(
         ControlAction::Usage => write_usage_human(output, payload),
         ControlAction::Cards => write_cards_human(output, payload),
         ControlAction::Diagnose => write_diagnostics_human(output, payload),
-        ControlAction::Activate
-        | ControlAction::Dashboard
-        | ControlAction::Cost
-        | ControlAction::Sessions => Ok(()),
+        ControlAction::Cost => write_cost_human(output, payload),
+        ControlAction::Sessions => write_sessions_human(output, payload),
+        ControlAction::Activate | ControlAction::Dashboard => Ok(()),
     }
+}
+
+fn write_cost_human(output: &mut impl Write, payload: &Value) -> io::Result<()> {
+    let rows = payload
+        .get("providers")
+        .and_then(Value::as_array)
+        .map_or(&[][..], Vec::as_slice);
+    if rows.is_empty() {
+        writeln!(output, "No provider cost data is currently available.")?;
+        return Ok(());
+    }
+    for row in rows {
+        let provider = row
+            .get("provider")
+            .and_then(Value::as_str)
+            .map_or("Unknown", provider_label);
+        let amount = row.pointer("/cost/used/amount").and_then(Value::as_str);
+        let currency = row.pointer("/cost/used/currency").and_then(Value::as_str);
+        match (amount, currency) {
+            (Some(amount), Some(currency)) => writeln!(output, "{provider}: {amount} {currency}")?,
+            _ => writeln!(output, "{provider}: cost details available")?,
+        }
+    }
+    Ok(())
+}
+
+fn write_sessions_human(output: &mut impl Write, payload: &Value) -> io::Result<()> {
+    let rows = payload
+        .get("sessions")
+        .and_then(Value::as_array)
+        .map_or(&[][..], Vec::as_slice);
+    if rows.is_empty() {
+        return writeln!(
+            output,
+            "No active provider sessions are currently reported."
+        );
+    }
+    for row in rows {
+        let provider = row
+            .get("provider")
+            .and_then(Value::as_str)
+            .map_or("Unknown", provider_label);
+        let session = row
+            .get("session")
+            .and_then(Value::as_str)
+            .unwrap_or("active");
+        writeln!(output, "{provider}: {session}")?;
+    }
+    Ok(())
 }
 
 fn write_usage_human(output: &mut impl Write, payload: &Value) -> io::Result<()> {

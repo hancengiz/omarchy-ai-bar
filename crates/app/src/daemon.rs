@@ -350,9 +350,15 @@ fn handle_client(mut verified: VerifiedDisplayStream, state: &RuntimeHandle) {
                 let snapshot = current_snapshot_value(state)?;
                 ControlResponse::with_payload(diagnostics_value(&snapshot))
             }
-            ControlAction::Dashboard | ControlAction::Cost | ControlAction::Sessions => {
-                ControlResponse::unavailable()
+            ControlAction::Cost => {
+                let snapshot = current_snapshot_value(state)?;
+                ControlResponse::with_payload(cost_value(&snapshot))
             }
+            ControlAction::Sessions => {
+                let snapshot = current_snapshot_value(state)?;
+                ControlResponse::with_payload(sessions_value(&snapshot))
+            }
+            ControlAction::Dashboard => ControlResponse::unavailable(),
         };
         write_frame(stream, &response)
     });
@@ -361,6 +367,60 @@ fn handle_client(mut verified: VerifiedDisplayStream, state: &RuntimeHandle) {
     } else {
         Shutdown::Both
     });
+}
+
+fn cost_value(snapshot: &Value) -> Value {
+    let providers = snapshot
+        .get("snapshots")
+        .and_then(Value::as_array)
+        .map(|snapshots| {
+            snapshots
+                .iter()
+                .filter_map(|entry| {
+                    let sample = entry.get("last_known_good")?;
+                    let cost = sample.get("cost")?;
+                    Some(json!({
+                        "provider": sample.pointer("/scope/provider").and_then(Value::as_str).unwrap_or("unknown"),
+                        "cost": cost,
+                        "cost_usage": sample.get("cost_usage"),
+                        "balance": sample.get("balance"),
+                    }))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    json!({
+        "schema_version": 1,
+        "generated_at": snapshot.get("generated_at").cloned().unwrap_or(Value::Null),
+        "providers": providers,
+    })
+}
+
+fn sessions_value(snapshot: &Value) -> Value {
+    let sessions = snapshot
+        .get("snapshots")
+        .and_then(Value::as_array)
+        .map(|snapshots| {
+            snapshots
+                .iter()
+                .filter_map(|entry| {
+                    let sample = entry.get("last_known_good")?;
+                    let session = sample.get("session")?.as_object()?;
+                    Some(json!({
+                        "provider": sample.pointer("/scope/provider").and_then(Value::as_str).unwrap_or("unknown"),
+                        "session": session.get("label").or_else(|| session.get("id")),
+                        "status": session.get("status"),
+                        "started_at": session.get("started_at"),
+                    }))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    json!({
+        "schema_version": 1,
+        "generated_at": snapshot.get("generated_at").cloned().unwrap_or(Value::Null),
+        "sessions": sessions,
+    })
 }
 
 fn current_snapshot_value(state: &RuntimeHandle) -> Result<Value, SingleInstanceError> {

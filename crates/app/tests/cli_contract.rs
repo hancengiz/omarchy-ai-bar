@@ -41,14 +41,13 @@ fn help_registers_the_complete_command_surface() {
 }
 
 #[test]
-fn every_unimplemented_handler_returns_stable_unavailable() {
+fn unavailable_handlers_and_daemon_commands_without_a_daemon_are_stable() {
     let fixture = DaemonFixture::new("placeholders");
     let cases: &[&[&str]] = &[
         &["usage"],
         &["cards"],
         &["cost"],
         &["serve"],
-        &["config"],
         &["hooks"],
         &["guard"],
         &["cookie"],
@@ -68,6 +67,46 @@ fn every_unimplemented_handler_returns_stable_unavailable() {
         assert!(output.stdout.is_empty(), "{arguments:?}");
         assert!(!output.stderr.is_empty(), "{arguments:?}");
     }
+}
+
+#[test]
+fn config_init_show_and_validate_use_the_private_xdg_file() {
+    let fixture = DaemonFixture::new("config-cli");
+    let initial = fixture
+        .command()
+        .args(["config", "show", "--format", "json"])
+        .output()
+        .expect("show missing config");
+    assert!(initial.status.success());
+    let initial: Value = serde_json::from_slice(&initial.stdout).expect("initial JSON");
+    assert_eq!(initial["initialized"], false);
+
+    let initialized = fixture
+        .command()
+        .args(["config", "init"])
+        .output()
+        .expect("initialize config");
+    assert!(initialized.status.success());
+
+    let shown = fixture
+        .command()
+        .args(["config", "show", "--format", "json"])
+        .output()
+        .expect("show config");
+    assert!(shown.status.success());
+    assert!(shown.stderr.is_empty());
+    let shown: Value = serde_json::from_slice(&shown.stdout).expect("shown JSON");
+    assert_eq!(shown["initialized"], true);
+    assert_eq!(shown["config"]["schema_version"], 1);
+    assert_eq!(shown["config"]["providers"], serde_json::json!([]));
+
+    let validated = fixture
+        .command()
+        .args(["config", "validate"])
+        .output()
+        .expect("validate config");
+    assert!(validated.status.success());
+    assert_eq!(validated.stdout, b"Configuration is valid.\n");
 }
 
 #[test]
@@ -221,6 +260,38 @@ fn running_daemon_serves_usage_cards_and_redacted_diagnostics() {
     assert!(toon.contains("provider:"));
     assert!(!toon.contains('{'));
 
+    assert_extended_daemon_commands(&fixture);
+
     terminate(&daemon);
     assert!(wait_for_exit(&mut daemon).success());
+}
+
+fn assert_extended_daemon_commands(fixture: &DaemonFixture) {
+    let cost = fixture
+        .command()
+        .args(["cost", "--format", "json"])
+        .output()
+        .expect("run JSON cost");
+    assert!(cost.status.success());
+    let cost: Value = serde_json::from_slice(&cost.stdout).expect("cost JSON");
+    assert_eq!(cost["schema_version"], 1);
+    assert!(cost["providers"].is_array());
+
+    let sessions = fixture
+        .command()
+        .args(["sessions", "--format", "json"])
+        .output()
+        .expect("run JSON sessions");
+    assert!(sessions.status.success());
+    let sessions: Value = serde_json::from_slice(&sessions.stdout).expect("sessions JSON");
+    assert_eq!(sessions["schema_version"], 1);
+    assert!(sessions["sessions"].is_array());
+
+    let guard = fixture
+        .command()
+        .args(["guard", "--max-used", "100"])
+        .output()
+        .expect("run guard");
+    assert!(guard.status.success());
+    assert!(String::from_utf8_lossy(&guard.stdout).starts_with("ALLOW:"));
 }

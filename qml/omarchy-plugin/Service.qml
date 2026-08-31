@@ -220,9 +220,56 @@ Item {
                 percent: sample ? percentFrom(sample) : 0,
                 ready: sample !== null,
                 status: status,
-                reset: primary && primary.reset_description ? String(primary.reset_description) : ""
+                reset: primary && primary.reset_description ? String(primary.reset_description) : "",
+                plan: sample && sample.identity && sample.identity.plan ? String(sample.identity.plan) : "",
+                windows: sample ? windowsFrom(sample) : [],
+                summary: sample ? summaryFrom(sample) : ""
             };
         });
+    }
+
+    function windowRow(title, window) {
+        if (!window || !window.usage)
+            return null;
+        var known = window.usage.state === "known" && isFinite(Number(window.usage.used_percent));
+        return {
+            title: title,
+            known: known,
+            percent: known ? Math.max(0, Math.min(100, Number(window.usage.used_percent))) : 0,
+            reset: window.reset_description ? String(window.reset_description) : ""
+        };
+    }
+
+    function windowsFrom(sample) {
+        var values = [];
+        var primary = windowRow("Primary", sample.primary);
+        var secondary = windowRow("Secondary", sample.secondary);
+        var tertiary = windowRow("Tertiary", sample.tertiary);
+        if (primary)
+            values.push(primary);
+        if (secondary)
+            values.push(secondary);
+        if (tertiary)
+            values.push(tertiary);
+        var extras = Array.isArray(sample.extra_windows) ? sample.extra_windows : [];
+        for (var index = 0; index < extras.length; index++) {
+            var extra = extras[index];
+            var row = extra ? windowRow(String(extra.title || "Quota"), extra.window) : null;
+            if (row)
+                values.push(row);
+        }
+        return values;
+    }
+
+    function summaryFrom(sample) {
+        var values = [];
+        if (sample.credits && sample.credits.remaining !== null && sample.credits.remaining !== undefined)
+            values.push(String(sample.credits.remaining) + " credits");
+        if (sample.balance && sample.balance.amount !== undefined)
+            values.push(String(sample.balance.amount) + (sample.balance.currency ? " " + String(sample.balance.currency) : ""));
+        if (sample.cost && sample.cost.used && sample.cost.used.amount !== undefined)
+            values.push(String(sample.cost.used.amount) + (sample.cost.used.currency ? " " + String(sample.cost.used.currency) : "") + " used");
+        return values.join(" · ");
     }
 
     function percentFrom(sample) {
@@ -234,13 +281,75 @@ Item {
 
     function labelForProvider(provider) {
         var labels = {
-            codex: "Codex",
+            abacus: "Abacus AI",
+            aiand: "ai&",
+            alibaba: "Alibaba Coding Plan",
+            alibabatokenplan: "Alibaba Token Plan",
+            amp: "Amp",
+            antigravity: "Antigravity",
+            augment: "Augment",
+            azureopenai: "Azure OpenAI",
+            bedrock: "AWS Bedrock",
+            chutes: "Chutes",
             claude: "Claude",
-            gemini: "Gemini",
+            clawrouter: "ClawRouter",
+            clinepass: "ClinePass",
+            codebuff: "Codebuff",
+            codex: "Codex",
+            commandcode: "Command Code",
             copilot: "Copilot",
+            crof: "Crof",
             cursor: "Cursor",
+            deepgram: "Deepgram",
+            deepinfra: "DeepInfra",
+            deepseek: "DeepSeek",
+            devin: "Devin",
+            doubao: "Doubao",
+            elevenlabs: "ElevenLabs",
+            factory: "Droid",
+            fireworks: "Fireworks",
+            gemini: "Gemini",
             grok: "Grok",
-            zai: "z.ai Coding Plan"
+            groq: "Groq",
+            ibmbob: "IBM Bob",
+            jetbrains: "JetBrains AI",
+            kilo: "Kilo",
+            kimi: "Kimi Code",
+            kiro: "Kiro",
+            litellm: "LiteLLM",
+            llmproxy: "LLM Proxy",
+            longcat: "LongCat",
+            manus: "Manus",
+            minimax: "MiniMax",
+            mimo: "Xiaomi MiMo",
+            mistral: "Mistral",
+            moonshot: "Moonshot",
+            neuralwatt: "Neuralwatt",
+            notion: "Notion AI",
+            ollama: "Ollama",
+            openai: "OpenAI",
+            opencode: "OpenCode",
+            opencodego: "OpenCode Go",
+            openrouter: "OpenRouter",
+            perplexity: "Perplexity",
+            poe: "Poe",
+            qoder: "Qoder",
+            qwencloud: "Qwen Cloud",
+            sakana: "Sakana AI",
+            stepfun: "StepFun",
+            sub2api: "sub2api",
+            synthetic: "Synthetic",
+            t3chat: "T3 Chat",
+            venice: "Venice",
+            vertexai: "Vertex AI",
+            warp: "Warp",
+            wayfinder: "Wayfinder",
+            windsurf: "Windsurf",
+            xai: "xAI",
+            zai: "z.ai Coding Plan",
+            zed: "Zed",
+            zenmux: "ZenMux",
+            zoommate: "ZoomMate"
         };
         return labels[provider] || String(provider || "AI");
     }

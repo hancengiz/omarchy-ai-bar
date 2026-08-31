@@ -32,11 +32,11 @@ pub enum Command {
     /// Run the local HTTP server.
     Serve,
     /// Inspect or modify configuration.
-    Config,
+    Config(ConfigArgs),
     /// Inspect or modify external hooks.
     Hooks,
     /// Evaluate a noninteractive quota guard.
-    Guard,
+    Guard(GuardArgs),
     /// Manage explicit cookie input.
     Cookie,
     /// Inspect or clear application caches.
@@ -73,6 +73,49 @@ pub struct OutputArgs {
     /// Select human, JSON, or TOON output.
     #[arg(long, value_enum, default_value_t)]
     pub format: OutputFormat,
+}
+
+/// Noninteractive quota-policy evaluation.
+#[derive(Debug, Clone, Args)]
+pub struct GuardArgs {
+    /// Deny when used quota is at or above this percentage.
+    #[arg(long, value_name = "PERCENT", default_value_t = 90, value_parser = clap::value_parser!(u8).range(1..=100))]
+    pub max_used: u8,
+    /// Evaluate only this canonical provider ID.
+    #[arg(long, value_name = "PROVIDER")]
+    pub provider: Option<String>,
+    /// Suppress the human-readable decision.
+    #[arg(long)]
+    pub quiet: bool,
+}
+
+/// Typed non-secret configuration operations.
+#[derive(Debug, Clone, Args)]
+pub struct ConfigArgs {
+    /// Configuration operation. Omitting it shows the current state.
+    #[command(subcommand)]
+    pub action: Option<ConfigAction>,
+}
+
+/// Configuration operation.
+#[derive(Debug, Clone, Subcommand)]
+pub enum ConfigAction {
+    /// Print the resolved configuration path.
+    Path,
+    /// Print the validated configuration, or its missing state.
+    Show(OutputArgs),
+    /// Validate a file without changing application state.
+    Validate {
+        /// File to validate. Defaults to the active XDG configuration.
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
+    },
+    /// Create a minimal valid configuration document.
+    Init {
+        /// Replace an existing application configuration.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 /// Packaged shell-completion targets.

@@ -179,7 +179,7 @@ Panel {
                             delegate: Column {
                                 required property var modelData
                                 width: parent.width
-                                spacing: Style.space(5)
+                                spacing: Style.space(6)
 
                                 Row {
                                     width: parent.width
@@ -203,28 +203,72 @@ Panel {
                                     }
                                 }
 
-                                Rectangle {
-                                    width: parent.width
-                                    height: Style.space(7)
-                                    radius: height / 2
-                                    color: Style.normalFillFor(root.bar ? root.bar.foreground : Color.foreground, Color.accent)
-
-                                    Rectangle {
-                                        width: parent.width * root.displayPercent(modelData) / 100
-                                        height: parent.height
-                                        radius: parent.radius
-                                        color: Number(modelData.percent || 0) >= Number(root.setting("warningThreshold", 90)) ? Color.urgent : Color.accent
-                                    }
-                                }
-
                                 Text {
                                     width: parent.width
-                                    visible: root.setting("showResetTimes", true) === true && modelData.reset !== ""
-                                    text: modelData.reset
+                                    visible: modelData.plan !== "" || modelData.summary !== ""
+                                    text: [modelData.plan, modelData.summary].filter(function (value) {
+                                        return value !== "";
+                                    }).join(" · ")
                                     color: Color.muted
                                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                     font.pixelSize: Style.font.caption
                                     elide: Text.ElideRight
+                                }
+
+                                Repeater {
+                                    model: modelData.ready && Array.isArray(modelData.windows) ? modelData.windows : []
+
+                                    delegate: Column {
+                                        required property var modelData
+                                        width: parent.width
+                                        spacing: Style.space(3)
+
+                                        Row {
+                                            width: parent.width
+
+                                            Text {
+                                                width: parent.width - laneUsage.width
+                                                text: modelData.title
+                                                color: Color.muted
+                                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                                font.pixelSize: Style.font.caption
+                                                elide: Text.ElideRight
+                                            }
+
+                                            Text {
+                                                id: laneUsage
+                                                text: modelData.known ? Math.round(root.setting("usageDirection", "Used") === "Remaining" ? 100 - Number(modelData.percent || 0) : Number(modelData.percent || 0)) + "%" : "Unavailable"
+                                                color: Color.muted
+                                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                                font.pixelSize: Style.font.caption
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            width: parent.width
+                                            height: Style.space(7)
+                                            radius: height / 2
+                                            color: Style.normalFillFor(root.bar ? root.bar.foreground : Color.foreground, Color.accent)
+
+                                            Rectangle {
+                                                width: parent.width * (root.setting("usageDirection", "Used") === "Remaining" ? 100 - Number(modelData.percent || 0) : Number(modelData.percent || 0)) / 100
+                                                height: parent.height
+                                                radius: parent.radius
+                                                color: Number(modelData.percent || 0) >= Number(root.setting("warningThreshold", 90)) ? Color.urgent : Color.accent
+                                                visible: modelData.known
+                                            }
+                                        }
+
+                                        Text {
+                                            width: parent.width
+                                            visible: root.setting("showResetTimes", true) === true && modelData.reset !== ""
+                                            text: modelData.reset
+                                            color: Color.muted
+                                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                            font.pixelSize: Style.font.caption
+                                            elide: Text.ElideRight
+                                        }
+                                    }
                                 }
                             }
                         }
