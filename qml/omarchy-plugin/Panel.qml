@@ -15,10 +15,28 @@ Panel {
     readonly property real usagePercent: service ? service.usedPercent : 0
     readonly property string providerName: service ? service.providerLabel : "AI"
     readonly property string statusText: service ? service.connectionStatus : "Starting"
+    readonly property var visibleProviderRows: {
+        var rows = service && Array.isArray(service.providerRows) ? service.providerRows : [];
+        if (setting("showUnavailable", true) === true)
+            return rows;
+        return rows.filter(function (row) {
+            return row && row.ready;
+        });
+    }
     readonly property string resetText: {
         var sample = service ? service.displaySample : null;
         var primary = sample && sample.primary ? sample.primary : null;
         return primary && primary.reset_description ? String(primary.reset_description) : "Reset unavailable";
+    }
+
+    function displayPercent(row) {
+        var used = Math.max(0, Math.min(100, Number(row && row.percent || 0)));
+        return setting("usageDirection", "Used") === "Remaining" ? 100 - used : used;
+    }
+
+    function usageLabel(row) {
+        var direction = setting("usageDirection", "Used") === "Remaining" ? "remaining" : "used";
+        return Math.round(displayPercent(row)) + "% " + direction;
     }
 
     function debugGeometry() {
@@ -110,7 +128,7 @@ Panel {
 
                         Text {
                             width: parent.width
-                            text: root.providerName + " usage"
+                            text: root.visibleProviderRows.length + " providers · " + String(root.setting("usageDirection", "Used")).toLowerCase() + " quota"
                             color: Color.muted
                             font.family: root.bar ? root.bar.fontFamily : Style.font.family
                             font.pixelSize: Style.font.bodySmall
@@ -138,7 +156,7 @@ Panel {
                     spacing: Style.space(10)
 
                     Repeater {
-                        model: root.service ? root.service.providerRows : []
+                        model: root.visibleProviderRows
 
                         delegate: Column {
                             required property var modelData
@@ -160,7 +178,7 @@ Panel {
 
                                 Text {
                                     id: providerUsage
-                                    text: modelData.ready ? Math.round(modelData.percent) + "% used" : modelData.status
+                                    text: modelData.ready ? root.usageLabel(modelData) : modelData.status
                                     color: modelData.ready ? (root.bar ? root.bar.foreground : Color.foreground) : Color.muted
                                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                     font.pixelSize: Style.font.bodySmall
@@ -174,16 +192,16 @@ Panel {
                                 color: Style.normalFillFor(root.bar ? root.bar.foreground : Color.foreground, Color.accent)
 
                                 Rectangle {
-                                    width: parent.width * modelData.percent / 100
+                                    width: parent.width * root.displayPercent(modelData) / 100
                                     height: parent.height
                                     radius: parent.radius
-                                    color: modelData.percent >= 90 ? Color.urgent : Color.accent
+                                    color: Number(modelData.percent || 0) >= Number(root.setting("warningThreshold", 90)) ? Color.urgent : Color.accent
                                 }
                             }
 
                             Text {
                                 width: parent.width
-                                visible: modelData.reset !== ""
+                                visible: root.setting("showResetTimes", true) === true && modelData.reset !== ""
                                 text: modelData.reset
                                 color: Color.muted
                                 font.family: root.bar ? root.bar.fontFamily : Style.font.family

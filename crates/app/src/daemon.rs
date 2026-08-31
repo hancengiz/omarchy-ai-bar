@@ -17,6 +17,7 @@ use oab_runtime::actor::{
 };
 use oab_runtime::command::RefreshTrigger;
 use oab_runtime::scheduler::{Clock, SystemClock};
+use serde_json::{Value, json};
 use thiserror::Error;
 use tokio::io::unix::AsyncFd;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -106,7 +107,7 @@ async fn run_loop(
             readiness = control_socket.readable() => {
                 match readiness {
                     Ok(mut readiness) => {
-                        let result = accept_ready_control_clients(control_socket.get_ref());
+                        let result = accept_ready_control_clients(control_socket.get_ref(), &state);
                         readiness.clear_ready();
                         if let Err(error) = result {
                             break Err(error);
@@ -145,10 +146,13 @@ async fn run_loop(
     listener_result
 }
 
-fn accept_ready_control_clients(socket: &DisplaySocket) -> Result<(), DaemonError> {
+fn accept_ready_control_clients(
+    socket: &DisplaySocket,
+    state: &RuntimeHandle,
+) -> Result<(), DaemonError> {
     for _ in 0..MAX_ACCEPT_BATCH {
         match socket.accept_verified() {
-            Ok(stream) => handle_client(stream),
+            Ok(stream) => handle_client(stream, state),
             Err(DisplaySocketError::Operation { source, .. })
                 if source.kind() == io::ErrorKind::WouldBlock =>
             {
@@ -326,7 +330,7 @@ fn is_peer_rejection(error: &DisplaySocketError) -> bool {
     )
 }
 
-fn handle_client(mut verified: VerifiedDisplayStream) {
+fn handle_client(mut verified: VerifiedDisplayStream, state: &RuntimeHandle) {
     let stream = verified.stream_mut();
     if configure_stream(stream).is_err() {
         let _ignored = stream.shutdown(Shutdown::Both);
@@ -339,12 +343,16 @@ fn handle_client(mut verified: VerifiedDisplayStream) {
         }
         let response = match request.action() {
             ControlAction::Activate => ControlResponse::accepted(),
-            ControlAction::Usage
-            | ControlAction::Cards
-            | ControlAction::Dashboard
-            | ControlAction::Cost
-            | ControlAction::Sessions
-            | ControlAction::Diagnose => ControlResponse::unavailable(),
+            ControlAction::Usage | ControlAction::Cards => {
+                ControlResponse::with_payload(current_snapshot_value(state)?)
+            }
+            ControlAction::Diagnose => {
+                let snapshot = current_snapshot_value(state)?;
+                ControlResponse::with_payload(diagnostics_value(&snapshot))
+            }
+            ControlAction::Dashboard | ControlAction::Cost | ControlAction::Sessions => {
+                ControlResponse::unavailable()
+            }
         };
         write_frame(stream, &response)
     });
@@ -353,4 +361,40 @@ fn handle_client(mut verified: VerifiedDisplayStream) {
     } else {
         Shutdown::Both
     });
+}
+
+fn current_snapshot_value(state: &RuntimeHandle) -> Result<Value, SingleInstanceError> {
+    let snapshots = state.subscribe();
+    let publication = snapshots.borrow().clone();
+    serde_json::to_value(publication.envelope().private_view())
+        .map_err(|_error| SingleInstanceError::Exchange)
+}
+
+fn diagnostics_value(snapshot: &Value) -> Value {
+    let providers = snapshot
+        .get("snapshots")
+        .and_then(Value::as_array)
+        .map(|snapshots| {
+            snapshots
+                .iter()
+                .map(|entry| {
+                    json!({
+                        "provider": entry.pointer("/last_known_good/scope/provider")
+                            .or_else(|| entry.pointer("/scope/provider"))
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown"),
+                        "state": entry.get("state").and_then(Value::as_str).unwrap_or("unknown"),
+                        "has_last_known_good": entry.get("last_known_good").is_some_and(|value| !value.is_null()),
+                        "error_kind": entry.pointer("/error/kind").and_then(Value::as_str),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    json!({
+        "schema_version": 1,
+        "daemon": "running",
+        "generated_at": snapshot.get("generated_at").cloned().unwrap_or(Value::Null),
+        "providers": providers,
+    })
 }

@@ -19,6 +19,72 @@
     "description": "AI provider usage and quota status",
     "category": "System",
     "allowMultiple": false,
-    "defaultSection": "right"
+    "defaultSection": "right",
+    "defaults": {
+      "barDisplay": "AI and usage",
+      "preferredProvider": "Highest usage",
+      "usageDirection": "Used",
+      "showUnavailable": true,
+      "showResetTimes": true,
+      "warningThreshold": 90
+    },
+    "schema": [
+      {
+        "key": "barDisplay",
+        "type": "enum",
+        "label": "Bar display",
+        "options": [
+          "AI and usage",
+          "Provider and usage",
+          "Usage only",
+          "Icon only"
+        ],
+        "defaultValue": "AI and usage"
+      },
+      {
+        "key": "preferredProvider",
+        "type": "enum",
+        "label": "Bar provider",
+        "options": [
+          "Highest usage",
+          "Codex",
+          "Claude",
+          "Grok",
+          "z.ai Coding Plan"
+        ],
+        "defaultValue": "Highest usage"
+      },
+      {
+        "key": "usageDirection",
+        "type": "enum",
+        "label": "Usage direction",
+        "options": [
+          "Used",
+          "Remaining"
+        ],
+        "defaultValue": "Used"
+      },
+      {
+        "key": "showUnavailable",
+        "type": "boolean",
+        "label": "Show providers that need setup",
+        "defaultValue": true
+      },
+      {
+        "key": "showResetTimes",
+        "type": "boolean",
+        "label": "Show reset times",
+        "defaultValue": true
+      },
+      {
+        "key": "warningThreshold",
+        "type": "integer",
+        "label": "Warning threshold (percent used)",
+        "min": 50,
+        "max": 100,
+        "step": 5,
+        "defaultValue": 90
+      }
+    ]
   }
 }

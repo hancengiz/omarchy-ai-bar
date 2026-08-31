@@ -11,6 +11,7 @@ use oab_ipc::codec::{JsonLineDecoder, encode_json_line};
 use oab_ipc::permissions::{PermissionError, effective_uid};
 use oab_ipc::socket::{DisplaySocket, DisplaySocketError, verify_peer_uid};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 
 const CONTROL_PROTOCOL: u8 = 1;
@@ -69,6 +70,8 @@ impl ControlRequest {
 pub(crate) struct ControlResponse {
     protocol: u8,
     status: ControlStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    payload: Option<Value>,
 }
 
 impl ControlResponse {
@@ -76,6 +79,15 @@ impl ControlResponse {
         Self {
             protocol: CONTROL_PROTOCOL,
             status: ControlStatus::Accepted,
+            payload: None,
+        }
+    }
+
+    pub(crate) const fn with_payload(payload: Value) -> Self {
+        Self {
+            protocol: CONTROL_PROTOCOL,
+            status: ControlStatus::Accepted,
+            payload: Some(payload),
         }
     }
 
@@ -83,11 +95,16 @@ impl ControlResponse {
         Self {
             protocol: CONTROL_PROTOCOL,
             status: ControlStatus::Unavailable,
+            payload: None,
         }
     }
 
     pub(crate) const fn status(&self) -> ControlStatus {
         self.status
+    }
+
+    pub(crate) fn payload(&self) -> Option<&Value> {
+        self.payload.as_ref()
     }
 
     const fn has_supported_protocol(&self) -> bool {

@@ -10,6 +10,9 @@ BarWidget {
     readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
     readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
     readonly property int serviceReadyGeneration: aiService ? aiService.readyGeneration : 0
+    readonly property var selectedRow: selectBarRow()
+    readonly property real selectedUsedPercent: selectedRow && selectedRow.ready ? Number(selectedRow.percent || 0) : 0
+    readonly property real selectedDisplayPercent: setting("usageDirection", "Used") === "Remaining" ? 100 - selectedUsedPercent : selectedUsedPercent
     property bool openReported: false
     property var reportingService: null
     property var geometryService: null
@@ -20,7 +23,37 @@ BarWidget {
             return vertical ? "AI" : "AI --";
         if (aiService.compatibilityFailure !== "")
             return vertical ? "!" : "AI !";
-        return vertical ? "AI" : "AI " + Math.round(aiService.usedPercent) + "%";
+        var mode = String(setting("barDisplay", "AI and usage"));
+        var percent = Math.round(selectedDisplayPercent) + "%";
+        if (vertical || mode === "Icon only")
+            return "AI";
+        if (mode === "Usage only")
+            return percent;
+        if (mode === "Provider and usage")
+            return (selectedRow ? selectedRow.label : "AI") + " " + percent;
+        return "AI " + percent;
+    }
+
+    function selectBarRow() {
+        var rows = aiService && Array.isArray(aiService.providerRows) ? aiService.providerRows : [];
+        if (rows.length === 0)
+            return null;
+        var preferred = String(setting("preferredProvider", "Highest usage"));
+        if (preferred !== "Highest usage") {
+            for (var index = 0; index < rows.length; index++) {
+                if (rows[index] && rows[index].label === preferred)
+                    return rows[index];
+            }
+        }
+        var selected = null;
+        for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+            var candidate = rows[rowIndex];
+            if (!candidate || !candidate.ready)
+                continue;
+            if (!selected || Number(candidate.percent || 0) > Number(selected.percent || 0))
+                selected = candidate;
+        }
+        return selected || rows[0];
     }
 
     function injectPanel() {
@@ -157,8 +190,8 @@ BarWidget {
         anchors.fill: parent
         bar: root.bar
         text: root.displayText
-        active: root.opened || (root.aiService && root.aiService.compatibilityFailure !== "")
-        tooltipText: root.aiService ? "Omarchy AI Bar · " + root.aiService.connectionStatus : "Omarchy AI Bar · Starting"
+        active: root.opened || (root.aiService && root.aiService.compatibilityFailure !== "") || root.selectedUsedPercent >= Number(root.setting("warningThreshold", 90))
+        tooltipText: root.aiService ? "Omarchy AI Bar · " + root.aiService.connectionStatus + (root.selectedRow ? " · " + root.selectedRow.label : "") : "Omarchy AI Bar · Starting"
 
         onPressed: function (button) {
             if (button === Qt.RightButton || button === Qt.MiddleButton) {
