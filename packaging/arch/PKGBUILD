@@ -20,7 +20,7 @@ depends=(
 makedepends=('cargo')
 install=omarchy-ai-bar.install
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('12cea3c1638d24609fb885f0dba7a70654074db1bcc2fa4dddb858256688a34a')
+sha256sums=('ed0237413b370e88c554a2be33d6f898f44e73c12ffecacc42b31c5e16883db7')
 
 prepare() {
   cd "$pkgname-$pkgver"
@@ -29,12 +29,20 @@ prepare() {
 
 build() {
   cd "$pkgname-$pkgver"
-  CARGO_TARGET_DIR=target cargo build --release --locked --frozen --package omarchy-ai-bar
+  CFLAGS="${CFLAGS:-} -ffile-prefix-map=$PWD=." \
+    CXXFLAGS="${CXXFLAGS:-} -ffile-prefix-map=$PWD=." \
+    RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$PWD=." \
+    CARGO_TARGET_DIR=target \
+    cargo build --release --locked --frozen --package omarchy-ai-bar
 }
 
 check() {
   cd "$pkgname-$pkgver"
-  CARGO_TARGET_DIR=target cargo test --workspace --locked --frozen
+  CFLAGS="${CFLAGS:-} -ffile-prefix-map=$PWD=." \
+    CXXFLAGS="${CXXFLAGS:-} -ffile-prefix-map=$PWD=." \
+    RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$PWD=." \
+    CARGO_TARGET_DIR=target \
+    cargo test --workspace --release --locked --frozen
   omarchy plugin validate qml/omarchy-plugin
 }
 
