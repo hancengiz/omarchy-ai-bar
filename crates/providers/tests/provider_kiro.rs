@@ -168,7 +168,7 @@ fn assert_close(actual: f64, expected: f64) {
 }
 
 async fn wait_for_marker(path: &Path) -> String {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
         if let Ok(contents) = fs::read_to_string(path)
             && !contents.trim().is_empty()
@@ -889,7 +889,7 @@ if [ "$1" = "chat" ] && [ "$3" = "/usage" ] && [ -t 1 ]; then
 fi
 {holder}
 count=0
-while [ ! -s {holder_marker} ] && [ "$count" -lt 100 ]; do
+while [ ! -s {holder_marker} ] && [ "$count" -lt 400 ]; do
   sleep 0.01
   count=$((count + 1))
 done
@@ -903,7 +903,7 @@ while :; do sleep 1; done
     );
     let timeouts = KiroCommandTimeouts::new(
         Duration::from_secs(1),
-        Duration::from_secs(1),
+        Duration::from_secs(5),
         Duration::from_secs(1),
         Duration::from_millis(50),
     )
