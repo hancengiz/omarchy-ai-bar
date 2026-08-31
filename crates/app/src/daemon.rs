@@ -4,14 +4,18 @@ use std::io;
 use std::net::Shutdown;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc;
 
 use oab_domain::{AccountScope, SurfaceSnapshotEnvelope};
 use oab_ipc::codec::{JsonLineDecoder, encode_json_line};
+use oab_ipc::frontend_presence::SniStatus;
 use oab_ipc::protocol::{
     AcceptedClientFrame, ActionProgressState, Capability, CapabilitySet, ClientMessage,
     RuntimeAction, Sequence, ServerHandshakeContext, ServerMessage,
 };
 use oab_ipc::socket::{DisplaySocket, DisplaySocketError, VerifiedDisplayStream};
+use oab_ipc::tray::TrayController;
 use oab_runtime::actor::{
     RuntimeActor, RuntimeBuildError, RuntimeConfig, RuntimeHandle, RuntimeJoinError,
 };
@@ -24,6 +28,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 use tokio::runtime::Builder;
 use tokio::signal::unix::{SignalKind, signal};
+use tokio::time::{Duration, Instant, interval, timeout};
 
 use crate::provider_bootstrap::ProductionProviders;
 use crate::single_instance::{
@@ -32,6 +37,8 @@ use crate::single_instance::{
 };
 
 const MAX_ACCEPT_BATCH: usize = 4;
+const FRONTEND_GRACE: Duration = Duration::from_secs(5);
+const TRAY_TICK: Duration = Duration::from_millis(250);
 
 /// Path-free daemon lifecycle failure.
 #[derive(Debug, Error)]
@@ -66,6 +73,10 @@ pub(crate) fn run(
     runtime.block_on(run_loop(control_socket, display_socket, providers))
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the select loop keeps socket, signal, tray, and actor shutdown ownership in one lifecycle"
+)]
 async fn run_loop(
     control_socket: DisplaySocket,
     display_socket: DisplaySocket,
@@ -99,8 +110,20 @@ async fn run_loop(
     let display_socket = AsyncFd::new(display_socket).map_err(DaemonError::Runtime)?;
     let mut terminate = signal(SignalKind::terminate()).map_err(DaemonError::Signal)?;
     let mut interrupt = signal(SignalKind::interrupt()).map_err(DaemonError::Signal)?;
+    let compatible_frontends = Arc::new(AtomicUsize::new(0));
+    let (tray_actions, tray_action_receiver) = mpsc::sync_channel(16);
+    let tray = timeout(
+        Duration::from_secs(2),
+        TrayController::spawn(SniStatus::Passive, tray_actions),
+    )
+    .await
+    .ok()
+    .and_then(Result::ok);
+    let tray_started_at = Instant::now();
+    let mut tray_tick = interval(TRAY_TICK);
+    let mut tray_status = SniStatus::Passive;
 
-    let listener_result = loop {
+    let listener_result = 'listener: loop {
         tokio::select! {
             _ = terminate.recv() => break Ok(()),
             _ = interrupt.recv() => break Ok(()),
@@ -124,6 +147,7 @@ async fn run_loop(
                             &state,
                             &handshake,
                             &scopes,
+                            &compatible_frontends,
                         );
                         readiness.clear_ready();
                         if let Err(error) = result {
@@ -133,6 +157,31 @@ async fn run_loop(
                     Err(error) => break Err(DaemonError::Runtime(error)),
                 }
             },
+            _ = tray_tick.tick() => {
+                let mut should_quit = false;
+                while let Ok(action) = tray_action_receiver.try_recv() {
+                    if run_tray_action(&state, scopes.as_slice(), action).await {
+                        should_quit = true;
+                        break;
+                    }
+                }
+                if should_quit {
+                    break 'listener Ok(());
+                }
+                let desired = if compatible_frontends.load(Ordering::Acquire) > 0
+                    || tray_started_at.elapsed() < FRONTEND_GRACE
+                {
+                    SniStatus::Passive
+                } else {
+                    SniStatus::Active
+                };
+                if desired != tray_status {
+                    if let Some(tray) = tray.as_ref() {
+                        let _updated = tray.set_status(desired).await;
+                    }
+                    tray_status = desired;
+                }
+            }
         }
     };
 
@@ -140,10 +189,47 @@ async fn run_loop(
         .shutdown()
         .await
         .map_err(DaemonError::StateJoin)?;
+    if let Some(tray) = tray {
+        tray.shutdown().await;
+    }
     if state_exit.fault().is_some() {
         return Err(DaemonError::StateFault);
     }
     listener_result
+}
+
+async fn run_tray_action(
+    state: &RuntimeHandle,
+    scopes: &[AccountScope],
+    action: RuntimeAction,
+) -> bool {
+    match action {
+        RuntimeAction::RefreshAll {} => {
+            for scope in scopes {
+                let _admission = state.refresh(scope.clone(), RefreshTrigger::Manual).await;
+            }
+            false
+        }
+        RuntimeAction::Quit {} => true,
+        RuntimeAction::RefreshProvider { provider } => {
+            for scope in scopes.iter().filter(|scope| scope.provider() == provider) {
+                let _admission = state.refresh(scope.clone(), RefreshTrigger::Manual).await;
+            }
+            false
+        }
+        RuntimeAction::Navigate { .. }
+        | RuntimeAction::OpenPanel {}
+        | RuntimeAction::ClosePanel {}
+        | RuntimeAction::TogglePanel {}
+        | RuntimeAction::SwitchAccount { .. }
+        | RuntimeAction::BeginLogin { .. }
+        | RuntimeAction::LogOut { .. }
+        | RuntimeAction::OpenProviderDashboard { .. }
+        | RuntimeAction::Export { .. }
+        | RuntimeAction::InstallPlugin { .. }
+        | RuntimeAction::ResolveApproval { .. }
+        | RuntimeAction::CancelRequest { .. } => false,
+    }
 }
 
 fn accept_ready_control_clients(
@@ -170,6 +256,7 @@ fn accept_ready_display_clients(
     state: &RuntimeHandle,
     handshake: &Arc<ServerHandshakeContext>,
     scopes: &Arc<Vec<AccountScope>>,
+    compatible_frontends: &Arc<AtomicUsize>,
 ) -> Result<(), DaemonError> {
     for _ in 0..MAX_ACCEPT_BATCH {
         match socket.accept_verified() {
@@ -180,8 +267,16 @@ fn accept_ready_display_clients(
                 let state = state.clone();
                 let handshake = Arc::clone(handshake);
                 let scopes = Arc::clone(scopes);
+                let compatible_frontends = Arc::clone(compatible_frontends);
                 tokio::spawn(async move {
-                    let _result = serve_display_client(stream, state, handshake, scopes).await;
+                    let _result = serve_display_client(
+                        stream,
+                        state,
+                        handshake,
+                        scopes,
+                        compatible_frontends,
+                    )
+                    .await;
                 });
             }
             Err(DisplaySocketError::Operation { source, .. })
@@ -201,12 +296,14 @@ async fn serve_display_client(
     state: RuntimeHandle,
     handshake: Arc<ServerHandshakeContext>,
     scopes: Arc<Vec<AccountScope>>,
+    compatible_frontends: Arc<AtomicUsize>,
 ) -> io::Result<()> {
     let (mut reader, mut writer) = stream.into_split();
     let mut snapshots = state.subscribe();
     let mut guard = handshake.connection();
     let mut decoder = JsonLineDecoder::<ClientMessage>::new();
     let mut chunk = [0_u8; 8 * 1024];
+    let mut frontend_presence = None;
 
     loop {
         tokio::select! {
@@ -220,6 +317,10 @@ async fn serve_display_client(
                 for message in messages {
                     match guard.accept(&message).map_err(invalid_wire)? {
                         AcceptedClientFrame::Hello(hello) => {
+                            debug_assert!(frontend_presence.is_none());
+                            frontend_presence = Some(ConnectedFrontend::new(Arc::clone(
+                                &compatible_frontends,
+                            )));
                             write_message(&mut writer, &ServerMessage::hello(hello)).await?;
                             let publication = snapshots.borrow().clone();
                             write_snapshot(&mut writer, publication.as_ref()).await?;
@@ -237,6 +338,23 @@ async fn serve_display_client(
                 write_snapshot(&mut writer, publication.as_ref()).await?;
             }
         }
+    }
+}
+
+struct ConnectedFrontend {
+    count: Arc<AtomicUsize>,
+}
+
+impl ConnectedFrontend {
+    fn new(count: Arc<AtomicUsize>) -> Self {
+        count.fetch_add(1, Ordering::AcqRel);
+        Self { count }
+    }
+}
+
+impl Drop for ConnectedFrontend {
+    fn drop(&mut self) {
+        self.count.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
