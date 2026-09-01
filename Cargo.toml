@@ -25,7 +25,7 @@ license = "MIT"
 aes = "~0.8.4"
 base64 = "~0.22.1"
 cbc = "~0.1.2"
-clap = { version = "~4.5", features = ["derive"] }
+clap = { version = "~4.6", features = ["derive"] }
 clap_complete = "~4.5"
 futures-util = "~0.3.34"
 getrandom = { version = "~0.2.17", features = ["std"] }
