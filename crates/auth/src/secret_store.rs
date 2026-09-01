@@ -10,6 +10,8 @@ use zeroize::Zeroizing;
 /// Maximum size of a credential accepted by storage adapters.
 pub const MAX_SECRET_BYTES: usize = 16 * 1024;
 const MAX_KEY_FIELD_BYTES: usize = 256;
+const MAX_BATCH_KEYS: usize = 256;
+const MAX_BATCH_ITEMS: usize = 512;
 const APPLICATION_ATTRIBUTE: &str = "omarchy-ai-bar";
 
 /// A validated logical credential identifier.
@@ -119,7 +121,18 @@ impl SecretValue {
     ///
     /// Returns [`SecretValueError`] for empty or oversized values.
     pub fn new(value: impl Into<Vec<u8>>) -> Result<Self, SecretValueError> {
-        let value = Zeroizing::new(value.into());
+        Self::from_zeroizing(Zeroizing::new(value.into()))
+    }
+
+    /// Adopts bytes that are already protected by a zeroizing allocation.
+    ///
+    /// This avoids a transient unprotected copy when another credential owner
+    /// transfers a secret into persistent storage.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SecretValueError`] for empty or oversized values.
+    pub fn from_zeroizing(value: Zeroizing<Vec<u8>>) -> Result<Self, SecretValueError> {
         if value.is_empty() {
             return Err(SecretValueError::Empty);
         }
@@ -214,6 +227,71 @@ impl SecretServiceStore {
             .await
             .map_err(|_| SecretStoreError::Unavailable)?;
         Ok(Self { keyring })
+    }
+
+    /// Retrieves a bounded set of exact application-owned credentials with a
+    /// single Secret Service search.
+    ///
+    /// This is used during daemon bootstrap, where performing one D-Bus search
+    /// per provider would make the startup deadline grow with the provider
+    /// catalog. Unknown application items are ignored. Duplicate exact keys or
+    /// malformed stored values fail closed.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable store error when the collection cannot be searched or
+    /// unlocked, an exact requested key is duplicated, or a selected secret is
+    /// invalid.
+    pub async fn get_many(
+        &self,
+        keys: &[SecretKey],
+    ) -> Result<Vec<(SecretKey, SecretValue)>, SecretStoreError> {
+        if keys.len() > MAX_BATCH_KEYS
+            || keys
+                .iter()
+                .enumerate()
+                .any(|(index, key)| keys[..index].contains(key))
+        {
+            return Err(SecretStoreError::InvalidData);
+        }
+        let mut items = self
+            .keyring
+            .search_items(&[("application", APPLICATION_ATTRIBUTE)])
+            .await
+            .map_err(|_| SecretStoreError::Operation)?;
+        if items.len() > MAX_BATCH_ITEMS {
+            return Err(SecretStoreError::InvalidData);
+        }
+        let mut seen = vec![false; keys.len()];
+        let mut values = Vec::with_capacity(keys.len().min(items.len()));
+
+        for item in items.drain(..) {
+            item.unlock().await.map_err(|_| SecretStoreError::Locked)?;
+            let attributes = item
+                .attributes()
+                .await
+                .map_err(|_| SecretStoreError::Operation)?;
+            let Some(index) = keys.iter().position(|key| {
+                attributes.get("application").map(String::as_str) == Some(APPLICATION_ATTRIBUTE)
+                    && attributes.get("provider").map(String::as_str) == Some(key.provider())
+                    && attributes.get("account").map(String::as_str) == Some(key.account())
+                    && attributes.get("purpose").map(String::as_str) == Some(key.purpose())
+            }) else {
+                continue;
+            };
+            if seen[index] {
+                return Err(SecretStoreError::InvalidData);
+            }
+            seen[index] = true;
+            let secret = item
+                .secret()
+                .await
+                .map_err(|_| SecretStoreError::Operation)?;
+            let value = SecretValue::new(secret.as_bytes().to_vec())
+                .map_err(|_| SecretStoreError::InvalidData)?;
+            values.push((keys[index].clone(), value));
+        }
+        Ok(values)
     }
 }
 

@@ -16,8 +16,15 @@ use time::{OffsetDateTime, UtcOffset};
 use url::Url;
 use zeroize::Zeroizing;
 
+use crate::browser_cookie::{
+    BrowserCookieDomainAllowlist, BrowserCookieDomainPolicy, BrowserCookieDomainRule,
+    ChromiumCookieDecryptor, import_browser_cookie_stores_with_decryptor,
+};
+use crate::browser_profile::BrowserProfileDiscovery;
 use crate::context::{ProviderAdapter, ProviderContext, ProviderFuture};
-use crate::cookie::{CookieJar, CookieUrlPolicy, ValidatedCookieUrl};
+use crate::cookie::{
+    CookieImportOrder, CookieJar, CookieSourceId, CookieUrlPolicy, ValidatedCookieUrl,
+};
 use crate::descriptor::ProviderSource;
 use crate::endpoint::{EndpointClass, EndpointPolicy};
 use crate::manual_capture::{CaptureHeader, ManualCaptureError, ManualCapturePolicy};
@@ -43,6 +50,7 @@ const MAX_JSONL_LINE_BYTES: usize = 512 * 1024;
 const MAX_JSON_NODES: usize = 32_768;
 const MAX_JSON_DEPTH: usize = 32;
 const MAX_FORWARDED_VALUE_BYTES: usize = 8 * 1024;
+const MAX_BROWSER_PROFILES: usize = 128;
 
 const FORWARDED_HEADERS: [&str; 15] = [
     "accept",
@@ -168,6 +176,87 @@ impl T3ChatProvider {
         let target = ValidatedCookieUrl::new(endpoint, CookieUrlPolicy::HttpsOnly)
             .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
         Self::from_browser_jar_at(scope, jar, &target, now, EndpointClass::PublicHttps)
+    }
+
+    /// Creates the production adapter from ordered Linux browser profiles.
+    ///
+    /// Each browser profile and Chromium cookie store remains an independent
+    /// candidate, matching `CodexBar`'s first non-empty T3 Chat session
+    /// behavior without combining cookies across stores or profiles. T3 Chat
+    /// does not publish a stable session-cookie name, so any active
+    /// target-scoped cookie set is accepted and the API validates it.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable missing/expired, bounded local-data, decryption,
+    /// scope, or endpoint error without exposing browser data.
+    pub fn new_browser_from_discovery(
+        scope: AccountScope,
+        discovery: &BrowserProfileDiscovery,
+        decryptor: &dyn ChromiumCookieDecryptor,
+        now: OffsetDateTime,
+    ) -> Result<Self, ClassifiedError> {
+        if scope.provider() != ProviderId::T3Chat {
+            return Err(ClassifiedError::new(ErrorKind::Api));
+        }
+        let report = discovery.discover();
+        if report.profiles().len() > MAX_BROWSER_PROFILES {
+            return Err(ClassifiedError::new(ErrorKind::Parse));
+        }
+        let allowlist = BrowserCookieDomainAllowlist::new([
+            BrowserCookieDomainRule {
+                domain: "t3.chat",
+                policy: BrowserCookieDomainPolicy::Exact,
+            },
+            BrowserCookieDomainRule {
+                domain: "www.t3.chat",
+                policy: BrowserCookieDomainPolicy::Exact,
+            },
+        ])
+        .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        let origin =
+            Url::parse(PRODUCTION_ORIGIN).map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        let target = Self::browser_target(origin, CookieUrlPolicy::HttpsOnly)?;
+        let mut saw_cookie_data = false;
+        for (index, profile) in report.profiles().iter().enumerate() {
+            let store_sources = browser_store_sources(index)?;
+            let Ok(imports) = import_browser_cookie_stores_with_decryptor(
+                profile,
+                store_sources,
+                &allowlist,
+                decryptor,
+            ) else {
+                continue;
+            };
+            let order = CookieImportOrder::new(store_sources)
+                .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+            for import in imports {
+                let jar = CookieJar::from_imports(&order, [import])
+                    .map_err(|_| ClassifiedError::new(ErrorKind::Parse))?;
+                saw_cookie_data |= !jar.is_empty();
+                match Self::from_browser_jar_at(
+                    scope.clone(),
+                    &jar,
+                    &target,
+                    now,
+                    EndpointClass::PublicHttps,
+                ) {
+                    Ok(provider) => return Ok(provider),
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            ErrorKind::MissingCredential | ErrorKind::AuthenticationExpired
+                        ) => {}
+                    Err(error) => return Err(error),
+                }
+            }
+        }
+        drop(scope);
+        Err(ClassifiedError::new(if saw_cookie_data {
+            ErrorKind::AuthenticationExpired
+        } else {
+            ErrorKind::MissingCredential
+        }))
     }
 
     /// Creates a browser-session adapter from an explicit validated target and
@@ -335,6 +424,21 @@ impl T3ChatProvider {
             );
         Ok(request)
     }
+
+    /// Credential source bound to this adapter.
+    #[must_use]
+    pub const fn source(&self) -> ProviderSource {
+        self.source
+    }
+}
+
+fn browser_store_sources(index: usize) -> Result<[CookieSourceId; 2], ClassifiedError> {
+    let first = index
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(1))
+        .and_then(|value| u16::try_from(value).ok())
+        .ok_or_else(|| ClassifiedError::new(ErrorKind::Parse))?;
+    Ok([CookieSourceId::new(first), CookieSourceId::new(first + 1)])
 }
 
 impl ProviderAdapter for T3ChatProvider {

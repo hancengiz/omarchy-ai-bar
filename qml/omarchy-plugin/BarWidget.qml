@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
@@ -16,6 +17,7 @@ BarWidget {
     property bool openReported: false
     property var reportingService: null
     property var geometryService: null
+    property var warnedProviders: ({})
     readonly property real openPanelIndicatorWidth: button.labelWidth
     readonly property real openPanelIndicatorHeight: Math.max(Style.space(10), Math.round(Style.bar.iconSlot * 0.55))
     readonly property string displayText: {
@@ -35,7 +37,7 @@ BarWidget {
     }
 
     function selectBarRow() {
-        var rows = aiService && Array.isArray(aiService.providerRows) ? aiService.providerRows : [];
+        var rows = aiService && Array.isArray(aiService.configuredProviderRows) ? aiService.configuredProviderRows : [];
         if (rows.length === 0)
             return null;
         var preferred = String(setting("preferredProvider", "Highest usage"));
@@ -72,6 +74,45 @@ BarWidget {
             target.service = root.aiService;
     }
 
+    function evaluateQuotaWarnings() {
+        if (!aiService || !aiService.hasLiveSnapshot || setting("quotaWarningsEnabled", true) !== true)
+            return;
+        var rows = Array.isArray(aiService.configuredProviderRows) ? aiService.configuredProviderRows : [];
+        var threshold = Number(setting("warningThreshold", 90));
+        var next = {};
+        for (var existing in warnedProviders)
+            next[existing] = warnedProviders[existing];
+        var pendingTitle = "";
+        var pendingBody = "";
+        for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+            var row = rows[rowIndex];
+            var highest = 0;
+            var highestTitle = "quota";
+            var windows = row && Array.isArray(row.windows) ? row.windows : [];
+            for (var windowIndex = 0; windowIndex < windows.length; windowIndex++) {
+                var window = windows[windowIndex];
+                if (window && window.known && Number(window.percent || 0) >= highest) {
+                    highest = Number(window.percent || 0);
+                    highestTitle = String(window.title || "quota");
+                }
+            }
+            if (highest < threshold) {
+                delete next[row.provider];
+                continue;
+            }
+            if (!next[row.provider] && pendingTitle === "") {
+                pendingTitle = row.label + " quota warning";
+                pendingBody = highestTitle + " is " + Math.round(highest) + "% used" + (row.reset !== "" ? " · resets " + row.reset : "");
+            }
+            next[row.provider] = true;
+        }
+        warnedProviders = next;
+        if (pendingTitle !== "" && !warningProcess.running) {
+            warningProcess.command = ["notify-send", "--app-name=Omarchy AI Bar", "--urgency=normal", pendingTitle, pendingBody];
+            warningProcess.running = true;
+        }
+    }
+
     function registerGeometrySource() {
         if (geometryService === aiService)
             return;
@@ -90,11 +131,34 @@ BarWidget {
     function open() {
         if (!panelLoader.item)
             return;
+        // Every ordinary open starts on the CodexBar-style glanceable usage view.
+        // Explicit provider/catalog/app-settings entry points call this first and
+        // then apply their requested destination below.
+        if (typeof panelLoader.item.showUsage === "function")
+            panelLoader.item.showUsage();
         if (aiService)
             aiService.claimPanel(root);
         if (!opened)
             panelLoader.item.open();
         reportOpenIfPossible();
+    }
+
+    function openProviderSettings(provider) {
+        open();
+        if (panelLoader.item && typeof panelLoader.item.openProviderSettings === "function")
+            panelLoader.item.openProviderSettings(provider);
+    }
+
+    function openProviderCatalog() {
+        open();
+        if (panelLoader.item && typeof panelLoader.item.openProviderCatalog === "function")
+            panelLoader.item.openProviderCatalog();
+    }
+
+    function openAppSettings(pane) {
+        open();
+        if (panelLoader.item && typeof panelLoader.item.openSettingsPane === "function")
+            panelLoader.item.openSettingsPane(pane);
     }
 
     function reportOpenIfPossible() {
@@ -149,7 +213,10 @@ BarWidget {
     implicitHeight: button.implicitHeight
 
     onBarChanged: injectPanel()
-    onSettingsChanged: injectPanel()
+    onSettingsChanged: {
+        injectPanel();
+        Qt.callLater(evaluateQuotaWarnings);
+    }
     onAiServiceChanged: {
         if (reportingService && reportingService !== aiService) {
             reportingService.releasePanel(root);
@@ -160,6 +227,7 @@ BarWidget {
         }
         registerGeometrySource();
         injectPanel();
+        Qt.callLater(evaluateQuotaWarnings);
         if (aiService && opened) {
             aiService.claimPanel(root);
             reportOpenIfPossible();
@@ -183,6 +251,19 @@ BarWidget {
             root.injectPanel();
             Qt.callLater(root.injectPanel);
         }
+    }
+
+    Connections {
+        target: root.aiService
+
+        function onProviderRowsChanged() {
+            root.evaluateQuotaWarnings();
+        }
+    }
+
+    Process {
+        id: warningProcess
+        running: false
     }
 
     WidgetButton {

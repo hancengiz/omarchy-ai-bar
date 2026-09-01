@@ -15,8 +15,15 @@ use time::{Month, OffsetDateTime};
 use url::Url;
 use zeroize::Zeroizing;
 
+use crate::browser_cookie::{
+    BrowserCookieDomainAllowlist, BrowserCookieDomainPolicy, BrowserCookieDomainRule,
+    ChromiumCookieDecryptor, import_browser_cookies_merging_chromium_stores_with_decryptor,
+};
+use crate::browser_profile::BrowserProfileDiscovery;
 use crate::context::{ProviderAdapter, ProviderContext, ProviderFuture};
-use crate::cookie::{CookieJar, CookieUrlPolicy, ValidatedCookieUrl};
+use crate::cookie::{
+    CookieImportOrder, CookieJar, CookieSourceId, CookieUrlPolicy, ValidatedCookieUrl,
+};
 use crate::descriptor::ProviderSource;
 use crate::endpoint::{EndpointClass, EndpointPolicy};
 use crate::manual_capture::{CaptureHeader, ManualCaptureError, ManualCapturePolicy};
@@ -42,6 +49,8 @@ const MAX_COOKIE_CHUNKS: usize = 64;
 const MAX_TOKEN_BYTES: usize = 16 * 1024;
 const MAX_GRANTS: usize = 8_192;
 const MAX_CREDIT_MAGNITUDE: i64 = 1_000_000_000_000_000;
+const MAX_BROWSER_PROFILES: usize = 128;
+const MAX_BROWSER_SESSIONS: usize = 64;
 const SESSION_COOKIE_NAMES: [&str; 4] = [
     "__Secure-authjs.session-token",
     "authjs.session-token",
@@ -168,6 +177,119 @@ impl PerplexityProvider {
         let origin =
             Url::parse(PRODUCTION_ORIGIN).map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
         Self::from_browser_jar_at(scope, jar, now, &origin, EndpointClass::PublicHttps)
+    }
+
+    /// Creates the production adapter from ordered Linux browser profiles.
+    ///
+    /// Network and primary Chromium stores are merged only within the same
+    /// profile, as `CodexBar` does for chunked Auth.js session cookies. Profiles
+    /// remain isolated and become ordered authentication candidates.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable missing/expired, bounded local-data, decryption, scope,
+    /// or endpoint failures.
+    pub fn new_browser_from_discovery(
+        scope: AccountScope,
+        discovery: &BrowserProfileDiscovery,
+        decryptor: &dyn ChromiumCookieDecryptor,
+        now: OffsetDateTime,
+    ) -> Result<Self, ClassifiedError> {
+        let origin =
+            Url::parse(PRODUCTION_ORIGIN).map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        Self::from_browser_discovery_at(
+            scope,
+            discovery,
+            decryptor,
+            now,
+            &origin,
+            EndpointClass::PublicHttps,
+        )
+    }
+
+    /// Creates a browser adapter with an injected exact transport origin.
+    /// Browser cookie discovery remains restricted to Perplexity domains.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable cookie, authentication, local-data, scope, or endpoint
+    /// failures.
+    #[doc(hidden)]
+    pub fn from_browser_discovery_at(
+        scope: AccountScope,
+        discovery: &BrowserProfileDiscovery,
+        decryptor: &dyn ChromiumCookieDecryptor,
+        now: OffsetDateTime,
+        origin: &Url,
+        endpoint_class: EndpointClass,
+    ) -> Result<Self, ClassifiedError> {
+        if scope.provider() != ProviderId::Perplexity {
+            return Err(ClassifiedError::new(ErrorKind::Api));
+        }
+        validate_origin(origin, endpoint_class)?;
+        let report = discovery.discover();
+        if report.profiles().len() > MAX_BROWSER_PROFILES {
+            return Err(parse_error());
+        }
+        let allowlist = BrowserCookieDomainAllowlist::new([
+            BrowserCookieDomainRule {
+                domain: "www.perplexity.ai",
+                policy: BrowserCookieDomainPolicy::Exact,
+            },
+            BrowserCookieDomainRule {
+                domain: "perplexity.ai",
+                policy: BrowserCookieDomainPolicy::Exact,
+            },
+        ])
+        .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        let cookie_origin =
+            Url::parse(PRODUCTION_ORIGIN).map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        let target =
+            ValidatedCookieUrl::new(credits_url(cookie_origin), CookieUrlPolicy::HttpsOnly)
+                .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        let mut candidates = Vec::new();
+        let mut saw_cookie_data = false;
+        for (index, profile) in report.profiles().iter().enumerate() {
+            let source = browser_source(index)?;
+            let Ok(import) = import_browser_cookies_merging_chromium_stores_with_decryptor(
+                profile, source, &allowlist, decryptor,
+            ) else {
+                continue;
+            };
+            let order = CookieImportOrder::new([source])
+                .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+            let jar = CookieJar::from_imports(&order, [import]).map_err(|_| parse_error())?;
+            saw_cookie_data |= !jar.is_empty();
+            let header = jar
+                .header_for(&target, now)
+                .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+            let Some(candidate) = header
+                .as_ref()
+                .map(|header| extract_session_cookie(header.expose()))
+                .transpose()?
+                .flatten()
+            else {
+                continue;
+            };
+            candidates.push(candidate);
+            if candidates.len() > MAX_BROWSER_SESSIONS {
+                return Err(parse_error());
+            }
+        }
+        if candidates.is_empty() {
+            return Err(ClassifiedError::new(if saw_cookie_data {
+                ErrorKind::AuthenticationExpired
+            } else {
+                ErrorKind::MissingCredential
+            }));
+        }
+        Self::build(
+            scope,
+            ProviderSource::BrowserSession,
+            origin,
+            endpoint_class,
+            candidates,
+        )
     }
 
     /// Creates a browser adapter at an injected exact-origin test seam.
@@ -318,6 +440,14 @@ impl PerplexityProvider {
             ErrorKind::MissingCredential
         }))
     }
+}
+
+fn browser_source(index: usize) -> Result<CookieSourceId, ClassifiedError> {
+    let value = index
+        .checked_add(1)
+        .and_then(|value| u16::try_from(value).ok())
+        .ok_or_else(parse_error)?;
+    Ok(CookieSourceId::new(value))
 }
 
 impl ProviderAdapter for PerplexityProvider {

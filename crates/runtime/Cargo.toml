@@ -10,12 +10,12 @@ workspace = true
 
 [dependencies]
 notify-rust.workspace = true
-oab-domain = { path = "../domain", version = "=0.2.0" }
+oab-domain = { path = "../domain", version = "=0.3.0" }
 thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 
 [dev-dependencies]
-oab-test-support = { path = "../test-support", version = "=0.2.0" }
+oab-test-support = { path = "../test-support", version = "=0.3.0" }
 tokio = { workspace = true, features = ["test-util"] }

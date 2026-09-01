@@ -1,12 +1,13 @@
 Omarchy AI Bar
 Copyright (c) 2026 Omarchy AI Bar contributors
 
-This project is a Rust and Omarchy port inspired by CodexBar, used under the
-MIT License.
+This project was ported from CodexBar, used under the MIT License, and
+customized for Omarchy by Cengiz Han (https://cengizhan.bio).
+
+Source code: https://github.com/hancengiz/omarchy-ai-bar
 
 CodexBar
 Copyright (c) 2026 Peter Steinberger
 https://github.com/steipete/CodexBar
 
 Initial parity baseline: CodexBar commit 1680b4ed5.
-

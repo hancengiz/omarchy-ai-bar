@@ -18,6 +18,11 @@ use tokio::time::Instant;
 use url::Url;
 use zeroize::Zeroizing;
 
+use crate::browser_cookie::{
+    BrowserCookieDomainAllowlist, BrowserCookieDomainPolicy, BrowserCookieDomainRule,
+    ChromiumCookieDecryptor, import_browser_cookie_stores_with_decryptor,
+};
+use crate::browser_profile::BrowserProfileDiscovery;
 use crate::context::{ProviderAdapter, ProviderContext, ProviderFuture};
 use crate::cookie::{
     CookieImport, CookieImportOrder, CookieJar, CookieSourceId, CookieUrlPolicy, ValidatedCookieUrl,
@@ -51,6 +56,7 @@ const MAX_JSON_DEPTH: usize = 40;
 const MAX_JSON_STRING_BYTES: usize = 512 * 1024;
 const MAX_COOKIE_HEADER_BYTES: usize = 16 * 1024;
 const MAX_COOKIE_VALUE_BYTES: usize = 8 * 1024;
+const MAX_BROWSER_PROFILES: usize = 128;
 const MAX_BROWSER_SESSIONS: usize = 64;
 const MAX_MODELS: usize = 128;
 const MAX_MODEL_NAME_BYTES: usize = 160;
@@ -260,6 +266,93 @@ impl MistralProvider {
         now: OffsetDateTime,
     ) -> Result<Self, ClassifiedError> {
         Self::from_browser_jars_routes(scope, jars, now, MistralRouteSet::production()?)
+    }
+
+    /// Creates the production adapter from ordered Linux browser profiles.
+    ///
+    /// Profiles and Chromium Network/root stores remain isolated authentication
+    /// candidates. All complete sessions are retained in deterministic order
+    /// so an HTTP 401/403 can advance to the next profile, matching `CodexBar`'s
+    /// Mistral retry behavior.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable missing/expired, bounded local-data, decryption, scope,
+    /// or route failures.
+    pub fn new_browser_from_discovery(
+        scope: AccountScope,
+        discovery: &BrowserProfileDiscovery,
+        decryptor: &dyn ChromiumCookieDecryptor,
+        now: OffsetDateTime,
+    ) -> Result<Self, ClassifiedError> {
+        if scope.provider() != ProviderId::Mistral {
+            return Err(api_error());
+        }
+        let routes = MistralRouteSet::production()?;
+        let report = discovery.discover();
+        if report.profiles().len() > MAX_BROWSER_PROFILES {
+            return Err(parse_error());
+        }
+        let allowlist = BrowserCookieDomainAllowlist::new([
+            BrowserCookieDomainRule {
+                domain: "mistral.ai",
+                policy: BrowserCookieDomainPolicy::Exact,
+            },
+            BrowserCookieDomainRule {
+                domain: "admin.mistral.ai",
+                policy: BrowserCookieDomainPolicy::Exact,
+            },
+            BrowserCookieDomainRule {
+                domain: "auth.mistral.ai",
+                policy: BrowserCookieDomainPolicy::Exact,
+            },
+            BrowserCookieDomainRule {
+                domain: "console.mistral.ai",
+                policy: BrowserCookieDomainPolicy::Exact,
+            },
+        ])
+        .map_err(|_| api_error())?;
+        let admin_target = cookie_target(routes.routes.usage.clone(), routes.cookie_policy())?;
+        let mut jars = Vec::new();
+        let mut saw_cookie_data = false;
+        for (index, profile) in report.profiles().iter().enumerate() {
+            let store_sources = browser_store_sources(index)?;
+            let Ok(imports) = import_browser_cookie_stores_with_decryptor(
+                profile,
+                store_sources,
+                &allowlist,
+                decryptor,
+            ) else {
+                continue;
+            };
+            let order = CookieImportOrder::new(store_sources).map_err(|_| api_error())?;
+            for import in imports {
+                let jar = CookieJar::from_imports(&order, [import]).map_err(|_| parse_error())?;
+                saw_cookie_data |= !jar.is_empty();
+                let header = jar
+                    .header_for(&admin_target, now)
+                    .map_err(|_| api_error())?;
+                if !header
+                    .as_ref()
+                    .is_some_and(|header| has_session_cookie(header.expose()))
+                {
+                    continue;
+                }
+                jars.push(jar);
+                if jars.len() > MAX_BROWSER_SESSIONS {
+                    return Err(parse_error());
+                }
+            }
+        }
+        if jars.is_empty() {
+            return Err(ClassifiedError::new(if saw_cookie_data {
+                ErrorKind::AuthenticationExpired
+            } else {
+                ErrorKind::MissingCredential
+            }));
+        }
+        let jar_refs = jars.iter().collect::<Vec<_>>();
+        Self::from_browser_jars_routes(scope, &jar_refs, now, routes)
     }
 
     /// Creates a browser adapter with injected fixed routes.
@@ -495,6 +588,15 @@ impl MistralProvider {
             Ok(Ok(_) | Err(_)) | Err(_) => Ok(None),
         }
     }
+}
+
+fn browser_store_sources(index: usize) -> Result<[CookieSourceId; 2], ClassifiedError> {
+    let first = index
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(1))
+        .and_then(|value| u16::try_from(value).ok())
+        .ok_or_else(parse_error)?;
+    Ok([CookieSourceId::new(first), CookieSourceId::new(first + 1)])
 }
 
 impl ProviderAdapter for MistralProvider {

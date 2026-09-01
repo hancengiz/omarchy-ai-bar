@@ -21,6 +21,7 @@ pub mod providers;
 pub mod redaction;
 pub mod registry;
 pub mod retry;
+pub mod settings_descriptor;
 pub mod sqlite_snapshot;
 pub mod subprocess;
 pub mod transport;

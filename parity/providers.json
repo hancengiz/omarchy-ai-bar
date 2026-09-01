@@ -19,18 +19,28 @@
         "Sources/CodexBarCore/Providers/ProviderManifest.swift"
       ],
       "cells": {
-        "authentication": "planned",
-        "usage_resets": "planned",
-        "costs_history": "planned",
-        "sessions": "planned",
+        "authentication": "in-progress",
+        "usage_resets": "in-progress",
+        "costs_history": "in-progress",
+        "sessions": "in-progress",
         "browser": "planned",
-        "status_errors": "planned",
-        "refresh": "planned",
-        "cli_server": "planned",
-        "qml_ui": "planned"
+        "status_errors": "in-progress",
+        "refresh": "in-progress",
+        "cli_server": "in-progress",
+        "qml_ui": "in-progress"
       },
-      "status": "planned",
-      "tests": []
+      "status": "in-progress",
+      "tests": [
+        "crates/app/tests/cli_contract.rs",
+        "crates/providers/tests/provider_codex.rs",
+        "crates/providers/tests/provider_codex_app_server.rs",
+        "crates/providers/tests/provider_codex_files.rs",
+        "crates/providers/tests/provider_codex_http.rs",
+        "crates/providers/tests/provider_codex_normalize.rs",
+        "crates/providers/tests/provider_codex_provider.rs",
+        "crates/providers/tests/provider_codex_runner.rs",
+        "crates/providers/tests/provider_settings_descriptor.rs"
+      ]
     },
     {
       "id": "openai",
@@ -95,18 +105,22 @@
         "Sources/CodexBarCore/Providers/ProviderManifest.swift"
       ],
       "cells": {
-        "authentication": "planned",
-        "usage_resets": "planned",
-        "costs_history": "planned",
-        "sessions": "planned",
+        "authentication": "in-progress",
+        "usage_resets": "in-progress",
+        "costs_history": "in-progress",
+        "sessions": "in-progress",
         "browser": "planned",
-        "status_errors": "planned",
-        "refresh": "planned",
-        "cli_server": "planned",
-        "qml_ui": "planned"
+        "status_errors": "in-progress",
+        "refresh": "in-progress",
+        "cli_server": "in-progress",
+        "qml_ui": "in-progress"
       },
-      "status": "planned",
-      "tests": []
+      "status": "in-progress",
+      "tests": [
+        "crates/app/tests/cli_contract.rs",
+        "crates/app/tests/daemon_display_e2e.rs",
+        "crates/providers/tests/provider_settings_descriptor.rs"
+      ]
     },
     {
       "id": "clinepass",
@@ -398,11 +412,11 @@
         "usage_resets": "passing",
         "costs_history": "not-applicable",
         "sessions": "not-applicable",
-        "browser": "passing",
+        "browser": "in-progress",
         "status_errors": "passing",
         "refresh": "passing",
         "cli_server": "in-progress",
-        "qml_ui": "planned"
+        "qml_ui": "in-progress"
       },
       "status": "in-progress",
       "tests": [
@@ -414,6 +428,7 @@
         "crates/providers/tests/http_transport.rs",
         "crates/providers/tests/manual_capture.rs",
         "crates/providers/tests/provider_copilot.rs",
+        "crates/providers/tests/provider_settings_descriptor.rs",
         "crates/providers/tests/sqlite_snapshot.rs"
       ],
       "not_applicable_reasons": {
@@ -467,11 +482,12 @@
         "status_errors": "passing",
         "refresh": "passing",
         "cli_server": "in-progress",
-        "qml_ui": "planned"
+        "qml_ui": "in-progress"
       },
       "status": "in-progress",
       "tests": [
         "crates/providers/tests/fixed_api.rs",
+        "crates/providers/tests/provider_settings_descriptor.rs",
         "crates/providers/tests/provider_zai.rs"
       ],
       "not_applicable_reasons": {
@@ -1414,18 +1430,26 @@
         "Sources/CodexBarCore/Providers/ProviderManifest.swift"
       ],
       "cells": {
-        "authentication": "planned",
-        "usage_resets": "planned",
-        "costs_history": "planned",
-        "sessions": "planned",
-        "browser": "planned",
-        "status_errors": "planned",
-        "refresh": "planned",
-        "cli_server": "planned",
-        "qml_ui": "planned"
+        "authentication": "in-progress",
+        "usage_resets": "in-progress",
+        "costs_history": "in-progress",
+        "sessions": "in-progress",
+        "browser": "in-progress",
+        "status_errors": "in-progress",
+        "refresh": "in-progress",
+        "cli_server": "in-progress",
+        "qml_ui": "in-progress"
       },
-      "status": "planned",
-      "tests": []
+      "status": "in-progress",
+      "tests": [
+        "crates/app/tests/cli_contract.rs",
+        "crates/app/tests/daemon_display_e2e.rs",
+        "crates/providers/tests/browser_cookie.rs",
+        "crates/providers/tests/browser_profile.rs",
+        "crates/providers/tests/json_rpc_child.rs",
+        "crates/providers/tests/manual_capture.rs",
+        "crates/providers/tests/provider_settings_descriptor.rs"
+      ]
     },
     {
       "id": "groq",

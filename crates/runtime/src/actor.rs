@@ -8,7 +8,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use oab_domain::{
-    AccountScope, ClassifiedError, CostUsageSnapshot, ErrorKind, Timestamp, UsageSample,
+    AccountScope, ClassifiedError, CostUsageSnapshot, ErrorKind, Freshness, ProviderId,
+    ProviderSnapshot, RetryEligibility, Timestamp, UsageSample,
 };
 use thiserror::Error;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -32,6 +33,92 @@ const DEFAULT_MAX_IN_FLIGHT: usize = 4;
 const DEFAULT_SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 const MAX_SHUTDOWN_GRACE: Duration = Duration::from_secs(30);
 
+fn automatic_minimum_interval(provider: ProviderId) -> Duration {
+    match provider {
+        ProviderId::Codex => Duration::from_mins(1),
+        ProviderId::Grok => Duration::from_mins(5),
+        _ => Duration::from_mins(2),
+    }
+}
+
+fn automatic_backoff_delay(error: &ClassifiedError, failures: u8) -> Option<Duration> {
+    let base = match error.kind() {
+        ErrorKind::RateLimited => Duration::from_mins(5),
+        ErrorKind::ProviderUnavailable | ErrorKind::Network | ErrorKind::Api => {
+            Duration::from_secs(60)
+        }
+        ErrorKind::MissingCredential
+        | ErrorKind::AuthenticationExpired
+        | ErrorKind::PermissionDenied
+        | ErrorKind::Parse => return None,
+    };
+    let multiplier = 1_u32 << u32::from(failures.saturating_sub(1).min(5));
+    let exponential = base.saturating_mul(multiplier).min(Duration::from_hours(1));
+    let requested = error
+        .retry_after()
+        .map(|delay| Duration::from_secs(delay.seconds()));
+    Some(requested.map_or(exponential, |value| value.max(exponential)))
+}
+
+fn retained_automatic_backoff(
+    retained: &[ProviderSnapshot],
+    wall_now: Timestamp,
+    monotonic_now: Instant,
+) -> (BTreeMap<AccountScope, Instant>, BTreeMap<AccountScope, u8>) {
+    let mut cooldowns: BTreeMap<AccountScope, Instant> = BTreeMap::new();
+    let mut failures: BTreeMap<AccountScope, u8> = BTreeMap::new();
+    for snapshot in retained {
+        let (Some(error), Some(Freshness::Stale { since })) =
+            (snapshot.error(), snapshot.freshness())
+        else {
+            continue;
+        };
+        let Some(delay) = automatic_backoff_delay(error, 1) else {
+            continue;
+        };
+        let elapsed = if since >= wall_now {
+            Duration::ZERO
+        } else {
+            Duration::try_from(wall_now.as_offset_date_time() - since.as_offset_date_time())
+                .unwrap_or(delay)
+        };
+        let remaining = delay.saturating_sub(elapsed);
+        if remaining.is_zero() {
+            continue;
+        }
+        let until = monotonic_now + remaining;
+        cooldowns
+            .entry(snapshot.scope().clone())
+            .and_modify(|current| *current = (*current).max(until))
+            .or_insert(until);
+        failures.insert(snapshot.scope().clone(), 1);
+    }
+    (cooldowns, failures)
+}
+
+fn needs_menu_open_refresh(snapshot: &ProviderSnapshot) -> bool {
+    if let Some(error) = snapshot.error() {
+        return error.retry() == RetryEligibility::Automatic;
+    }
+    snapshot.last_known_good().is_none() || !matches!(snapshot.freshness(), Some(Freshness::Fresh))
+}
+
+fn usage_reset_boundaries(sample: &UsageSample) -> Vec<Timestamp> {
+    sample
+        .primary()
+        .into_iter()
+        .chain(sample.secondary())
+        .chain(sample.tertiary())
+        .chain(
+            sample
+                .extra_windows()
+                .iter()
+                .map(oab_domain::NamedRateWindow::window),
+        )
+        .filter_map(oab_domain::RateWindow::resets_at)
+        .collect()
+}
+
 /// Boxed, owned provider operation used by object-safe refresh sources.
 pub type RefreshFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
@@ -43,6 +130,21 @@ pub trait RefreshSource: Send + Sync + 'static {
         scope: AccountScope,
         cancellation: CancellationToken,
     ) -> RefreshFuture<Result<UsageSample, ClassifiedError>>;
+
+    /// Fetches display-critical usage with the admission trigger attached.
+    ///
+    /// Most sources do not vary their provider operation by trigger and keep
+    /// this default. Sources that cache expensive provider-owned CLI results
+    /// can override it so an explicit manual refresh bypasses that cache
+    /// without weakening the runtime's normal coalescing and backoff rules.
+    fn fetch_required_with_trigger(
+        &self,
+        scope: AccountScope,
+        cancellation: CancellationToken,
+        _trigger: RefreshTrigger,
+    ) -> RefreshFuture<Result<UsageSample, ClassifiedError>> {
+        self.fetch_required(scope, cancellation)
+    }
 
     /// Optionally enriches an already successful required sample.
     ///
@@ -408,6 +510,9 @@ pub struct RuntimeActor {
     pending: VecDeque<(AccountScope, RefreshTrigger)>,
     pending_scopes: BTreeSet<AccountScope>,
     generations: BTreeMap<AccountScope, u64>,
+    automatic_cooldowns: BTreeMap<AccountScope, Instant>,
+    automatic_failures: BTreeMap<AccountScope, u8>,
+    automatic_last_attempts: BTreeMap<AccountScope, Instant>,
 }
 
 impl RuntimeActor {
@@ -422,6 +527,26 @@ impl RuntimeActor {
         config: RuntimeConfig,
         clock: Arc<dyn Clock>,
         registrations: impl IntoIterator<Item = RefreshRegistration>,
+    ) -> Result<(Self, RuntimeHandle), RuntimeBuildError> {
+        Self::new_with_retained(config, clock, registrations, std::iter::empty())
+    }
+
+    /// Builds an actor whose exact-scope last-known-good samples are restored
+    /// before the first live refresh begins.
+    ///
+    /// Unavailable, loading, cross-scope, and error state is discarded. A
+    /// retained sample starts stale and becomes fresh only after a successful
+    /// provider fetch.
+    ///
+    /// # Errors
+    ///
+    /// Rejects duplicate scopes, excessive registrations, or invalid retained
+    /// snapshot state.
+    pub fn new_with_retained(
+        config: RuntimeConfig,
+        clock: Arc<dyn Clock>,
+        registrations: impl IntoIterator<Item = RefreshRegistration>,
+        retained: impl IntoIterator<Item = ProviderSnapshot>,
     ) -> Result<(Self, RuntimeHandle), RuntimeBuildError> {
         let mut sources = BTreeMap::new();
         for registration in registrations {
@@ -439,7 +564,11 @@ impl RuntimeActor {
             });
         }
 
-        let store = SnapshotStore::new(sources.keys().cloned(), clock.wall_now())?;
+        let retained = retained.into_iter().collect::<Vec<_>>();
+        let wall_now = clock.wall_now();
+        let (automatic_cooldowns, automatic_failures) =
+            retained_automatic_backoff(&retained, wall_now, clock.monotonic_now());
+        let store = SnapshotStore::new_with_retained(sources.keys().cloned(), retained, wall_now)?;
         let snapshots = store.subscribe();
         let (command_sender, commands) = mpsc::channel(config.limits.command_capacity());
         let (events, _event_receiver) = broadcast::channel(config.limits.event_capacity());
@@ -469,6 +598,9 @@ impl RuntimeActor {
                 pending: VecDeque::new(),
                 pending_scopes: BTreeSet::new(),
                 generations: BTreeMap::new(),
+                automatic_cooldowns,
+                automatic_failures,
+                automatic_last_attempts: BTreeMap::new(),
             },
             handle,
         ))
@@ -543,7 +675,22 @@ impl RuntimeActor {
                 let _ignored = response.send(admission);
             }
             RuntimeCommand::PopupOpen { open, response } => {
-                self.scheduler.set_popup_open(open, self.clock.as_ref());
+                let transitioned = self.scheduler.set_popup_open(open, self.clock.as_ref());
+                if transitioned && open {
+                    let retry_scopes = self
+                        .sources
+                        .keys()
+                        .filter(|scope| {
+                            self.store
+                                .snapshot(scope)
+                                .is_some_and(needs_menu_open_refresh)
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    for scope in retry_scopes {
+                        self.admit_refresh(scope, RefreshTrigger::MenuOpen)?;
+                    }
+                }
                 let _ignored = response.send(());
             }
             RuntimeCommand::ScheduleReset {
@@ -603,6 +750,25 @@ impl RuntimeActor {
         if self.active_required.contains_key(&scope) || self.pending_scopes.contains(&scope) {
             return Ok(RefreshAdmission::Coalesced);
         }
+        if !matches!(trigger, RefreshTrigger::Manual)
+            && self
+                .automatic_cooldowns
+                .get(&scope)
+                .is_some_and(|until| *until > self.clock.monotonic_now())
+        {
+            return Ok(RefreshAdmission::Coalesced);
+        }
+        if matches!(trigger, RefreshTrigger::Periodic)
+            && self
+                .automatic_last_attempts
+                .get(&scope)
+                .is_some_and(|last| {
+                    *last + automatic_minimum_interval(scope.provider())
+                        > self.clock.monotonic_now()
+                })
+        {
+            return Ok(RefreshAdmission::Coalesced);
+        }
         if self.active_required.len() < self.config.limits.max_in_flight() {
             self.start_required(scope, trigger)?;
             return Ok(RefreshAdmission::Started);
@@ -622,6 +788,8 @@ impl RuntimeActor {
         scope: AccountScope,
         trigger: RefreshTrigger,
     ) -> Result<(), RuntimeFault> {
+        self.automatic_last_attempts
+            .insert(scope.clone(), self.clock.monotonic_now());
         self.cancel_optional(&scope);
         let generation = self.next_generation(&scope)?;
         let source = Arc::clone(
@@ -638,7 +806,7 @@ impl RuntimeActor {
         let worker_scope = scope.clone();
         let abort = self.workers.spawn(async move {
             let result = source
-                .fetch_required(worker_scope.clone(), cancellation)
+                .fetch_required_with_trigger(worker_scope.clone(), cancellation, trigger)
                 .await;
             WorkerExit::Required {
                 scope: worker_scope,
@@ -738,9 +906,12 @@ impl RuntimeActor {
 
         match result {
             Ok(sample) if sample.scope() == &scope => {
+                self.automatic_cooldowns.remove(&scope);
+                self.automatic_failures.remove(&scope);
                 let optional_sample = sample.clone();
                 let generated_at = self.clock.wall_now();
                 self.store.apply_success(&scope, sample, generated_at)?;
+                self.reconcile_reset_boundaries(&scope);
                 self.emit(RuntimeEvent::RequiredUsagePublished {
                     scope: scope.clone(),
                     generation,
@@ -754,11 +925,58 @@ impl RuntimeActor {
                 self.finish_required(&scope, generation)?;
             }
             Err(error) => {
+                self.record_automatic_backoff(&scope, &error);
+                if error.retry() != RetryEligibility::Automatic {
+                    self.clear_reset_boundary(&scope);
+                }
                 self.publish_required_failure(&scope, generation, error)?;
                 self.finish_required(&scope, generation)?;
             }
         }
         Ok(())
+    }
+
+    fn record_automatic_backoff(&mut self, scope: &AccountScope, error: &ClassifiedError) {
+        let failures = self
+            .automatic_failures
+            .entry(scope.clone())
+            .and_modify(|value| *value = value.saturating_add(1).min(6))
+            .or_insert(1);
+        let Some(delay) = automatic_backoff_delay(error, *failures) else {
+            self.automatic_failures.remove(scope);
+            self.automatic_cooldowns.remove(scope);
+            return;
+        };
+        self.automatic_cooldowns
+            .insert(scope.clone(), self.clock.monotonic_now() + delay);
+    }
+
+    fn reconcile_reset_boundaries(&mut self, scope: &AccountScope) {
+        let Some(sample) = self
+            .store
+            .snapshot(scope)
+            .and_then(ProviderSnapshot::last_known_good)
+            .cloned()
+        else {
+            self.clear_reset_boundary(scope);
+            return;
+        };
+        let boundaries = usage_reset_boundaries(&sample);
+        let _ignored = self.scheduler.reconcile_reset_boundaries(
+            scope.clone(),
+            boundaries,
+            sample.fetched_at(),
+            self.clock.as_ref(),
+        );
+    }
+
+    fn clear_reset_boundary(&mut self, scope: &AccountScope) {
+        let _ignored = self.scheduler.reconcile_reset_boundaries(
+            scope.clone(),
+            std::iter::empty(),
+            self.clock.wall_now(),
+            self.clock.as_ref(),
+        );
     }
 
     fn handle_optional(
@@ -807,6 +1025,7 @@ impl RuntimeActor {
                 if self.required_is_current(&scope, generation) =>
             {
                 let classified = ClassifiedError::new(ErrorKind::ProviderUnavailable);
+                self.record_automatic_backoff(&scope, &classified);
                 self.publish_required_failure(&scope, generation, classified)?;
                 self.finish_required(&scope, generation)?;
             }
@@ -1035,3 +1254,20 @@ impl Drop for RuntimeTask {
 #[derive(Debug, Error)]
 #[error("runtime actor task failed")]
 pub struct RuntimeJoinError(#[source] JoinError);
+
+#[cfg(test)]
+mod policy_tests {
+    use super::*;
+
+    #[test]
+    fn provider_level_automatic_admission_floors_remain_bounded() {
+        assert_eq!(
+            automatic_minimum_interval(ProviderId::Claude),
+            Duration::from_mins(2)
+        );
+        assert_eq!(
+            automatic_minimum_interval(ProviderId::Grok),
+            Duration::from_mins(5)
+        );
+    }
+}

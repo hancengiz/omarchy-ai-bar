@@ -10,7 +10,9 @@ use time::OffsetDateTime;
 use tokio::time::Instant;
 
 const DEFAULT_NORMAL_CADENCE: Duration = Duration::from_mins(5);
-const DEFAULT_POPUP_CADENCE: Duration = Duration::from_secs(30);
+const DEFAULT_POPUP_CADENCE: Duration = Duration::from_mins(2);
+const RESET_BOUNDARY_GRACE: Duration = Duration::from_secs(30);
+const RESET_BOUNDARY_MINIMUM_DELAY: Duration = Duration::from_secs(5);
 
 /// Supplies paired wall-clock and monotonic observations to the scheduler.
 ///
@@ -191,7 +193,8 @@ impl Scheduler {
     ///
     /// Opening starts a separate accelerated cadence. Closing removes it and
     /// leaves the original normal-cadence anchor intact.
-    pub fn set_popup_open(&mut self, open: bool, clock: &dyn Clock) {
+    pub fn set_popup_open(&mut self, open: bool, clock: &dyn Clock) -> bool {
+        let was_open = self.popup_due.is_some();
         match (open, self.popup_due.is_some()) {
             (true, false) => {
                 self.popup_due = Some(saturating_instant_add(
@@ -202,6 +205,7 @@ impl Scheduler {
             (false, true) => self.popup_due = None,
             _ => {}
         }
+        was_open != open
     }
 
     /// Arms the current reset boundary for an account.
@@ -231,9 +235,46 @@ impl Scheduler {
             return Ok(false);
         }
 
-        let wall_now = clock.wall_now();
-        let monotonic_now = clock.monotonic_now();
-        let due = project_wall_deadline(boundary, wall_now, monotonic_now)?;
+        let due = project_reset_deadline(boundary, clock)?;
+        self.pending_resets
+            .insert(scope, ResetDeadline { boundary, due });
+        Ok(true)
+    }
+
+    /// Reconciles the reset schedule for an account with the reset boundaries
+    /// in its latest successful sample.
+    ///
+    /// The earliest boundary which has not already fired wins. An empty or
+    /// exhausted set cancels a previously armed boundary, so removed provider
+    /// metadata cannot cause a stale refresh later.
+    pub(crate) fn reconcile_reset_boundaries(
+        &mut self,
+        scope: AccountScope,
+        boundaries: impl IntoIterator<Item = Timestamp>,
+        sample_fetched_at: Timestamp,
+        clock: &dyn Clock,
+    ) -> Result<bool, ScheduleError> {
+        let last_fired = self.last_fired_resets.get(&scope).copied();
+        let next = boundaries
+            .into_iter()
+            .filter(|boundary| last_fired.is_none_or(|fired| *boundary > fired))
+            .filter(|boundary| {
+                reset_refresh_at(*boundary).is_ok_and(|refresh_at| sample_fetched_at < refresh_at)
+            })
+            .min();
+
+        let Some(boundary) = next else {
+            return Ok(self.pending_resets.remove(&scope).is_some());
+        };
+        if self
+            .pending_resets
+            .get(&scope)
+            .is_some_and(|pending| pending.boundary == boundary)
+        {
+            return Ok(false);
+        }
+
+        let due = project_reset_deadline(boundary, clock)?;
         self.pending_resets
             .insert(scope, ResetDeadline { boundary, due });
         Ok(true)
@@ -310,6 +351,28 @@ fn project_wall_deadline(
     let duration =
         Duration::try_from(wall_delta).map_err(|_| ScheduleError::WallDeltaOutOfRange)?;
     Ok(saturating_instant_add(monotonic_now, duration))
+}
+
+fn project_reset_deadline(
+    boundary: Timestamp,
+    clock: &dyn Clock,
+) -> Result<Instant, ScheduleError> {
+    let refresh_at = reset_refresh_at(boundary)?;
+    let monotonic_now = clock.monotonic_now();
+    let projected = project_wall_deadline(refresh_at, clock.wall_now(), monotonic_now)?;
+    let minimum = saturating_instant_add(monotonic_now, RESET_BOUNDARY_MINIMUM_DELAY);
+    Ok(cmp::max(projected, minimum))
+}
+
+fn reset_refresh_at(boundary: Timestamp) -> Result<Timestamp, ScheduleError> {
+    boundary
+        .as_offset_date_time()
+        .checked_add(time::Duration::seconds(
+            i64::try_from(RESET_BOUNDARY_GRACE.as_secs())
+                .expect("reset-boundary grace fits in i64"),
+        ))
+        .and_then(|value| Timestamp::new(value).ok())
+        .ok_or(ScheduleError::WallDeltaOutOfRange)
 }
 
 fn saturating_instant_add(base: Instant, duration: Duration) -> Instant {

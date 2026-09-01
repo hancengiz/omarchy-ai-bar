@@ -9,9 +9,9 @@ Verify the adjacent checksum, extract the archive, then copy its `bin`, `lib`,
 and `share` trees into `/usr`:
 
 ```sh
-sha256sum --check omarchy-ai-bar-0.2.0-linux-x86_64.tar.gz.sha256
-tar -xzf omarchy-ai-bar-0.2.0-linux-x86_64.tar.gz
-cd omarchy-ai-bar-0.2.0
+sha256sum --check omarchy-ai-bar-0.3.0-linux-x86_64.tar.gz.sha256
+tar -xzf omarchy-ai-bar-0.3.0-linux-x86_64.tar.gz
+cd omarchy-ai-bar-0.3.0
 sudo cp -a bin lib share /usr/
 systemctl --user daemon-reload
 ```
@@ -32,8 +32,10 @@ the credential flow you use:
   executable enables app-server fallback.
 - Claude reads Claude Code's Linux credential file and calls the OAuth usage
   endpoint natively; the CLI does not need to stay running.
-- Grok usage uses the `grok agent stdio` billing RPC and therefore requires the
-  Grok Build CLI plus `grok login`.
+- Grok first tries the `grok agent stdio` billing RPC, then reads the valid
+  owner-managed `~/.grok/auth.json` session for the authenticated billing
+  proxy. Install the Grok Build CLI and run `grok login`; it does not need to
+  remain running.
 - z.ai Coding Plan is native and uses `Z_AI_API_KEY` (or the supported
   BigModel/GLM credential variables); no helper executable is required.
 
@@ -46,6 +48,10 @@ After an AUR/pacman or direct-archive upgrade, refresh only the user bridge:
 ```sh
 omarchy-ai-bar bridge update
 ```
+
+The bridge command already asks Omarchy to rescan the plugin. Do not immediately
+chain `omarchy restart shell`; restart only if the rescan fails or the widget
+does not update.
 
 The update refuses unrecognized or locally modified plugin trees. Omarchy's
 placement, enabled state, and settings are stored outside that tree and remain

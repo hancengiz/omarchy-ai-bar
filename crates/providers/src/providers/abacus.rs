@@ -12,8 +12,15 @@ use time::{Date, Month, OffsetDateTime, format_description::well_known::Rfc3339}
 use url::Url;
 use zeroize::Zeroizing;
 
+use crate::browser_cookie::{
+    BrowserCookieDomainAllowlist, BrowserCookieDomainPolicy, BrowserCookieDomainRule,
+    ChromiumCookieDecryptor, import_browser_cookie_stores_with_decryptor,
+};
+use crate::browser_profile::{BrowserKind, BrowserProfileDiscovery};
 use crate::context::{ProviderAdapter, ProviderContext, ProviderFuture};
-use crate::cookie::{CookieJar, CookieUrlPolicy, ValidatedCookieUrl};
+use crate::cookie::{
+    CookieImportOrder, CookieJar, CookieSourceId, CookieUrlPolicy, ValidatedCookieUrl,
+};
 use crate::descriptor::ProviderSource;
 use crate::endpoint::{EndpointClass, EndpointPolicy};
 use crate::manual_capture::{CaptureHeader, ManualCaptureError, ManualCapturePolicy};
@@ -35,6 +42,7 @@ const MAX_JSON_KEY_BYTES: usize = 512;
 const MAX_PLAN_BYTES: usize = 256;
 const MAX_CREDIT_MAGNITUDE: f64 = 1_000_000_000_000_000.0;
 const OPTIONAL_BILLING_BUDGET: Duration = Duration::from_secs(5);
+const MAX_BROWSER_PROFILES: usize = 128;
 
 const KNOWN_SESSION_COOKIE_NAMES: [&str; 5] = [
     "sessionid",
@@ -157,9 +165,13 @@ pub struct AbacusProvider {
     scope: AccountScope,
     source: ProviderSource,
     routes: AbacusRouteSet,
+    sessions: Vec<AbacusSession>,
+    transport: HttpTransport,
+}
+
+struct AbacusSession {
     compute_cookie: Zeroizing<String>,
     billing_cookie: Option<Zeroizing<String>>,
-    transport: HttpTransport,
 }
 
 impl AbacusProvider {
@@ -213,6 +225,96 @@ impl AbacusProvider {
         now: OffsetDateTime,
     ) -> Result<Self, ClassifiedError> {
         Self::from_browser_jar_routes(scope, jar, now, AbacusRouteSet::production()?)
+    }
+
+    /// Creates the production adapter from ordered Linux browser profiles.
+    ///
+    /// Chromium Network and primary stores remain separate candidates, and
+    /// profiles are never combined. Google Chrome profiles are attempted
+    /// first, matching `CodexBar`'s preferred-Chrome pass, followed by every
+    /// other supported Linux browser profile in discovery order.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable missing/expired, bounded local-data, decryption,
+    /// scope, or endpoint error without exposing browser data.
+    pub fn new_browser_from_discovery(
+        scope: AccountScope,
+        discovery: &BrowserProfileDiscovery,
+        decryptor: &dyn ChromiumCookieDecryptor,
+        now: OffsetDateTime,
+    ) -> Result<Self, ClassifiedError> {
+        if scope.provider() != ProviderId::Abacus {
+            return Err(ClassifiedError::new(ErrorKind::Api));
+        }
+        let report = discovery.discover();
+        if report.profiles().len() > MAX_BROWSER_PROFILES {
+            return Err(ClassifiedError::new(ErrorKind::Parse));
+        }
+        let allowlist = BrowserCookieDomainAllowlist::new([
+            BrowserCookieDomainRule {
+                domain: "abacus.ai",
+                policy: BrowserCookieDomainPolicy::Exact,
+            },
+            BrowserCookieDomainRule {
+                domain: "apps.abacus.ai",
+                policy: BrowserCookieDomainPolicy::Exact,
+            },
+        ])
+        .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        let routes = AbacusRouteSet::production()?;
+        let profiles = report
+            .profiles()
+            .iter()
+            .filter(|profile| profile.browser() == BrowserKind::GoogleChrome)
+            .chain(
+                report
+                    .profiles()
+                    .iter()
+                    .filter(|profile| profile.browser() != BrowserKind::GoogleChrome),
+            );
+        let mut saw_cookie_data = false;
+        let mut sessions = Vec::new();
+        for (index, profile) in profiles.enumerate() {
+            let store_sources = browser_store_sources(index)?;
+            let Ok(imports) = import_browser_cookie_stores_with_decryptor(
+                profile,
+                store_sources,
+                &allowlist,
+                decryptor,
+            ) else {
+                continue;
+            };
+            let order = CookieImportOrder::new(store_sources)
+                .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+            for import in imports {
+                let jar = CookieJar::from_imports(&order, [import])
+                    .map_err(|_| ClassifiedError::new(ErrorKind::Parse))?;
+                saw_cookie_data |= !jar.is_empty();
+                match Self::from_browser_jar_routes(scope.clone(), &jar, now, routes.clone()) {
+                    Ok(provider) => {
+                        sessions.extend(provider.sessions);
+                        if sessions.len() > MAX_BROWSER_PROFILES * 2 {
+                            return Err(ClassifiedError::new(ErrorKind::Parse));
+                        }
+                    }
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            ErrorKind::MissingCredential | ErrorKind::AuthenticationExpired
+                        ) => {}
+                    Err(error) => return Err(error),
+                }
+            }
+        }
+        if sessions.is_empty() {
+            return Err(ClassifiedError::new(if saw_cookie_data {
+                ErrorKind::AuthenticationExpired
+            } else {
+                ErrorKind::MissingCredential
+            }));
+        }
+        Self::build_sessions(scope, ProviderSource::BrowserSession, routes, sessions)
     }
 
     /// Creates a browser adapter with deterministic routes. Cookie selection
@@ -279,18 +381,41 @@ impl AbacusProvider {
         compute_cookie: &str,
         billing_cookie: Option<&str>,
     ) -> Result<Self, ClassifiedError> {
+        Self::build_sessions(
+            scope,
+            source,
+            routes,
+            vec![AbacusSession {
+                compute_cookie: Zeroizing::new(compute_cookie.to_owned()),
+                billing_cookie: billing_cookie.map(|cookie| Zeroizing::new(cookie.to_owned())),
+            }],
+        )
+    }
+
+    fn build_sessions(
+        scope: AccountScope,
+        source: ProviderSource,
+        routes: AbacusRouteSet,
+        sessions: Vec<AbacusSession>,
+    ) -> Result<Self, ClassifiedError> {
         if scope.provider() != ProviderId::Abacus
             || !matches!(
                 source,
                 ProviderSource::ManualCookie | ProviderSource::BrowserSession
             )
+            || sessions.is_empty()
+            || sessions.len() > MAX_BROWSER_PROFILES * 2
         {
             return Err(ClassifiedError::new(ErrorKind::Api));
         }
         routes.validate()?;
-        Authentication::cookie(compute_cookie.to_owned()).map_err(|error| error.classified())?;
-        if let Some(cookie) = billing_cookie {
-            Authentication::cookie(cookie.to_owned()).map_err(|error| error.classified())?;
+        for session in &sessions {
+            Authentication::cookie(session.compute_cookie.as_str().to_owned())
+                .map_err(|error| error.classified())?;
+            if let Some(cookie) = &session.billing_cookie {
+                Authentication::cookie(cookie.as_str().to_owned())
+                    .map_err(|error| error.classified())?;
+            }
         }
         let transport = HttpTransport::new(routes.endpoint_policy()?, transport_config()?)
             .map_err(|error| error.classified())?;
@@ -298,8 +423,7 @@ impl AbacusProvider {
             scope,
             source,
             routes,
-            compute_cookie: Zeroizing::new(compute_cookie.to_owned()),
-            billing_cookie: billing_cookie.map(|cookie| Zeroizing::new(cookie.to_owned())),
+            sessions,
             transport,
         })
     }
@@ -315,12 +439,31 @@ impl AbacusProvider {
         fetched_at: Timestamp,
     ) -> Result<UsageSample, ClassifiedError> {
         self.validate_context(context)?;
-        let compute_request = self.compute_request()?;
+        let mut last_error = ClassifiedError::new(ErrorKind::AuthenticationExpired);
+        for session in &self.sessions {
+            if context.cancellation().is_cancelled() {
+                return Err(ClassifiedError::new(ErrorKind::Network));
+            }
+            match self.fetch_session_at(context, fetched_at, session).await {
+                Ok(sample) => return Ok(sample),
+                Err(error) => last_error = error,
+            }
+        }
+        Err(last_error)
+    }
+
+    async fn fetch_session_at(
+        &self,
+        context: &ProviderContext,
+        fetched_at: Timestamp,
+        session: &AbacusSession,
+    ) -> Result<UsageSample, ClassifiedError> {
+        let compute_request = self.compute_request(session)?;
         let compute = self
             .transport
             .send(&compute_request, context.cancellation());
         let billing = async {
-            let Some(request) = self.billing_request()? else {
+            let Some(request) = self.billing_request(session)? else {
                 return Ok::<_, ClassifiedError>(None);
             };
             Ok(tokio::time::timeout(
@@ -355,19 +498,32 @@ impl AbacusProvider {
         fetched_at: Timestamp,
     ) -> Result<UsageSample, ClassifiedError> {
         self.validate_context(context)?;
-        let request = self.compute_request()?;
-        let response = self
-            .transport
-            .send(&request, context.cancellation())
-            .await
-            .map_err(|error| error.classified())?;
-        parse_responses(
-            context.scope().clone(),
-            fetched_at,
-            &response,
-            None,
-            self.source,
-        )
+        let mut last_error = ClassifiedError::new(ErrorKind::AuthenticationExpired);
+        for session in &self.sessions {
+            if context.cancellation().is_cancelled() {
+                return Err(ClassifiedError::new(ErrorKind::Network));
+            }
+            let request = self.compute_request(session)?;
+            let result = self
+                .transport
+                .send(&request, context.cancellation())
+                .await
+                .map_err(|error| error.classified())
+                .and_then(|response| {
+                    parse_responses(
+                        context.scope().clone(),
+                        fetched_at,
+                        &response,
+                        None,
+                        self.source,
+                    )
+                });
+            match result {
+                Ok(sample) => return Ok(sample),
+                Err(error) => last_error = error,
+            }
+        }
+        Err(last_error)
     }
 
     fn validate_context(&self, context: &ProviderContext) -> Result<(), ClassifiedError> {
@@ -377,20 +533,39 @@ impl AbacusProvider {
         Ok(())
     }
 
-    fn compute_request(&self) -> Result<HttpRequest, ClassifiedError> {
+    fn compute_request(&self, session: &AbacusSession) -> Result<HttpRequest, ClassifiedError> {
         json_request(
             self.routes.compute_points.clone(),
             false,
-            self.compute_cookie.as_str(),
+            session.compute_cookie.as_str(),
         )
     }
 
-    fn billing_request(&self) -> Result<Option<HttpRequest>, ClassifiedError> {
-        self.billing_cookie
+    fn billing_request(
+        &self,
+        session: &AbacusSession,
+    ) -> Result<Option<HttpRequest>, ClassifiedError> {
+        session
+            .billing_cookie
             .as_ref()
             .map(|cookie| json_request(self.routes.billing_info.clone(), true, cookie.as_str()))
             .transpose()
     }
+
+    /// Credential source bound to this adapter.
+    #[must_use]
+    pub const fn source(&self) -> ProviderSource {
+        self.source
+    }
+}
+
+fn browser_store_sources(index: usize) -> Result<[CookieSourceId; 2], ClassifiedError> {
+    let first = index
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(1))
+        .and_then(|value| u16::try_from(value).ok())
+        .ok_or_else(|| ClassifiedError::new(ErrorKind::Parse))?;
+    Ok([CookieSourceId::new(first), CookieSourceId::new(first + 1)])
 }
 
 impl ProviderAdapter for AbacusProvider {
@@ -413,8 +588,15 @@ impl Debug for AbacusProvider {
             .field("scope", &"<redacted>")
             .field("source", &self.source)
             .field("routes", &"<redacted>")
-            .field("compute_cookie", &"<redacted>")
-            .field("has_billing_cookie", &self.billing_cookie.is_some())
+            .field("session_count", &self.sessions.len())
+            .field(
+                "billing_session_count",
+                &self
+                    .sessions
+                    .iter()
+                    .filter(|session| session.billing_cookie.is_some())
+                    .count(),
+            )
             .field("transport", &"<redacted>")
             .finish()
     }

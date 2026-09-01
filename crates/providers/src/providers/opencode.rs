@@ -21,8 +21,16 @@ use time::format_description::well_known::Rfc3339;
 use url::Url;
 use zeroize::Zeroizing;
 
+use crate::browser_cookie::{
+    BrowserCookieDomainAllowlist, BrowserCookieDomainPolicy, BrowserCookieDomainRule,
+    ChromiumCookieDecryptor, import_browser_cookie_stores_with_decryptor,
+};
+use crate::browser_profile::BrowserProfileDiscovery;
 use crate::context::{ProviderAdapter, ProviderContext, ProviderFuture};
-use crate::cookie::{CookieHeaderNormalizer, CookieJar, CookieUrlPolicy, ValidatedCookieUrl};
+use crate::cookie::{
+    CookieHeaderNormalizer, CookieImportOrder, CookieJar, CookieSourceId, CookieUrlPolicy,
+    ValidatedCookieUrl,
+};
 use crate::descriptor::ProviderSource;
 use crate::endpoint::{EndpointClass, EndpointPolicy};
 use crate::manual_capture::{CaptureHeader, ManualCaptureError, ManualCapturePolicy};
@@ -52,6 +60,7 @@ const MAX_FIELD_BYTES: usize = 8 * 1024;
 const MAX_WORKSPACES: usize = 64;
 const MAX_WORKSPACE_BYTES: usize = 128;
 const MAX_WINDOW_CANDIDATES: usize = 256;
+const MAX_BROWSER_PROFILES: usize = 128;
 const USD_SCALE: i64 = 100_000_000;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -156,6 +165,77 @@ impl OpenCodeProvider {
         )
     }
 
+    /// Creates the production adapter from ordered Linux browser profiles.
+    ///
+    /// Profile and Chromium store order are preserved. Each store remains an
+    /// isolated candidate, matching `CodexBar`'s first authenticated `OpenCode`
+    /// session behavior without combining cookies across profiles.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable missing/expired, bounded local-data, decryption,
+    /// scope, or endpoint error.
+    pub fn new_browser_from_discovery(
+        scope: AccountScope,
+        discovery: &BrowserProfileDiscovery,
+        decryptor: &dyn ChromiumCookieDecryptor,
+        now: OffsetDateTime,
+        workspace_override: Option<&str>,
+    ) -> Result<Self, ClassifiedError> {
+        if scope.provider() != ProviderId::OpenCode {
+            return Err(ClassifiedError::new(ErrorKind::Api));
+        }
+        let report = discovery.discover();
+        if report.profiles().len() > MAX_BROWSER_PROFILES {
+            return Err(ClassifiedError::new(ErrorKind::Parse));
+        }
+        let allowlist = BrowserCookieDomainAllowlist::new([
+            BrowserCookieDomainRule {
+                domain: "opencode.ai",
+                policy: BrowserCookieDomainPolicy::Exact,
+            },
+            BrowserCookieDomainRule {
+                domain: "app.opencode.ai",
+                policy: BrowserCookieDomainPolicy::Exact,
+            },
+        ])
+        .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        let mut saw_cookie_data = false;
+        for (index, profile) in report.profiles().iter().enumerate() {
+            let store_sources = browser_store_sources(index)?;
+            let Ok(imports) = import_browser_cookie_stores_with_decryptor(
+                profile,
+                store_sources,
+                &allowlist,
+                decryptor,
+            ) else {
+                continue;
+            };
+            let order = CookieImportOrder::new(store_sources)
+                .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+            for import in imports {
+                let jar = CookieJar::from_imports(&order, [import])
+                    .map_err(|_| ClassifiedError::new(ErrorKind::Parse))?;
+                saw_cookie_data |= !jar.is_empty();
+                match Self::new_browser(scope.clone(), &jar, now, workspace_override) {
+                    Ok(provider) => return Ok(provider),
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            ErrorKind::MissingCredential | ErrorKind::AuthenticationExpired
+                        ) => {}
+                    Err(error) => return Err(error),
+                }
+            }
+        }
+        drop(scope);
+        Err(ClassifiedError::new(if saw_cookie_data {
+            ErrorKind::AuthenticationExpired
+        } else {
+            ErrorKind::MissingCredential
+        }))
+    }
+
     /// Creates a browser adapter from one validated exact target and injected time.
     ///
     /// # Errors
@@ -209,6 +289,12 @@ impl OpenCodeProvider {
     ) -> Result<ValidatedCookieUrl, ClassifiedError> {
         ValidatedCookieUrl::new(server_url(origin)?, policy)
             .map_err(|_| ClassifiedError::new(ErrorKind::Api))
+    }
+
+    /// Source to which this provider instance is permanently bound.
+    #[must_use]
+    pub const fn source(&self) -> ProviderSource {
+        self.source
     }
 
     fn build(
@@ -384,6 +470,15 @@ impl OpenCodeProvider {
             .await?;
         classify_response(response)
     }
+}
+
+fn browser_store_sources(index: usize) -> Result<[CookieSourceId; 2], ClassifiedError> {
+    let first = index
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(1))
+        .and_then(|value| u16::try_from(value).ok())
+        .ok_or_else(|| ClassifiedError::new(ErrorKind::Parse))?;
+    Ok([CookieSourceId::new(first), CookieSourceId::new(first + 1)])
 }
 
 impl ProviderAdapter for OpenCodeProvider {

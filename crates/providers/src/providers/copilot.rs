@@ -12,9 +12,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use oab_domain::{
-    AccountScope, BoundedText, ClassifiedError, DetailRow, DetailSection, DetailSensitivity,
-    ErrorKind, NamedRateWindow, ProviderId, RateWindow, Timestamp, UsagePercent, UsageSample,
-    WindowUsage,
+    AccountKey, AccountScope, BoundedText, ClassifiedError, DetailRow, DetailSection,
+    DetailSensitivity, ErrorKind, NamedRateWindow, ProviderId, ProviderInstanceId, RateWindow,
+    Timestamp, UsagePercent, UsageSample, WindowUsage,
 };
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
@@ -49,7 +49,7 @@ use crate::transport::{
 };
 
 const DEFAULT_HOST: &str = "github.com";
-const TOKEN_KEY: &str = "COPILOT_API_TOKEN";
+const TOKEN_KEYS: &[&str] = &["COPILOT_API_TOKEN"];
 const DEVICE_CLIENT_ID: &str = "Iv1.b507a08c87ecfe98";
 const DEVICE_SCOPE: &str = "read:user";
 const DEVICE_GRANT_TYPE: &str = "urn:ietf:params:oauth:grant-type:device_code";
@@ -59,9 +59,12 @@ const MAX_HOST_BYTES: usize = 512;
 const MAX_DEVICE_CODE_BYTES: usize = 16 * 1024;
 const MAX_USER_CODE_BYTES: usize = 256;
 const MAX_VERIFICATION_URL_BYTES: usize = 8 * 1024;
+const MAX_IDENTITY_RESPONSE_BYTES: usize = 64 * 1024;
 const MAX_DEVICE_FLOW_LIFETIME: Duration = Duration::from_hours(24);
 const MAX_DEVICE_POLL_INTERVAL: Duration = Duration::from_mins(5);
 const SLOW_DOWN_DELAY: Duration = Duration::from_secs(5);
+const GITHUB_REST_API_VERSION: &str = "2022-11-28";
+const IDENTITY_USER_AGENT: &str = "omarchy-ai-bar";
 const BUDGET_SETTINGS_URL: &str = "https://github.com/settings/billing/budgets";
 const BUDGET_ORIGIN: &str = "https://github.com";
 const BUDGET_USER_AGENT: &str = "omarchy-ai-bar";
@@ -420,7 +423,7 @@ impl<C: DeviceFlowClock> CopilotDeviceFlow<C> {
             let _scope = wire
                 .scope
                 .ok_or_else(|| ClassifiedError::new(ErrorKind::Parse))?;
-            return ApiKeyCredential::new(token.as_str())
+            return ApiKeyCredential::from_zeroizing(token)
                 .map_err(|_| ClassifiedError::new(ErrorKind::Parse));
         }
     }
@@ -459,6 +462,186 @@ impl<C: DeviceFlowClock> CopilotDeviceFlow<C> {
             .checked_sub(elapsed)
             .filter(|remaining| !remaining.is_zero())
             .ok_or_else(|| ClassifiedError::new(ErrorKind::AuthenticationExpired))
+    }
+}
+
+/// A newly minted Copilot OAuth credential whose GitHub identity was verified.
+///
+/// The inner token remains opaque and zeroizing. Application orchestration can
+/// only move its bytes into the app-owned secret store after the validator has
+/// observed a valid identity response from the matching GitHub API origin.
+pub struct ValidatedCopilotCredential {
+    credential: ApiKeyCredential,
+}
+
+impl ValidatedCopilotCredential {
+    /// Moves the validated token into an application-owned secret container.
+    ///
+    /// The returned bytes remain zeroizing and must never be logged or
+    /// serialized.
+    #[must_use]
+    pub fn into_secret_bytes(self) -> Zeroizing<Vec<u8>> {
+        self.credential.into_secret_bytes()
+    }
+}
+
+impl Debug for ValidatedCopilotCredential {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str("ValidatedCopilotCredential(<redacted>)")
+    }
+}
+
+/// Exact-origin GitHub identity check for one newly minted Copilot credential.
+///
+/// Public GitHub credentials are sent only to `api.github.com/user`. Enterprise
+/// credentials use the same enterprise API origin as Copilot usage and are
+/// never rebound to public GitHub.
+pub struct CopilotLoginValidator {
+    client: FixedApiClient,
+    identity_url: Url,
+    credential: ApiKeyCredential,
+}
+
+impl CopilotLoginValidator {
+    /// Creates a production identity validator for GitHub or GitHub Enterprise.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable API error for an invalid host or transport policy.
+    pub fn new(
+        credential: ApiKeyCredential,
+        enterprise_host: Option<&str>,
+    ) -> Result<Self, ClassifiedError> {
+        let base_url = usage_base_url(enterprise_host)?;
+        let endpoint_class =
+            classify_https_endpoint(&base_url).map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        if endpoint_class == EndpointClass::LoopbackDevelopment {
+            return Err(ClassifiedError::new(ErrorKind::Api));
+        }
+        Self::build(base_url, endpoint_class, credential)
+    }
+
+    /// Builds an exact loopback validator for isolated transport tests.
+    ///
+    /// The supplied URL is still checked as a bare credential-free loopback
+    /// origin by the shared endpoint policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable API error for a non-loopback or malformed base URL.
+    #[doc(hidden)]
+    pub fn with_test_endpoint(
+        base_url: &Url,
+        credential: ApiKeyCredential,
+    ) -> Result<Self, ClassifiedError> {
+        Self::build(
+            base_url.clone(),
+            EndpointClass::LoopbackDevelopment,
+            credential,
+        )
+    }
+
+    fn build(
+        base_url: Url,
+        endpoint_class: EndpointClass,
+        credential: ApiKeyCredential,
+    ) -> Result<Self, ClassifiedError> {
+        if base_url.host_str().is_none()
+            || !base_url.username().is_empty()
+            || base_url.password().is_some()
+            || base_url.path() != "/"
+            || base_url.query().is_some()
+            || base_url.fragment().is_some()
+        {
+            return Err(ClassifiedError::new(ErrorKind::Api));
+        }
+        let scope = AccountScope::new(
+            ProviderId::Copilot,
+            ProviderInstanceId::new("login-validation")
+                .map_err(|_| ClassifiedError::new(ErrorKind::Api))?,
+            AccountKey::new("device-oauth").map_err(|_| ClassifiedError::new(ErrorKind::Api))?,
+        );
+        let identity_url = base_url
+            .join("user")
+            .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        let client = FixedApiClient::new_authorization_scheme(
+            scope,
+            base_url,
+            endpoint_class,
+            "token",
+            credential.clone(),
+            identity_transport_config()?,
+        )?
+        .with_source(ProviderSource::OAuth)?;
+        Ok(Self {
+            client,
+            identity_url,
+            credential,
+        })
+    }
+
+    /// Exact identity endpoint selected before any credential is attached.
+    #[must_use]
+    #[doc(hidden)]
+    pub const fn identity_url(&self) -> &Url {
+        &self.identity_url
+    }
+
+    /// Validates this credential against the matching GitHub `/user` endpoint.
+    ///
+    /// The response body is bounded by the transport and must contain a valid,
+    /// bounded numeric-or-string `id` and non-empty `login`. HTTP 401 and 403
+    /// remain distinct authentication and permission failures. Cancellation is
+    /// propagated through the shared provider transport.
+    ///
+    /// # Errors
+    ///
+    /// Returns classified transport, authentication, permission, or parse
+    /// failures without retaining or exposing response text.
+    pub async fn validate(
+        self,
+        cancellation: &CancellationToken,
+    ) -> Result<ValidatedCopilotCredential, ClassifiedError> {
+        let context = ProviderContext::new(
+            self.client.scope().clone(),
+            ProviderSource::OAuth,
+            cancellation.clone(),
+        );
+        let response = self
+            .client
+            .get_json_with_public_headers_and_status_map(
+                &context,
+                self.identity_url.clone(),
+                &[
+                    ("user-agent", IDENTITY_USER_AGENT),
+                    ("x-github-api-version", GITHUB_REST_API_VERSION),
+                ],
+                |status| match status {
+                    401 => Some(ErrorKind::AuthenticationExpired),
+                    403 => Some(ErrorKind::PermissionDenied),
+                    _ => None,
+                },
+            )
+            .await?;
+        if response.status() != 200 {
+            return Err(ClassifiedError::new(ErrorKind::Api));
+        }
+        let _identity = parse_oauth_identity(response.body())
+            .map_err(|_| ClassifiedError::new(ErrorKind::Parse))?;
+        Ok(ValidatedCopilotCredential {
+            credential: self.credential,
+        })
+    }
+}
+
+impl Debug for CopilotLoginValidator {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CopilotLoginValidator")
+            .field("client", &self.client)
+            .field("identity_url", &"<redacted>")
+            .field("credential", &"<redacted>")
+            .finish()
     }
 }
 
@@ -511,7 +694,7 @@ impl CopilotDeviceCode {
 
 #[derive(Deserialize)]
 struct AccessTokenWire {
-    access_token: Option<String>,
+    access_token: Option<Zeroizing<String>>,
     token_type: Option<String>,
     scope: Option<String>,
     error: Option<String>,
@@ -1104,16 +1287,21 @@ fn parse_oauth_identity(body: &[u8]) -> Result<GitHubOAuthIdentity, BudgetFailur
     validate_budget_json(&value).map_err(BudgetFailure::from)?;
     let object = value.as_object().ok_or(BudgetFailure::InvalidResponse)?;
     let id = flexible_identifier(object.get("id"))
-        .filter(|value| !value.is_empty() && value.len() <= MAX_IDENTITY_BYTES)
+        .map(|value| value.trim().to_owned())
+        .filter(|value| valid_identity_component(value))
         .ok_or(BudgetFailure::InvalidResponse)?;
     let login = object
         .get("login")
         .and_then(Value::as_str)
         .map(str::trim)
-        .filter(|value| !value.is_empty() && value.len() <= MAX_IDENTITY_BYTES)
+        .filter(|value| valid_identity_component(value))
         .ok_or(BudgetFailure::InvalidResponse)?
         .to_owned();
     Ok(GitHubOAuthIdentity { id, _login: login })
+}
+
+fn valid_identity_component(value: &str) -> bool {
+    !value.is_empty() && value.len() <= MAX_IDENTITY_BYTES && !value.chars().any(char::is_control)
 }
 
 fn parse_budget_page_metadata(html: &str) -> Result<BudgetPageMetadata, BudgetFailure> {
@@ -1864,8 +2052,34 @@ pub fn parse_budget_windows(
 /// Native GitHub Copilot usage adapter.
 pub struct CopilotProvider {
     client: FixedApiClient,
+    credential_owner: CopilotCredentialOwner,
     budget_identity_allowed: bool,
     budget: Option<CopilotBudgetEnrichment>,
+}
+
+/// Owner of the OAuth credential selected by application orchestration.
+///
+/// This is public-safe metadata only. It lets presentation layers distinguish
+/// an Omarchy AI Bar session from an explicit environment override without
+/// exposing, hashing, or otherwise inspecting the credential itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopilotCredentialOwner {
+    /// The caller did not provide ownership metadata.
+    Unspecified,
+    /// Omarchy AI Bar obtained and stored the token under its exact secret key.
+    Application,
+    /// The token came from an explicit process environment override.
+    Environment,
+}
+
+impl CopilotCredentialOwner {
+    const fn provenance_strategy(self) -> Option<&'static str> {
+        match self {
+            Self::Unspecified => None,
+            Self::Application => Some("application"),
+            Self::Environment => Some("environment"),
+        }
+    }
 }
 
 fn is_public_github_or_loopback(url: &Url) -> bool {
@@ -1895,7 +2109,7 @@ impl CopilotProvider {
     pub fn resolve_credential(
         environment: &BTreeMap<String, String>,
     ) -> Result<ApiKeyCredential, ClassifiedError> {
-        ApiKeyCredential::resolve(environment, &[TOKEN_KEY])
+        ApiKeyCredential::resolve(environment, TOKEN_KEYS)
     }
 
     /// Creates an exact-origin OAuth-token client for GitHub or GitHub Enterprise.
@@ -1907,6 +2121,26 @@ impl CopilotProvider {
         scope: AccountScope,
         credential: ApiKeyCredential,
         enterprise_host: Option<&str>,
+    ) -> Result<Self, ClassifiedError> {
+        Self::new_with_credential_owner(
+            scope,
+            credential,
+            enterprise_host,
+            CopilotCredentialOwner::Unspecified,
+        )
+    }
+
+    /// Creates an OAuth client and records only the public-safe credential
+    /// ownership class selected by application orchestration.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable API error for an invalid enterprise host or transport.
+    pub fn new_with_credential_owner(
+        scope: AccountScope,
+        credential: ApiKeyCredential,
+        enterprise_host: Option<&str>,
+        credential_owner: CopilotCredentialOwner,
     ) -> Result<Self, ClassifiedError> {
         let base_url = usage_base_url(enterprise_host)?;
         let endpoint_class =
@@ -1923,7 +2157,7 @@ impl CopilotProvider {
             transport_config()?,
         )?
         .with_source(ProviderSource::OAuth)?;
-        Self::from_client(client)
+        Ok(Self::from_client(client)?.with_credential_owner(credential_owner))
     }
 
     /// Wraps an already validated OAuth-bound account client.
@@ -1941,9 +2175,18 @@ impl CopilotProvider {
         let budget_identity_allowed = is_public_github_or_loopback(client.base_url());
         Ok(Self {
             client,
+            credential_owner: CopilotCredentialOwner::Unspecified,
             budget_identity_allowed,
             budget: None,
         })
+    }
+
+    /// Attaches public-safe ownership metadata without changing credential
+    /// authority, endpoint policy, or provider source.
+    #[must_use]
+    pub const fn with_credential_owner(mut self, owner: CopilotCredentialOwner) -> Self {
+        self.credential_owner = owner;
+        self
     }
 
     /// Reports whether this client's OAuth origin may perform public GitHub
@@ -1997,14 +2240,24 @@ impl CopilotProvider {
                     ("user-agent", "GitHubCopilotChat/0.26.7"),
                     ("x-github-api-version", "2025-04-01"),
                 ],
-                |status| (status == 403).then_some(ErrorKind::AuthenticationExpired),
+                |status| match status {
+                    401 => Some(ErrorKind::AuthenticationExpired),
+                    403 => Some(ErrorKind::PermissionDenied),
+                    _ => None,
+                },
             )
             .await?;
         if response.status() != 200 {
             return Err(ClassifiedError::new(ErrorKind::Api));
         }
         let payload: Value = response.json()?;
-        let base = normalize(context.scope().clone(), fetched_at, &payload, Vec::new())?;
+        let base = normalize(
+            context.scope().clone(),
+            fetched_at,
+            &payload,
+            Vec::new(),
+            self.credential_owner,
+        )?;
         let Some(enrichment) = &self.budget else {
             return Ok(base);
         };
@@ -2018,7 +2271,14 @@ impl CopilotProvider {
             Ok(extras) if !extras.is_empty() => extras,
             Ok(_) | Err(_) => return Ok(base),
         };
-        normalize(context.scope().clone(), fetched_at, &payload, extras).or(Ok(base))
+        normalize(
+            context.scope().clone(),
+            fetched_at,
+            &payload,
+            extras,
+            self.credential_owner,
+        )
+        .or(Ok(base))
     }
 
     async fn fetch_budget_windows(
@@ -2161,6 +2421,7 @@ fn normalize(
     fetched_at: Timestamp,
     payload: &Value,
     extra_windows: Vec<oab_domain::NamedRateWindow>,
+    credential_owner: CopilotCredentialOwner,
 ) -> Result<UsageSample, ClassifiedError> {
     let root = payload
         .as_object()
@@ -2212,8 +2473,24 @@ fn normalize(
             .chat
             .as_ref()
             .is_some_and(|snapshot| snapshot.unlimited);
+    let plan = match root.get("copilot_plan") {
+        None | Some(Value::Null) => "Unknown".to_owned(),
+        Some(Value::String(value)) => capitalize(value),
+        Some(_) => return Err(ClassifiedError::new(ErrorKind::Parse)),
+    };
+    let access_type_sku = optional_string(root.get("access_type_sku"))?;
+    let chat_enabled = optional_bool(root.get("chat_enabled"))?;
+    let cli_enabled = optional_bool(root.get("cli_enabled"))?;
+    let explicitly_inactive = access_type_sku
+        .as_deref()
+        .is_some_and(|sku| sku.eq_ignore_ascii_case("subscription_ended"))
+        || matches!((chat_enabled, cli_enabled), (Some(false), Some(false)));
     if primary.is_none() && secondary.is_none() && !token_billing && !has_unlimited {
-        return Err(ClassifiedError::new(ErrorKind::Parse));
+        return Err(ClassifiedError::new(if explicitly_inactive {
+            ErrorKind::PermissionDenied
+        } else {
+            ErrorKind::Parse
+        }));
     }
 
     let credits = snapshots
@@ -2226,17 +2503,7 @@ fn normalize(
                 .as_ref()
                 .and_then(|snapshot| snapshot.credits_used)
         });
-    let details = credits
-        .map(|credits| credits_section(credits, reset))
-        .transpose()?
-        .into_iter()
-        .collect();
-    let plan = match root.get("copilot_plan") {
-        None | Some(Value::Null) => "Unknown".to_owned(),
-        Some(Value::String(value)) => capitalize(value),
-        Some(_) => return Err(ClassifiedError::new(ErrorKind::Parse)),
-    };
-
+    let details = detail_sections(credits, reset, chat_enabled, cli_enabled)?;
     let mut builder = UsageSampleBuilder::new(scope, fetched_at)
         .extra_windows(extra_windows)
         .login_method(Some(plan))?
@@ -2247,7 +2514,11 @@ fn normalize(
     if let Some(secondary) = secondary {
         builder = builder.secondary(secondary);
     }
-    builder.provenance("copilot", "oauth")?.build()
+    let mut builder = builder.provenance("copilot", "oauth")?;
+    if let Some(strategy) = credential_owner.provenance_strategy() {
+        builder = builder.provenance("credential_owner", strategy)?;
+    }
+    builder.build()
 }
 
 fn parse_direct_snapshots(value: Option<&Value>) -> Result<QuotaSnapshots, ClassifiedError> {
@@ -2444,6 +2715,60 @@ fn credits_section(
         .map_err(|_| ClassifiedError::new(ErrorKind::Parse))
 }
 
+fn detail_sections(
+    credits: Option<f64>,
+    resets_at: Option<Timestamp>,
+    chat_enabled: Option<bool>,
+    cli_enabled: Option<bool>,
+) -> Result<Vec<DetailSection>, ClassifiedError> {
+    let mut details = Vec::new();
+    if let Some(section) = entitlement_section(chat_enabled, cli_enabled)? {
+        details.push(section);
+    }
+    if let Some(section) = credits
+        .map(|credits| credits_section(credits, resets_at))
+        .transpose()?
+    {
+        details.push(section);
+    }
+    Ok(details)
+}
+
+fn entitlement_section(
+    chat_enabled: Option<bool>,
+    cli_enabled: Option<bool>,
+) -> Result<Option<DetailSection>, ClassifiedError> {
+    let mut rows = Vec::new();
+    if let Some(enabled) = cli_enabled {
+        rows.push(
+            DetailRow::new(
+                "Copilot CLI",
+                if enabled { "Enabled" } else { "Disabled" },
+                Some("Reported by GitHub".to_owned()),
+                DetailSensitivity::Public,
+            )
+            .map_err(|_| ClassifiedError::new(ErrorKind::Parse))?,
+        );
+    }
+    if let Some(enabled) = chat_enabled {
+        rows.push(
+            DetailRow::new(
+                "Copilot Chat",
+                if enabled { "Enabled" } else { "Disabled" },
+                Some("Reported by GitHub".to_owned()),
+                DetailSensitivity::Public,
+            )
+            .map_err(|_| ClassifiedError::new(ErrorKind::Parse))?,
+        );
+    }
+    if rows.is_empty() {
+        return Ok(None);
+    }
+    DetailSection::new(Some("Entitlements".to_owned()), rows, None)
+        .map(Some)
+        .map_err(|_| ClassifiedError::new(ErrorKind::Parse))
+}
+
 fn optional_number(value: Option<&Value>) -> Result<Option<f64>, ClassifiedError> {
     let Some(value) = value.filter(|value| !value.is_null()) else {
         return Ok(None);
@@ -2463,6 +2788,22 @@ fn optional_number(value: Option<&Value>) -> Result<Option<f64>, ClassifiedError
 fn validate_optional_string(value: Option<&Value>) -> Result<(), ClassifiedError> {
     match value {
         None | Some(Value::Null | Value::String(_)) => Ok(()),
+        Some(_) => Err(ClassifiedError::new(ErrorKind::Parse)),
+    }
+}
+
+fn optional_string(value: Option<&Value>) -> Result<Option<String>, ClassifiedError> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) if value.len() <= MAX_IDENTITY_BYTES => Ok(Some(value.clone())),
+        Some(_) => Err(ClassifiedError::new(ErrorKind::Parse)),
+    }
+}
+
+fn optional_bool(value: Option<&Value>) -> Result<Option<bool>, ClassifiedError> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(value)) => Ok(Some(*value)),
         Some(_) => Err(ClassifiedError::new(ErrorKind::Parse)),
     }
 }
@@ -2605,6 +2946,17 @@ fn transport_config() -> Result<TransportConfig, ClassifiedError> {
         Duration::from_secs(30),
         MAX_RESPONSE_BYTES,
         3,
+        RetryPolicy::none(),
+    )
+    .map_err(|error| error.classified())
+}
+
+fn identity_transport_config() -> Result<TransportConfig, ClassifiedError> {
+    TransportConfig::new(
+        Duration::from_secs(5),
+        Duration::from_secs(15),
+        MAX_IDENTITY_RESPONSE_BYTES,
+        0,
         RetryPolicy::none(),
     )
     .map_err(|error| error.classified())

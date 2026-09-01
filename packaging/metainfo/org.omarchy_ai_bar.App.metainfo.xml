@@ -6,7 +6,7 @@
   <metadata_license>MIT</metadata_license>
   <project_license>MIT</project_license>
   <developer id="io.github.hancengiz">
-    <name>Omarchy AI Bar contributors</name>
+    <name>Cengiz Han</name>
   </developer>
   <description>
     <p>
@@ -17,6 +17,9 @@
       The backend also offers scriptable command-line output and a
       StatusNotifierItem fallback when the Omarchy plugin is unavailable.
     </p>
+    <p>
+      Ported from CodexBar and customized for Omarchy by Cengiz Han.
+    </p>
   </description>
   <launchable type="desktop-id">org.omarchy_ai_bar.App.desktop</launchable>
   <url type="homepage">https://github.com/hancengiz/omarchy-ai-bar</url>
@@ -25,6 +28,11 @@
   </provides>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.3.0" date="2026-09-01">
+      <description>
+        <p>CodexBar-style inline usage and cost views, provider configuration, credential isolation, persistent rate-limit backoff, and expanded native provider support.</p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-08-31">
       <description>
         <p>Full 69-provider daemon and Omarchy UI, operational CLI, Secret Service, local API, hooks, and sandboxed user plugins.</p>

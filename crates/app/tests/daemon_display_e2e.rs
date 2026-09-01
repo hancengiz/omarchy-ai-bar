@@ -15,6 +15,7 @@ use support::{DaemonFixture, EXPECTED_PROVIDER_IDS, terminate, wait_for_exit};
 #[test]
 fn daemon_publishes_production_provider_slice_and_completes_refresh_action() {
     let fixture = DaemonFixture::new("display-e2e");
+    fixture.configure_all_providers_enabled();
     let mut daemon = fixture.spawn_daemon();
     fixture.wait_until_listening(&mut daemon);
 

@@ -3,6 +3,7 @@
 use oab_domain::ProviderId;
 
 use crate::capability::{CapabilitySet, ProviderCapability};
+use crate::settings_descriptor::{ProviderSettingsDescriptor, settings_for};
 
 /// Provider-owned input mechanism selected for one account instance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,6 +125,15 @@ impl ProviderDescriptor {
     #[must_use]
     pub const fn default_behavior(self) -> DefaultBehavior {
         default_behavior_for(self.id)
+    }
+
+    /// Value-free typed settings metadata, when this provider has been migrated.
+    ///
+    /// Unavailable upstream controls remain in the schema with an explicit gap,
+    /// allowing consumers to hide them instead of offering ignored settings.
+    #[must_use]
+    pub const fn settings(self) -> Option<&'static ProviderSettingsDescriptor> {
+        settings_for(self.id)
     }
 }
 
@@ -265,6 +275,7 @@ const fn sources_for(id: ProviderId) -> SourceSet {
             .with(Source::BrowserSession)
             .with(Source::LocalData),
         Id::Grok => SourceSet::one(Source::Cli)
+            .with(Source::OAuth)
             .with(Source::ManualCookie)
             .with(Source::BrowserSession)
             .with(Source::LocalData),

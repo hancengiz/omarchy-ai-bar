@@ -1,8 +1,9 @@
 # Operations
 
 `omarchy-ai-bar daemon` is the single long-running backend used by the Omarchy
-widget, CLI projections, local API, and StatusNotifierItem fallback. The AUR
-package supplies a user service:
+widget, CLI projections, local API, and StatusNotifierItem fallback. The
+repository's Arch package definition supplies a user service; AUR publication
+is still a release task:
 
 ```sh
 systemctl --user enable --now omarchy-ai-bar.service
@@ -48,34 +49,205 @@ omarchy-ai-bar config path
 omarchy-ai-bar config init
 omarchy-ai-bar config show --format json
 omarchy-ai-bar config validate ./config.json
+omarchy-ai-bar config describe codex --format json
+omarchy-ai-bar config enable claude
+omarchy-ai-bar config disable claude
+omarchy-ai-bar config set-option codex codex-usage-source oauth
+omarchy-ai-bar config set-option codex codex-usage-source --clear
+omarchy-ai-bar config set-endpoint litellm https://llm.example.net
+omarchy-ai-bar config set-endpoint litellm --clear
 omarchy-ai-bar cache status
 omarchy-ai-bar cache clear
 ```
 
-Configuration contains non-secret policy only. Provider environment variables
-and supported native credential files remain the active provider inputs.
+Configuration contains non-secret policy only. One base endpoint can be saved
+for Azure OpenAI, Kimi, Ollama, Groq, ClawRouter, OpenRouter, Wayfinder,
+sub2api, LLM Proxy, LiteLLM, Neuralwatt, Codebuff, Chutes, and Deepgram. Each
+adapter applies its own HTTPS/private-network policy, and an explicit service
+environment value wins over the saved route. Providers with multiple endpoint
+roles, including z.ai, intentionally do not expose an ambiguous single field.
+Provider environment variables and supported native credential files remain
+active inputs.
+
+`config describe [PROVIDER]` is the public, value-free schema used by the QML
+settings renderer. The current typed slice covers Codex, Claude, Grok, Copilot,
+and z.ai. It describes pickers, toggles, plain fields, named secret slots,
+actions, dependencies, and whether each item is implemented. It contains no
+selected values, environment-variable names, credential paths, or secrets.
+Only controls marked `implemented` can be changed; a described CodexBar control
+that has no Linux runtime path is visible as unavailable instead of being saved
+and ignored.
+
+The runtime-backed non-secret settings are:
+
+| Provider | Setting key | Accepted values |
+| --- | --- | --- |
+| Codex | `codex-usage-source` | `auto`, `pat`, `oauth`, `cli` |
+| Codex | `codex-external-oauth-sources` | `true`, `false` |
+| Claude | `claude-usage-source` | `auto`, `oauth`, `cli` |
+| Grok | `grok-usage-source` | `auto`, `cli`, `oauth`, `web` |
+| Grok | `grok-cookie-source` | `auto`, `manual`, `off` |
+| Copilot | `copilot-budget-extras` | `true`, `false` |
+| Copilot | `copilot-budget-cookie-source` | `manual` |
+| Copilot | `copilot-enterprise-host` | a validated GitHub host |
+| z.ai | `zai-api-region` | `global`, `bigmodel-cn` |
+
+Claude Auto tries its read-only OAuth endpoint before a bounded interactive
+Claude CLI PTY capture. OAuth rate limits and permission failures are terminal
+and continue to use the shared last-known-good/backoff behavior; they do not
+launch another request through the CLI. A successful CLI sample is reused for
+up to 15 minutes by automatic refreshes, after OAuth has still been attempted
+first in Auto mode. CLI failures are never cached, any reported quota reset
+invalidates the entry, and an explicit manual refresh always bypasses it. Grok
+Auto advances from every non-cancelled CLI failure to its read-only OAuth proxy;
+only a final missing or expired authentication result can enter an eligible web
+session. Browser discovery is lazy and is only attached for Auto/Web with the
+Auto cookie policy; it is never performed during provider detection.
+
+Use `--clear` instead of a value to restore any setting to its provider default.
+Direct CLI mutations are applied after the user service restarts; the QML
+settings page performs that restart automatically.
+
+Enable/disable changes take effect when the daemon restarts; the Omarchy panel
+does this automatically when its provider switch is used. Disabled providers
+are omitted from daemon polling and from the usage menu. With no explicit route,
+a provider is enabled only when its local client, credential, or account can be
+detected; the complete registry remains available under **Add Provider**.
 `cache clear` is restricted to the application-owned XDG cache directory and
 does not follow symlinks.
 
-## Managed manual sessions
+## Managed provider credentials
 
-Providers that need a manual browser session can read one from the desktop
-Secret Service. List the supported canonical IDs with:
+Providers with a single API key, access token, or manual browser session can
+read an app-owned credential from the desktop Secret Service. Explicit service
+environment values keep precedence. `credential` is the preferred command;
+`cookie` remains an exact compatibility alias. List the supported canonical
+IDs and the adapter environment route with:
 
 ```sh
-omarchy-ai-bar cookie list
+omarchy-ai-bar credential list
 ```
 
 Credential input is accepted only from a pipe, never from an echoing terminal:
 
 ```sh
-printf '%s' "$SESSION_VALUE" | omarchy-ai-bar cookie set cursor
-omarchy-ai-bar cookie status cursor
-omarchy-ai-bar cookie delete cursor
+printf '%s\n' "$SESSION_VALUE" | omarchy-ai-bar credential set cursor
+omarchy-ai-bar credential status cursor
+omarchy-ai-bar credential delete cursor
 ```
 
-Add `--account NAME` to isolate more than one stored account. A matching
-provider environment variable takes precedence over Secret Service.
+Add `--account NAME` to isolate more than one stored credential. The current
+desktop daemon uses the `ambient` account; account selection is reserved for
+the multi-account routing surface.
+
+Typed providers may expose more than one purpose-specific credential. Supply
+the exact descriptor slot with `--slot`; unsupported provider/slot pairs are
+rejected before Secret Service is opened:
+
+```sh
+printf '%s\n' "$Z_AI_API_KEY" \
+  | omarchy-ai-bar credential set zai --slot zai-api-key
+omarchy-ai-bar credential status zai --slot zai-api-key
+
+printf '%s\n' "$GITHUB_COOKIE_HEADER" \
+  | omarchy-ai-bar credential set copilot --slot copilot-budget-cookie
+omarchy-ai-bar credential delete copilot --slot copilot-budget-cookie
+
+printf '%s\n' "$GROK_COOKIE_HEADER" \
+  | omarchy-ai-bar credential set grok --slot grok-web-cookie
+```
+
+Secret values are not representable in the JSON configuration or provider
+descriptor and are never included in daemon/display snapshots. The QML form
+sends one bounded newline-delimited value directly to the credential helper's
+standard input, clears its pending copy as soon as the helper starts, and only
+retains `configured`/`not configured` status. z.ai's typed API-key control
+continues to use the primary 0.2.x Secret Service key so an existing key is not
+silently shadowed. Copilot's budget-cookie slot is distinct from its OAuth-token
+key.
+
+## GitHub Copilot authentication
+
+Copilot uses a GitHub OAuth device flow owned by Omarchy AI Bar. The resulting
+token is stored under an exact application-specific Secret Service key; the
+bar does not read, write, log out, or rotate Copilot CLI or GitHub CLI
+credentials. The request deliberately matches pinned CodexBar's device flow:
+GitHub client `Iv1.b507a08c87ecfe98` with the single `read:user` scope. Sharing
+that public request identity does not share the returned token or its local
+storage.
+
+Normal background refresh never starts the device flow or mints a token. It
+only reads the bar's exact Secret Service item into private in-process provider
+state and performs authenticated `GET` requests. Current Copilot CLI releases
+instead look for `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`, then the
+`copilot-cli` system-keychain item, and finally GitHub CLI; Omarchy AI Bar reads
+and writes none of those locations. See GitHub's
+[Copilot CLI authentication reference](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/authenticate-copilot-cli).
+
+A user-requested `omarchy-ai-bar copilot login` does create a separate GitHub
+OAuth token. GitHub limits a user to ten tokens for the same OAuth app and
+scope combination and can revoke an older token after that limit is exceeded,
+so repeatedly manufacturing logins should be avoided. That remote OAuth limit
+does not make the local credential stores shared, and one or a few ordinary AI
+Bar logins do not edit the CLI's saved credential. See GitHub's
+[OAuth token-limit documentation](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#creating-multiple-tokens-for-oauth-apps).
+
+```sh
+omarchy-ai-bar copilot login
+omarchy-ai-bar copilot status
+omarchy-ai-bar copilot logout
+```
+
+Successful login enables Copilot and reloads the user service so the new token
+is available to the daemon. A newly issued token must pass a bounded GitHub
+`/user` identity check before the bar reads or writes its credential item.
+Login proves GitHub identity, but active Copilot feature access still depends
+on the account's subscription, assigned seat, and organization policy. When
+GitHub supplies them, the usage card shows separate **Copilot CLI** and
+**Copilot Chat** entitlement rows. Local token history may remain visible when
+current cloud access is unavailable; it is historical data, not proof of
+current entitlement.
+
+If Copilot CLI completes its authenticated account self-fetch and prints its
+welcome message before the service rejects feature/model access with HTTP 403
+and `not authorized to use this Copilot feature`, its credential has already
+been accepted. GitHub documents that invalid credentials initially produce
+HTTP 401, while insufficient authorization can produce HTTP 403; its Copilot
+documentation also confirms that seats and organization or enterprise policies
+govern CLI access. That evidence points to server-side entitlement or policy,
+not Omarchy AI Bar overwriting the CLI credential. It does not identify which
+seat or policy needs correction. See GitHub's
+[Copilot CLI authentication troubleshooting](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/troubleshoot-copilot-cli-auth)
+and [Copilot policy model](https://docs.github.com/en/copilot/concepts/policies).
+
+For GitHub Enterprise, save the host before starting the device flow. The host
+is normalized and unsafe, credential-bearing, or loopback inputs are rejected:
+
+```sh
+omarchy-ai-bar config set-option \
+  copilot copilot-enterprise-host octocorp.ghe.com
+omarchy-ai-bar copilot login
+```
+
+Copilot budget bars are a separate, optional web enrichment. The OAuth login
+does not produce the `github.com` browser cookie they require. Automatic
+browser-cookie import is not implemented yet; the current end-to-end path is a
+manual Cookie header in its own slot:
+
+```sh
+omarchy-ai-bar config set-option copilot copilot-budget-extras true
+omarchy-ai-bar config set-option \
+  copilot copilot-budget-cookie-source manual
+printf '%s\n' "$GITHUB_COOKIE_HEADER" \
+  | omarchy-ai-bar credential set copilot --slot copilot-budget-cookie
+systemctl --user restart omarchy-ai-bar.service
+```
+
+Use **Refresh budgets** in Copilot settings (or refresh Copilot normally) after
+the service reloads. A missing or invalid optional budget cookie does not replace
+the base Copilot API result. The menu-bar secondary-budget selector and
+automatic GitHub browser-cookie discovery remain unavailable and are labelled
+that way in the typed settings page.
 
 ## Hooks
 
@@ -141,4 +313,8 @@ omarchy-ai-bar bridge uninstall
 
 Install, update, and uninstall ask Omarchy to reload the plugin registry. A
 package upgrade does not silently rewrite the user's bridge; run `bridge
-update` after pacman installs a newer version.
+update` after pacman installs a newer version. Do not immediately follow a
+successful bridge update with `omarchy restart shell`: the update already
+requests a live rescan, and a simultaneous full restart can race Quickshell's
+plugin replacement. Restart only when the rescan fails or the widget remains
+on the previous payload.

@@ -10,8 +10,11 @@ use serde_json::Value;
 
 pub use schema::{
     AccountConfig, AppConfig, CURRENT_SCHEMA_VERSION, MAX_ACCOUNTS_PER_INSTANCE,
-    MAX_ENDPOINT_BYTES, MAX_PROVIDER_INSTANCES, MAX_PROVIDER_PATH_BYTES, MAX_TOTAL_ACCOUNTS,
-    ProviderConfig,
+    MAX_ENDPOINT_BYTES, MAX_PROVIDER_INSTANCES, MAX_PROVIDER_OPTION_DEPTH,
+    MAX_PROVIDER_OPTION_ENTRIES, MAX_PROVIDER_OPTION_KEY_BYTES, MAX_PROVIDER_OPTION_NODES,
+    MAX_PROVIDER_OPTION_TEXT_BYTES, MAX_PROVIDER_OPTION_TOTAL_TEXT_BYTES,
+    MAX_PROVIDER_OPTION_VALUE_BYTES, MAX_PROVIDER_PATH_BYTES, MAX_TOTAL_ACCOUNTS, ProviderConfig,
+    ProviderCookieSource, ProviderOptionValue, ProviderOptions, ProviderSourceMode,
 };
 pub use validation::validate_config;
 
@@ -63,6 +66,15 @@ fn contains_secret_like_field(value: &Value) -> bool {
 }
 
 fn secret_like_key(key: &str) -> bool {
+    // This enum selector is non-secret. A key with the same spelling inside
+    // `provider_options` is still rejected by semantic option validation.
+    if key == "cookie_source" {
+        return false;
+    }
+    strict_secret_like_key(key)
+}
+
+pub(super) fn strict_secret_like_key(key: &str) -> bool {
     let normalized: String = key
         .bytes()
         .filter(u8::is_ascii_alphanumeric)
@@ -101,8 +113,10 @@ pub enum DiagnosticCode {
     SecretField,
     /// A bounded collection exceeded its limit.
     CollectionTooLarge,
-    /// A bounded endpoint or provider path exceeded its limit.
+    /// A bounded endpoint, provider path, or provider option exceeded its limit.
     TextTooLong,
+    /// A provider option is empty, non-canonical, or otherwise unsafe.
+    InvalidProviderOption,
     /// A provider or account route is not in canonical form.
     InvalidIdentifier,
     /// The same provider and instance route occurs more than once.
@@ -133,6 +147,7 @@ impl DiagnosticCode {
             Self::SecretField => "secret_field",
             Self::CollectionTooLarge => "collection_too_large",
             Self::TextTooLong => "text_too_long",
+            Self::InvalidProviderOption => "invalid_provider_option",
             Self::InvalidIdentifier => "invalid_identifier",
             Self::DuplicateProvider => "duplicate_provider",
             Self::DuplicateProviderOrder => "duplicate_provider_order",
@@ -153,6 +168,7 @@ impl DiagnosticCode {
             Self::SecretField => "ordinary configuration must not contain secret fields",
             Self::CollectionTooLarge => "a configuration collection exceeds its limit",
             Self::TextTooLong => "a configuration text field exceeds its limit",
+            Self::InvalidProviderOption => "a provider option is invalid",
             Self::InvalidIdentifier => "a configuration identifier is not canonical",
             Self::DuplicateProvider => "a provider instance route is duplicated",
             Self::DuplicateProviderOrder => "the provider order contains a duplicate",

@@ -193,6 +193,46 @@ async fn error_statuses_still_use_default_stable_errors() {
 }
 
 #[tokio::test]
+async fn retry_after_survives_a_disabled_in_request_retry_budget() {
+    let server = FakeHttpServer::start([
+        FakeHttpResponse::new(429, Vec::new()).header("Retry-After", "900"),
+        FakeHttpResponse::new(503, Vec::new()).header("Retry-After", "7200"),
+    ])
+    .await;
+    let transport = HttpTransport::new(policy(&server), config()).expect("HTTP transport");
+
+    let rate_limit = transport
+        .send(
+            &HttpRequest::get(server.url("/rate-limit")),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("rate limit is rejected");
+    assert_eq!(rate_limit.retry_after(), Some(Duration::from_mins(15)));
+    assert_eq!(
+        rate_limit
+            .classified()
+            .retry_after()
+            .expect("classified cooldown")
+            .seconds(),
+        15 * 60
+    );
+
+    let unavailable = transport
+        .send(
+            &HttpRequest::get(server.url("/unavailable")),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("provider failure is rejected");
+    assert_eq!(
+        unavailable.retry_after(),
+        Some(Duration::from_hours(1)),
+        "server cooldowns remain globally bounded"
+    );
+}
+
+#[tokio::test]
 async fn response_headers_are_bounded_filtered_and_case_insensitive() {
     const HEADER_CANARY: &str = "fixture-response-header-secret";
     const BODY_CANARY: &str = "fixture-response-body-secret";

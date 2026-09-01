@@ -16,6 +16,11 @@ use time::OffsetDateTime;
 use url::Url;
 use zeroize::Zeroizing;
 
+use crate::browser_cookie::{
+    BrowserCookieDomainAllowlist, BrowserCookieDomainPolicy, BrowserCookieDomainRule,
+    ChromiumCookieDecryptor, import_browser_cookie_stores_with_decryptor,
+};
+use crate::browser_profile::BrowserProfileDiscovery;
 use crate::context::{ProviderAdapter, ProviderContext, ProviderFuture};
 use crate::cookie::{
     CookieImport, CookieImportOrder, CookieJar, CookieSourceId, CookieUrlPolicy, ValidatedCookieUrl,
@@ -46,6 +51,7 @@ const MAX_JSON_KEY_BYTES: usize = 512;
 const MAX_JSON_STRING_BYTES: usize = 512 * 1024;
 const MAX_WORKSPACE_ID_BYTES: usize = 512;
 const MONTHLY_SENTINEL_MINUTES: i64 = 30 * 24 * 60;
+const MAX_BROWSER_PROFILES: usize = 128;
 
 const COOKIE_DOMAINS: [&str; 5] = [
     "app.notion.com",
@@ -428,6 +434,79 @@ impl NotionProvider {
         )
     }
 
+    /// Creates the production adapter from ordered Linux browser profiles.
+    ///
+    /// Every browser store remains an isolated candidate. Within a selected
+    /// store the fixed Notion domain priority removes duplicate cookie names,
+    /// and `token_v2` is required before an adapter can be returned. No
+    /// profiles or Chromium stores are combined.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable missing/expired, bounded local-data, decryption,
+    /// workspace, scope, or endpoint error without exposing browser data.
+    pub fn new_browser_from_discovery(
+        scope: AccountScope,
+        discovery: &BrowserProfileDiscovery,
+        decryptor: &dyn ChromiumCookieDecryptor,
+        now: OffsetDateTime,
+        preferred_space_id: Option<&str>,
+    ) -> Result<Self, ClassifiedError> {
+        if scope.provider() != ProviderId::Notion {
+            return Err(api_error());
+        }
+        let report = discovery.discover();
+        if report.profiles().len() > MAX_BROWSER_PROFILES {
+            return Err(parse_error());
+        }
+        let allowlist = BrowserCookieDomainAllowlist::new(COOKIE_DOMAINS.map(|domain| {
+            BrowserCookieDomainRule {
+                domain,
+                policy: BrowserCookieDomainPolicy::Exact,
+            }
+        }))
+        .map_err(|_| api_error())?;
+        let routes = NotionRouteSet::production()?;
+        let mut saw_cookie_data = false;
+        for (index, profile) in report.profiles().iter().enumerate() {
+            let store_sources = browser_store_sources(index)?;
+            let Ok(imports) = import_browser_cookie_stores_with_decryptor(
+                profile,
+                store_sources,
+                &allowlist,
+                decryptor,
+            ) else {
+                continue;
+            };
+            let order = CookieImportOrder::new(store_sources).map_err(|_| api_error())?;
+            for import in imports {
+                let jar = CookieJar::from_imports(&order, [import]).map_err(|_| parse_error())?;
+                saw_cookie_data |= !jar.is_empty();
+                match Self::from_browser_jar_routes(
+                    scope.clone(),
+                    &jar,
+                    now,
+                    preferred_space_id,
+                    routes.clone(),
+                ) {
+                    Ok(provider) => return Ok(provider),
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            ErrorKind::MissingCredential | ErrorKind::AuthenticationExpired
+                        ) => {}
+                    Err(error) => return Err(error),
+                }
+            }
+        }
+        drop(scope);
+        Err(ClassifiedError::new(if saw_cookie_data {
+            ErrorKind::AuthenticationExpired
+        } else {
+            ErrorKind::MissingCredential
+        }))
+    }
+
     /// Creates a browser adapter at exact injected transport routes.
     ///
     /// Cookie selection remains bound to the five fixed HTTPS Notion domains.
@@ -575,6 +654,21 @@ impl NotionProvider {
                     .map_err(|error| error.classified())
             })
     }
+
+    /// Credential source bound to this adapter.
+    #[must_use]
+    pub const fn source(&self) -> ProviderSource {
+        self.source
+    }
+}
+
+fn browser_store_sources(index: usize) -> Result<[CookieSourceId; 2], ClassifiedError> {
+    let first = index
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(1))
+        .and_then(|value| u16::try_from(value).ok())
+        .ok_or_else(parse_error)?;
+    Ok([CookieSourceId::new(first), CookieSourceId::new(first + 1)])
 }
 
 impl ProviderAdapter for NotionProvider {

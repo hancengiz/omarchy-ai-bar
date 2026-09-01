@@ -14,7 +14,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Component, Path, PathBuf};
 
 use nix::dir::Dir;
-use nix::fcntl::{AtFlags, OFlag, open, openat};
+use nix::fcntl::{AtFlags, OFlag, PosixFadviseAdvice, open, openat, posix_fadvise};
 use nix::sys::stat::{Mode, SFlag, fstat, fstatat};
 use nix::unistd::geteuid;
 use thiserror::Error;
@@ -22,9 +22,9 @@ use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
 /// Absolute ceiling for one in-memory provider file.
-pub const MAX_PROVIDER_FILE_BYTES: usize = 256 * 1024 * 1024;
+pub const MAX_PROVIDER_FILE_BYTES: usize = 512 * 1024 * 1024;
 /// Absolute ceiling for aggregate file sizes observed by one scan.
-pub const MAX_PROVIDER_SCAN_BYTES: usize = 512 * 1024 * 1024;
+pub const MAX_PROVIDER_SCAN_BYTES: usize = 1024 * 1024 * 1024;
 /// Absolute ceiling for entries observed by one scan.
 pub const MAX_PROVIDER_SCAN_ENTRIES: usize = 25_000;
 /// Absolute ceiling for files returned by one scan.
@@ -36,6 +36,7 @@ const MAX_PATH_BYTES: usize = 4096;
 const MAX_COMPONENT_BYTES: usize = 255;
 const MAX_ROOT_COMPONENTS: usize = 64;
 const READ_CHUNK_BYTES: usize = 16 * 1024;
+const MAX_PROVIDER_LINE_BYTES: usize = 4 * 1024 * 1024;
 
 /// Caller-selected scan ceilings, themselves constrained by hard limits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -236,6 +237,52 @@ impl ProviderFileRoot {
         )
     }
 
+    /// Streams bounded lines from an identity-pinned scan candidate.
+    ///
+    /// Lines larger than `maximum_line_bytes` are skipped without allocating
+    /// the whole line. This keeps large append-only provider logs from
+    /// temporarily occupying their full on-disk size in process memory while
+    /// preserving the same ownership, symlink, identity, and mutation checks
+    /// as [`Self::read_candidate`]. Newline bytes are not passed to `visitor`.
+    ///
+    /// # Errors
+    ///
+    /// Rejects invalid line limits, changed or unsafe candidates, read
+    /// failures, and cancellation.
+    pub fn visit_candidate_lines(
+        &self,
+        candidate: &ProviderFileCandidate,
+        maximum_line_bytes: usize,
+        cancellation: &CancellationToken,
+        visitor: impl FnMut(&[u8]),
+    ) -> Result<(), ProviderFileError> {
+        check_cancelled(cancellation)?;
+        if maximum_line_bytes == 0 || maximum_line_bytes > MAX_PROVIDER_LINE_BYTES {
+            return Err(ProviderFileError::InvalidLimits);
+        }
+        self.ensure_root_identity()?;
+        if candidate.root != self.identity {
+            return Err(ProviderFileError::WrongRoot);
+        }
+        inspect_relative_file(
+            &self.directory,
+            &candidate.relative_path,
+            candidate.size,
+            self.owner,
+            Some(candidate.snapshot),
+            cancellation,
+            |file, expected_size, cancellation| {
+                visit_bounded_lines(
+                    file,
+                    expected_size,
+                    maximum_line_bytes,
+                    cancellation,
+                    visitor,
+                )
+            },
+        )
+    }
+
     fn ensure_root_identity(&self) -> Result<(), ProviderFileError> {
         if geteuid().as_raw() != self.owner {
             return Err(ProviderFileError::WrongOwner);
@@ -284,6 +331,15 @@ impl ProviderFileCandidate {
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.size == 0
+    }
+
+    /// Returns the identity-pinned modification time observed by the scan.
+    #[must_use]
+    pub const fn modified_unix_time(&self) -> (i64, i64) {
+        (
+            self.snapshot.modified_seconds,
+            self.snapshot.modified_nanoseconds,
+        )
     }
 }
 
@@ -656,6 +712,33 @@ fn read_relative_file(
     expected: Option<FileSnapshot>,
     cancellation: &CancellationToken,
 ) -> Result<ProviderFileContents, ProviderFileError> {
+    inspect_relative_file(
+        root,
+        relative,
+        maximum_bytes,
+        owner,
+        expected,
+        cancellation,
+        |file, expected_size, cancellation| {
+            read_bounded(file, expected_size, maximum_bytes, cancellation)
+                .map(|bytes| ProviderFileContents { bytes })
+        },
+    )
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "security-sensitive file validation inputs remain explicit"
+)]
+fn inspect_relative_file<T>(
+    root: &File,
+    relative: &Path,
+    maximum_bytes: usize,
+    owner: u32,
+    expected: Option<FileSnapshot>,
+    cancellation: &CancellationToken,
+    operation: impl FnOnce(&mut File, usize, &CancellationToken) -> Result<T, ProviderFileError>,
+) -> Result<T, ProviderFileError> {
     check_cancelled(cancellation)?;
     let parent_path = relative.parent().unwrap_or_else(|| Path::new(""));
     let name = relative
@@ -688,7 +771,7 @@ fn read_relative_file(
         return Err(ProviderFileError::Changed);
     }
     let size = usize::try_from(opened.st_size).map_err(|_| ProviderFileError::TooLarge)?;
-    let bytes = read_bounded(&mut file, size, maximum_bytes, cancellation)?;
+    let output = operation(&mut file, size, cancellation)?;
     let closed_over = fstat(&file).map_err(|_| ProviderFileError::Changed)?;
     if FileSnapshot::from_stat(&closed_over) != snapshot {
         return Err(ProviderFileError::Changed);
@@ -700,7 +783,7 @@ fn read_relative_file(
     }
     chain.verify(owner)?;
     check_cancelled(cancellation)?;
-    Ok(ProviderFileContents { bytes })
+    Ok(output)
 }
 
 fn read_bounded(
@@ -735,6 +818,57 @@ fn read_bounded(
         return Err(ProviderFileError::Changed);
     }
     Ok(bytes)
+}
+
+fn visit_bounded_lines(
+    file: &mut File,
+    expected_size: usize,
+    maximum_line_bytes: usize,
+    cancellation: &CancellationToken,
+    mut visitor: impl FnMut(&[u8]),
+) -> Result<(), ProviderFileError> {
+    let _ = posix_fadvise(&*file, 0, 0, PosixFadviseAdvice::POSIX_FADV_SEQUENTIAL);
+    let mut total = 0_usize;
+    let mut line = Zeroizing::new(Vec::with_capacity(maximum_line_bytes.min(64 * 1024)));
+    let mut chunk = Zeroizing::new([0_u8; READ_CHUNK_BYTES]);
+    let mut oversized = false;
+    loop {
+        check_cancelled(cancellation)?;
+        let read = file
+            .read(&mut *chunk)
+            .map_err(|_| ProviderFileError::Read)?;
+        if read == 0 {
+            break;
+        }
+        total = total.checked_add(read).ok_or(ProviderFileError::TooLarge)?;
+        if total > expected_size {
+            return Err(ProviderFileError::Changed);
+        }
+        for byte in &chunk[..read] {
+            if *byte == b'\n' {
+                if !oversized && !line.is_empty() {
+                    visitor(&line);
+                }
+                line.clear();
+                oversized = false;
+            } else if !oversized {
+                if line.len() == maximum_line_bytes {
+                    line.clear();
+                    oversized = true;
+                } else {
+                    line.push(*byte);
+                }
+            }
+        }
+    }
+    if total != expected_size {
+        return Err(ProviderFileError::Changed);
+    }
+    if !oversized && !line.is_empty() {
+        visitor(&line);
+    }
+    let _ = posix_fadvise(&*file, 0, 0, PosixFadviseAdvice::POSIX_FADV_DONTNEED);
+    Ok(())
 }
 
 #[allow(

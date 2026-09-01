@@ -378,6 +378,31 @@ fn candidates_are_root_scoped_identity_pinned_and_redacted() {
 }
 
 #[test]
+fn candidate_lines_are_streamed_and_oversized_records_are_skipped() {
+    let fixture = Fixture::new();
+    fixture.write(
+        "events.jsonl",
+        b"one\nrecord-too-large\ntwo-without-newline",
+    );
+    let root = fixture.open();
+    let candidates = root
+        .scan("", limits(0, 2, 2, 64, 64), &CancellationToken::new())
+        .expect("candidate scan");
+    let mut lines = Vec::new();
+    root.visit_candidate_lines(&candidates[0], 8, &CancellationToken::new(), |line| {
+        lines.push(line.to_vec());
+    })
+    .expect("bounded line stream");
+
+    assert_eq!(lines, [b"one".to_vec()]);
+    assert_eq!(
+        root.visit_candidate_lines(&candidates[0], 0, &CancellationToken::new(), |_| {})
+            .expect_err("zero line limit"),
+        ProviderFileError::InvalidLimits
+    );
+}
+
+#[test]
 fn replaced_candidate_never_reads_a_symlink_target() {
     let fixture = Fixture::new();
     let selected = fixture.write("selected", b"inside");

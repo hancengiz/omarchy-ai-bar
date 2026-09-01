@@ -213,7 +213,12 @@ fn endpoints_and_provider_paths_fail_closed() {
         ("ollama", "http://localhost:11434/v1"),
         ("ollama", "http://127.42.0.9:4000/v1"),
         ("ollama", "http://[::1]:8080/v1"),
+        ("sub2api", "http://127.0.0.1:8080/v1"),
+        ("wayfinder", "http://localhost:8088"),
         ("litellm", "http://127.0.0.1:4000/v1"),
+        ("litellm", "http://192.168.1.5:4000/v1"),
+        ("llmproxy", "http://proxy.local:4000/v1"),
+        ("llmproxy", "http://[fd00::1]:4000/v1"),
     ] {
         let input =
             config(provider, "account-one").replace("https://api.example.test/v1", endpoint);
@@ -235,6 +240,22 @@ fn endpoints_and_provider_paths_fail_closed() {
         assert_eq!(
             load_config_bytes(input.as_bytes())
                 .expect_err("unsafe endpoint")
+                .code(),
+            DiagnosticCode::InvalidEndpoint
+        );
+    }
+
+    for (provider, endpoint) in [
+        ("sub2api", "http://192.168.1.5:8080"),
+        ("wayfinder", "http://router.local:8088"),
+        ("litellm", "http://api.example.test:4000"),
+        ("llmproxy", "http://8.8.8.8:4000"),
+    ] {
+        let input =
+            config(provider, "account-one").replace("https://api.example.test/v1", endpoint);
+        assert_eq!(
+            load_config_bytes(input.as_bytes())
+                .expect_err("provider HTTP policy must fail closed")
                 .code(),
             DiagnosticCode::InvalidEndpoint
         );

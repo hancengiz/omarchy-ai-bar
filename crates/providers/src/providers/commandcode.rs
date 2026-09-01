@@ -15,6 +15,11 @@ use time::OffsetDateTime;
 use url::Url;
 use zeroize::Zeroizing;
 
+use crate::browser_cookie::{
+    BrowserCookieDomainAllowlist, BrowserCookieDomainPolicy, BrowserCookieDomainRule,
+    ChromiumCookieDecryptor, import_browser_cookies_merging_chromium_stores_with_decryptor,
+};
+use crate::browser_profile::BrowserProfileDiscovery;
 use crate::context::{ProviderAdapter, ProviderContext, ProviderFuture};
 use crate::cookie::{
     CookieImport, CookieImportOrder, CookieJar, CookieSourceId, CookieUrlPolicy, ValidatedCookieUrl,
@@ -47,6 +52,7 @@ const MAX_AMOUNT: i64 = 1_000_000_000_000_000;
 const MONTH_SECONDS: u64 = 30 * 24 * 60 * 60;
 const DEFAULT_SUBSCRIPTION_GRACE: Duration = Duration::from_secs(2);
 const BARE_COOKIE_NAME: &str = "__Secure-better-auth.session_token";
+const MAX_BROWSER_PROFILES: usize = 128;
 
 #[derive(Clone)]
 pub struct CommandCodeRouteSet {
@@ -238,6 +244,73 @@ impl CommandCodeProvider {
         Self::from_browser_jar_routes(scope, jar, now, CommandCodeRouteSet::production()?)
     }
 
+    /// Creates the production adapter from ordered Linux browser profiles.
+    ///
+    /// `CodexBar` treats each browser profile as an independent session while
+    /// merging that profile's Chromium Network and primary stores. The shared
+    /// importer implements the same expiry precedence: a later persistent
+    /// expiry wins, with Network winning equal expiries and session-cookie
+    /// ties. Cookies are never combined across profiles.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable missing/expired, bounded local-data, decryption,
+    /// scope, or endpoint error without exposing browser data.
+    pub fn new_browser_from_discovery(
+        scope: AccountScope,
+        discovery: &BrowserProfileDiscovery,
+        decryptor: &dyn ChromiumCookieDecryptor,
+        now: OffsetDateTime,
+    ) -> Result<Self, ClassifiedError> {
+        if scope.provider() != ProviderId::CommandCode {
+            return Err(api_error());
+        }
+        let report = discovery.discover();
+        if report.profiles().len() > MAX_BROWSER_PROFILES {
+            return Err(parse_error());
+        }
+        let allowlist = BrowserCookieDomainAllowlist::new([
+            BrowserCookieDomainRule {
+                domain: "commandcode.ai",
+                policy: BrowserCookieDomainPolicy::Exact,
+            },
+            BrowserCookieDomainRule {
+                domain: "www.commandcode.ai",
+                policy: BrowserCookieDomainPolicy::Exact,
+            },
+        ])
+        .map_err(|_| api_error())?;
+        let routes = CommandCodeRouteSet::production()?;
+        let target = routes.cookie_target()?;
+        let mut saw_cookie_data = false;
+        for (index, profile) in report.profiles().iter().enumerate() {
+            let source = browser_source(index)?;
+            let Ok(import) = import_browser_cookies_merging_chromium_stores_with_decryptor(
+                profile, source, &allowlist, decryptor,
+            ) else {
+                continue;
+            };
+            let order = CookieImportOrder::new([source]).map_err(|_| api_error())?;
+            let jar = CookieJar::from_imports(&order, [import]).map_err(|_| parse_error())?;
+            saw_cookie_data |= !jar.is_empty();
+            let Some(header) = jar.header_for(&target, now).map_err(|_| api_error())? else {
+                continue;
+            };
+            return Self::build(
+                scope,
+                ProviderSource::BrowserSession,
+                routes,
+                Zeroizing::new(header.expose().to_owned()),
+            );
+        }
+        drop(scope);
+        Err(ClassifiedError::new(if saw_cookie_data {
+            ErrorKind::AuthenticationExpired
+        } else {
+            ErrorKind::MissingCredential
+        }))
+    }
+
     /// Creates a browser adapter using an injected route table.
     ///
     /// # Errors
@@ -397,6 +470,20 @@ impl CommandCodeProvider {
             .map(|request| request.authentication(authentication))
             .map_err(|error| error.classified())
     }
+
+    /// Credential source bound to this adapter.
+    #[must_use]
+    pub const fn source(&self) -> ProviderSource {
+        self.source
+    }
+}
+
+fn browser_source(index: usize) -> Result<CookieSourceId, ClassifiedError> {
+    index
+        .checked_add(1)
+        .and_then(|value| u16::try_from(value).ok())
+        .map(CookieSourceId::new)
+        .ok_or_else(parse_error)
 }
 
 impl ProviderAdapter for CommandCodeProvider {

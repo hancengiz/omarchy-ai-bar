@@ -14,6 +14,7 @@ pub struct ProviderContext {
     scope: AccountScope,
     source: ProviderSource,
     cancellation: CancellationToken,
+    provider_cache_bypass: bool,
 }
 
 impl ProviderContext {
@@ -28,7 +29,19 @@ impl ProviderContext {
             scope,
             source,
             cancellation,
+            provider_cache_bypass: false,
         }
+    }
+
+    /// Requests a fresh provider operation instead of a provider-local
+    /// successful-result cache hit.
+    ///
+    /// Runtime bridges use this only for an explicit manual refresh. Network
+    /// retry, coalescing, and last-known-good policy remain runtime-owned.
+    #[must_use]
+    pub const fn with_provider_cache_bypass(mut self) -> Self {
+        self.provider_cache_bypass = true;
+        self
     }
 
     /// Exact provider-instance/account routing scope.
@@ -47,6 +60,12 @@ impl ProviderContext {
     #[must_use]
     pub const fn cancellation(&self) -> &CancellationToken {
         &self.cancellation
+    }
+
+    /// Whether this call must bypass provider-local successful-result caches.
+    #[must_use]
+    pub const fn provider_cache_bypass(&self) -> bool {
+        self.provider_cache_bypass
     }
 }
 

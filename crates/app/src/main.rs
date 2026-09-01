@@ -26,6 +26,7 @@ mod credentials;
 mod daemon;
 mod hyprland_events;
 mod provider_bootstrap;
+mod provider_config;
 pub mod provider_refresh;
 mod server;
 mod single_instance;

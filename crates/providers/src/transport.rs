@@ -34,6 +34,10 @@ const MAX_RESPONSE_HEADERS: usize = 32;
 const MAX_RESPONSE_HEADER_VALUE_BYTES: usize = 8 * 1024;
 const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_REDIRECTS: u8 = 10;
+// Preserve a provider's cooldown hint for the outer refresh scheduler even
+// when this transport has no in-request retry budget. The retry policy still
+// applies its own (potentially smaller) cap before sleeping between attempts.
+const MAX_RETRY_AFTER_DELAY: Duration = Duration::from_hours(1);
 
 /// Typed values permitted in the request `Accept` header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +76,8 @@ pub enum RequestContentType {
     AwsJson10,
     /// AWS JSON protocol version 1.1.
     AwsJson11,
+    /// Binary gRPC-Web protobuf framing used by provider browser APIs.
+    GrpcWebProto,
 }
 
 impl RequestContentType {
@@ -82,6 +88,7 @@ impl RequestContentType {
             Self::FormUrlEncodedUtf8 => "application/x-www-form-urlencoded; charset=utf-8",
             Self::AwsJson10 => "application/x-amz-json-1.0",
             Self::AwsJson11 => "application/x-amz-json-1.1",
+            Self::GrpcWebProto => "application/grpc-web+proto",
         }
     }
 }
@@ -1036,7 +1043,7 @@ impl<C: RetryClock> HttpTransport<C> {
 
     fn status_error(&self, status: StatusCode, headers: &HeaderMap) -> TransportError {
         let retry_after = headers.get(reqwest::header::RETRY_AFTER).and_then(|value| {
-            parse_retry_after(value, self.clock.wall_now(), self.config.retry.max_delay())
+            parse_retry_after(value, self.clock.wall_now(), MAX_RETRY_AFTER_DELAY)
         });
         match status {
             StatusCode::UNAUTHORIZED => TransportError::AuthenticationExpired,

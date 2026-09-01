@@ -428,6 +428,11 @@ TestCase {
 
         var refresh = JSON.parse(Protocol.refreshAllLine(9));
         compare(refresh.action.id, "refresh_all");
+        var providerRefresh = JSON.parse(Protocol.refreshProviderLine(10, "copilot"));
+        compare(providerRefresh.action.id, "refresh_provider");
+        compare(providerRefresh.action.provider, "copilot");
+        compare(Protocol.refreshProviderLine(10, "not-a-provider"), "");
+        compare(Protocol.refreshProviderLine(0, "copilot"), "");
         compare(Protocol.actionLine(9, "run_shell"), "");
         compare(Protocol.snapshotAckLine(0), "");
     }

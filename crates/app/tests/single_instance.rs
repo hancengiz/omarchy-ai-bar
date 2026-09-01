@@ -34,6 +34,7 @@ fn second_invocation_forwards_activation_without_replacing_the_owner() {
 #[test]
 fn safe_command_uses_daemon_state_when_present() {
     let fixture = DaemonFixture::new("daemon-safe-command");
+    fixture.configure_all_providers_enabled();
     let mut daemon = fixture.spawn_daemon();
     fixture.wait_until_listening(&mut daemon);
     assert!(fixture.activate().status.success(), "control loop is ready");

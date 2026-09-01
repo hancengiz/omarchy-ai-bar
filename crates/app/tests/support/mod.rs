@@ -145,6 +145,37 @@ impl DaemonFixture {
         command
     }
 
+    pub fn configure_all_providers_enabled(&self) {
+        let directory = self.root.join("config").join("omarchy-ai-bar");
+        fs::create_dir_all(&directory).expect("create fixture configuration directory");
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
+            .expect("secure fixture configuration directory");
+        let providers = EXPECTED_PROVIDER_IDS
+            .iter()
+            .map(|provider| {
+                serde_json::json!({
+                    "id": provider,
+                    "instance_id": "default",
+                    "enabled": true,
+                    "accounts": [],
+                })
+            })
+            .collect::<Vec<_>>();
+        let document = serde_json::json!({
+            "schema_version": 1,
+            "providers": providers,
+            "provider_order": EXPECTED_PROVIDER_IDS.to_vec(),
+        });
+        let file = directory.join("config.json");
+        fs::write(
+            &file,
+            serde_json::to_vec_pretty(&document).expect("encode fixture configuration"),
+        )
+        .expect("write fixture configuration");
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600))
+            .expect("secure fixture configuration");
+    }
+
     pub fn socket_path(&self) -> PathBuf {
         self.root
             .join("runtime")

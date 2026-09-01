@@ -1,11 +1,15 @@
 //! Side-effect-free production discovery for daemon-backed providers.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use oab_domain::{AccountKey, AccountScope, ClassifiedError, ProviderId, ProviderInstanceId};
+use oab_domain::{
+    AccountKey, AccountScope, ClassifiedError, ProviderId, ProviderInstanceId, Timestamp,
+};
+use oab_providers::browser_cookie::ChromiumCookieDecryptor;
+use oab_providers::browser_profile::BrowserProfileDiscovery;
 use oab_providers::context::ProviderAdapter;
 use oab_providers::descriptor::ProviderSource;
 use oab_providers::executable::resolve_executable;
@@ -18,11 +22,12 @@ use oab_providers::providers::alibabatokenplan::{
 };
 use oab_providers::providers::amp::AmpProvider;
 use oab_providers::providers::antigravity::{AntigravityProvider, AntigravitySettings};
+use oab_providers::providers::antigravity_cost::AntigravityHistoryRoots;
 use oab_providers::providers::augment::{AugmentCliSettings, AugmentProvider};
 use oab_providers::providers::azureopenai::{AzureOpenAiProvider, AzureOpenAiSettings};
 use oab_providers::providers::bedrock::{BedrockProvider, BedrockSettings};
 use oab_providers::providers::chutes::{ChutesProvider, ChutesSettings};
-use oab_providers::providers::claude::{ClaudeProvider, ClaudeSettings};
+use oab_providers::providers::claude::{ClaudeProvider, ClaudeSettings, ClaudeSourceMode};
 use oab_providers::providers::clawrouter::{ClawRouterProvider, ClawRouterSettings};
 use oab_providers::providers::clinepass::ClinePassProvider;
 use oab_providers::providers::codebuff::{CodebuffProvider, CodebuffSettings};
@@ -32,7 +37,9 @@ use oab_providers::providers::codex_provider::{
     CodexAccountSelection, CodexCoordinator, CodexCoordinatorSettings,
 };
 use oab_providers::providers::commandcode::CommandCodeProvider;
-use oab_providers::providers::copilot::CopilotProvider;
+use oab_providers::providers::copilot::{
+    CopilotBudgetEnrichment, CopilotCredentialOwner, CopilotProvider,
+};
 use oab_providers::providers::crof::CrofProvider;
 use oab_providers::providers::cursor::CursorProvider;
 use oab_providers::providers::deepgram::{DeepgramProvider, DeepgramSettings};
@@ -44,7 +51,9 @@ use oab_providers::providers::elevenlabs::ElevenLabsProvider;
 use oab_providers::providers::factory::FactoryProvider;
 use oab_providers::providers::fireworks::{FireworksCredential, FireworksProvider};
 use oab_providers::providers::gemini::{GeminiProvider, GeminiSettings};
-use oab_providers::providers::grok::{GrokProvider, GrokSettings};
+use oab_providers::providers::grok::{
+    GrokBrowserProvider, GrokCookieSource, GrokProvider, GrokSettings, GrokSourceMode,
+};
 use oab_providers::providers::groq::{GroqProvider, GroqSettings};
 use oab_providers::providers::ibmbob::{IBMBobProvider, IBMBobSettings};
 use oab_providers::providers::jetbrains::{JetBrainsProvider, JetBrainsSettings};
@@ -64,7 +73,8 @@ use oab_providers::providers::notion::NotionProvider;
 use oab_providers::providers::ollama::{OllamaProvider, OllamaSettings};
 use oab_providers::providers::openai::{OpenAiCredential, OpenAiProvider};
 use oab_providers::providers::opencode::OpenCodeProvider;
-use oab_providers::providers::opencodego::OpenCodeGoProvider;
+use oab_providers::providers::opencodego::{OpenCodeGoLocalProvider, OpenCodeGoProvider};
+use oab_providers::providers::opencodego_cost::has_opencodego_local_usage;
 use oab_providers::providers::openrouter::{OpenRouterProvider, OpenRouterSettings};
 use oab_providers::providers::perplexity::PerplexityProvider;
 use oab_providers::providers::poe::PoeProvider;
@@ -87,11 +97,12 @@ use oab_providers::providers::zenmux::ZenMuxProvider;
 use oab_providers::providers::zoommate::ZoomMateProvider;
 use oab_runtime::actor::RefreshRegistration;
 use oab_runtime::actor::RefreshSource;
+use oab_storage::config::{AppConfig, ProviderSourceMode};
 use thiserror::Error;
 
 use crate::provider_refresh::{
-    CodexRefreshSource, ConfiguredProvider, LazyAdapterBuilder, LazyProviderRefreshSource,
-    ProviderRefreshBuildError, ProviderRefreshSource,
+    BrowserAdapterBuilder, CodexRefreshSource, ConfiguredProvider, LazyAdapterBuilder,
+    LazyProviderRefreshSource, ProviderRefreshBuildError, ProviderRefreshSource,
 };
 
 #[derive(Clone, Copy)]
@@ -99,6 +110,7 @@ struct LazyRegistrationSpec {
     provider: ProviderId,
     source: ProviderSource,
     builder: LazyAdapterBuilder,
+    browser_fallback: Option<BrowserAdapterBuilder>,
 }
 
 const LAZY_PROVIDER_SPECS: [LazyRegistrationSpec; 57] = [
@@ -201,48 +213,60 @@ const LAZY_PROVIDER_SPECS: [LazyRegistrationSpec; 57] = [
         ProviderSource::Cli,
         build_alibaba_token_plan,
     ),
-    lazy_spec(
+    browser_lazy_spec(
         ProviderId::Abacus,
         ProviderSource::ManualCookie,
         build_abacus,
+        build_abacus_browser,
     ),
-    lazy_spec(
+    browser_lazy_spec(
         ProviderId::CommandCode,
         ProviderSource::ManualCookie,
         build_command_code,
+        build_command_code_browser,
     ),
-    lazy_spec(ProviderId::Devin, ProviderSource::ManualCookie, build_devin),
+    browser_lazy_spec(
+        ProviderId::Devin,
+        ProviderSource::ManualCookie,
+        build_devin,
+        build_devin_browser,
+    ),
     lazy_spec(
         ProviderId::LongCat,
         ProviderSource::ManualCookie,
         build_longcat,
     ),
     lazy_spec(ProviderId::Manus, ProviderSource::ManualCookie, build_manus),
-    lazy_spec(
+    browser_lazy_spec(
         ProviderId::Mistral,
         ProviderSource::ManualCookie,
         build_mistral,
+        build_mistral_browser,
     ),
-    lazy_spec(
+    browser_lazy_spec(
         ProviderId::Notion,
         ProviderSource::ManualCookie,
         build_notion,
+        build_notion_browser,
     ),
-    lazy_spec(
+    browser_lazy_spec(
         ProviderId::OpenCode,
         ProviderSource::ManualCookie,
         build_opencode,
+        build_opencode_browser,
     ),
-    lazy_spec(
+    browser_lazy_spec(
         ProviderId::Perplexity,
         ProviderSource::ManualCookie,
         build_perplexity,
+        build_perplexity_browser,
     ),
     lazy_spec(ProviderId::Qoder, ProviderSource::ManualCookie, build_qoder),
-    lazy_spec(
+    browser_lazy_spec(
         ProviderId::QwenCloud,
         ProviderSource::ManualCookie,
         build_qwencloud,
+        build_qwencloud_browser,
     ),
     lazy_spec(
         ProviderId::Sakana,
@@ -254,10 +278,11 @@ const LAZY_PROVIDER_SPECS: [LazyRegistrationSpec; 57] = [
         ProviderSource::ManualCookie,
         build_stepfun,
     ),
-    lazy_spec(
+    browser_lazy_spec(
         ProviderId::T3Chat,
         ProviderSource::ManualCookie,
         build_t3chat,
+        build_t3chat_browser,
     ),
     lazy_spec(
         ProviderId::ZoomMate,
@@ -302,6 +327,21 @@ const fn lazy_spec(
         provider,
         source,
         builder,
+        browser_fallback: None,
+    }
+}
+
+const fn browser_lazy_spec(
+    provider: ProviderId,
+    source: ProviderSource,
+    builder: LazyAdapterBuilder,
+    browser_fallback: BrowserAdapterBuilder,
+) -> LazyRegistrationSpec {
+    LazyRegistrationSpec {
+        provider,
+        source,
+        builder,
+        browser_fallback: Some(browser_fallback),
     }
 }
 
@@ -316,7 +356,7 @@ fn selected_lazy_specs(environment: &BTreeMap<String, String>) -> [LazyRegistrat
             ),
             build_codebuff,
         ),
-        lazy_spec(
+        browser_lazy_spec(
             ProviderId::Amp,
             choose_source(
                 environment_has_value(environment, "AMP_API_KEY"),
@@ -324,6 +364,7 @@ fn selected_lazy_specs(environment: &BTreeMap<String, String>) -> [LazyRegistrat
                 ProviderSource::Cli,
             ),
             build_amp,
+            build_amp_browser,
         ),
         lazy_spec(ProviderId::Doubao, doubao_source(environment), build_doubao),
         lazy_spec(
@@ -344,7 +385,7 @@ fn selected_lazy_specs(environment: &BTreeMap<String, String>) -> [LazyRegistrat
             ),
             build_alibaba,
         ),
-        lazy_spec(
+        browser_lazy_spec(
             ProviderId::MiniMax,
             choose_source(
                 environment_has_any_value(environment, MINIMAX_API_KEYS),
@@ -352,8 +393,14 @@ fn selected_lazy_specs(environment: &BTreeMap<String, String>) -> [LazyRegistrat
                 ProviderSource::ManualCookie,
             ),
             build_minimax,
+            build_minimax_browser,
         ),
-        lazy_spec(ProviderId::Kimi, kimi_source(environment), build_kimi),
+        browser_lazy_spec(
+            ProviderId::Kimi,
+            kimi_source(environment),
+            build_kimi,
+            build_kimi_browser,
+        ),
         lazy_spec(
             ProviderId::Mimo,
             choose_source(
@@ -442,6 +489,29 @@ pub(crate) struct ProductionProviders {
     pub(crate) scopes: Vec<AccountScope>,
 }
 
+fn select_enabled_providers(
+    config: Option<&AppConfig>,
+    detected_providers: &BTreeSet<ProviderId>,
+    registrations: Vec<RefreshRegistration>,
+    scopes: Vec<AccountScope>,
+) -> ProductionProviders {
+    let (registrations, scopes) = registrations
+        .into_iter()
+        .zip(scopes)
+        .filter(|(_registration, scope)| {
+            provider_enabled(
+                config,
+                scope.provider(),
+                detected_providers.contains(&scope.provider()),
+            )
+        })
+        .unzip();
+    ProductionProviders {
+        registrations,
+        scopes,
+    }
+}
+
 /// Stable, path-free production discovery failure.
 #[derive(Debug, Error)]
 pub(crate) enum ProviderBootstrapError {
@@ -468,7 +538,9 @@ pub(crate) enum ProviderBootstrapError {
 /// Discovers production providers without accessing provider networks or
 /// starting provider child processes. Explicit environment credentials win;
 /// missing manual-session values may be hydrated from desktop Secret Service.
-pub(crate) fn discover() -> Result<ProductionProviders, ProviderBootstrapError> {
+pub(crate) fn discover(
+    config: Option<&AppConfig>,
+) -> Result<ProductionProviders, ProviderBootstrapError> {
     let home = env::var_os("HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
@@ -479,6 +551,7 @@ pub(crate) fn discover() -> Result<ProductionProviders, ProviderBootstrapError> 
         env::var_os("XDG_DATA_HOME").as_deref(),
     )
     .map_err(|_| ProviderBootstrapError::CredentialPaths)?;
+    let codex_history_root = paths.native_root().to_path_buf();
     let executable_override = env::var("OMARCHY_AI_BAR_CODEX_EXECUTABLE").ok();
     let executable = resolve_executable(
         "codex",
@@ -487,21 +560,33 @@ pub(crate) fn discover() -> Result<ProductionProviders, ProviderBootstrapError> 
         &[],
     )
     .map_err(|_| ProviderBootstrapError::Executable)?;
+    let codex_detected = executable.is_some();
 
     let scope = AccountScope::new(
         ProviderId::Codex,
         ProviderInstanceId::new("default").map_err(|_| ProviderBootstrapError::Identity)?,
         AccountKey::new("ambient").map_err(|_| ProviderBootstrapError::Identity)?,
     );
+    let codex_source = resolve_codex_source(crate::provider_config::provider_source(
+        config,
+        ProviderId::Codex,
+    ))?;
+    let allow_external_oauth = crate::provider_config::provider_toggle(
+        config,
+        ProviderId::Codex,
+        "external_oauth_sources",
+    )
+    .unwrap_or(false);
     let settings = CodexCoordinatorSettings::new(
-        CodexSourceMode::Auto,
+        codex_source,
         CodexAccountSelection::Ambient,
-        false,
+        allow_external_oauth,
         None,
     )
     .map_err(|_| ProviderBootstrapError::Coordinator)?;
     let mut child_environment = unicode_environment();
     crate::credentials::hydrate_environment(&mut child_environment);
+    crate::provider_config::apply_provider_route_environment(config, &mut child_environment);
     let coordinator = CodexCoordinator::production(
         scope.clone(),
         settings,
@@ -510,14 +595,33 @@ pub(crate) fn discover() -> Result<ProductionProviders, ProviderBootstrapError> 
         &child_environment,
     )
     .map_err(|_| ProviderBootstrapError::Coordinator)?;
-    let source = Arc::new(CodexRefreshSource::new(coordinator)?);
+    let source =
+        Arc::new(CodexRefreshSource::new(coordinator)?.with_history_root(codex_history_root));
 
+    let mut detected_providers = BTreeSet::new();
+    if codex_detected {
+        detected_providers.insert(ProviderId::Codex);
+    }
     let mut registrations = vec![RefreshRegistration::new(scope.clone(), source)];
     let mut scopes = vec![scope];
-    let (scope, source) = discover_claude(&child_environment, &home)?;
+    let claude_source = resolve_claude_source(crate::provider_config::provider_source(
+        config,
+        ProviderId::Claude,
+    ))?;
+    let (scope, source, detected) = discover_claude(&child_environment, &home, claude_source)?;
+    if detected {
+        detected_providers.insert(ProviderId::Claude);
+    }
     registrations.push(RefreshRegistration::new(scope.clone(), source));
     scopes.push(scope);
-    let (scope, source) = discover_grok(&child_environment)?;
+    validate_grok_source(crate::provider_config::provider_source(
+        config,
+        ProviderId::Grok,
+    ))?;
+    let (scope, source, detected) = discover_grok(&child_environment, &home)?;
+    if detected {
+        detected_providers.insert(ProviderId::Grok);
+    }
     registrations.push(RefreshRegistration::new(scope.clone(), source));
     scopes.push(scope);
     let lazy_environment = Arc::new(child_environment);
@@ -525,42 +629,170 @@ pub(crate) fn discover() -> Result<ProductionProviders, ProviderBootstrapError> 
         .into_iter()
         .chain(selected_lazy_specs(&lazy_environment))
     {
-        let (scope, source) = discover_lazy(spec, Arc::clone(&lazy_environment))?;
+        let spec = resolve_lazy_source(spec, &lazy_environment);
+        let (scope, source, detected) = discover_lazy(spec, Arc::clone(&lazy_environment))?;
+        if detected {
+            detected_providers.insert(scope.provider());
+        }
         registrations.push(RefreshRegistration::new(scope.clone(), source));
         scopes.push(scope);
     }
 
-    Ok(ProductionProviders {
+    Ok(select_enabled_providers(
+        config,
+        &detected_providers,
         registrations,
         scopes,
-    })
+    ))
+}
+
+fn resolve_codex_source(
+    source: Option<ProviderSourceMode>,
+) -> Result<CodexSourceMode, ProviderBootstrapError> {
+    match source.unwrap_or(ProviderSourceMode::Auto) {
+        ProviderSourceMode::Auto => Ok(CodexSourceMode::Auto),
+        ProviderSourceMode::Pat => Ok(CodexSourceMode::Pat),
+        ProviderSourceMode::Oauth | ProviderSourceMode::Api | ProviderSourceMode::ApiKey => {
+            Ok(CodexSourceMode::OAuth)
+        }
+        ProviderSourceMode::Cli => Ok(CodexSourceMode::Cli),
+        ProviderSourceMode::Web
+        | ProviderSourceMode::ConfigurableEndpoint
+        | ProviderSourceMode::ManualCookie
+        | ProviderSourceMode::BrowserSession
+        | ProviderSourceMode::Local
+        | ProviderSourceMode::CloudCredentials => Err(ProviderBootstrapError::Coordinator),
+    }
+}
+
+fn resolve_claude_source(
+    source: Option<ProviderSourceMode>,
+) -> Result<ClaudeSourceMode, ProviderBootstrapError> {
+    match source.unwrap_or(ProviderSourceMode::Auto) {
+        ProviderSourceMode::Auto => Ok(ClaudeSourceMode::Auto),
+        ProviderSourceMode::Oauth => Ok(ClaudeSourceMode::OAuth),
+        ProviderSourceMode::Cli => Ok(ClaudeSourceMode::Cli),
+        _ => Err(ProviderBootstrapError::Claude),
+    }
+}
+
+fn validate_grok_source(source: Option<ProviderSourceMode>) -> Result<(), ProviderBootstrapError> {
+    match source {
+        None
+        | Some(
+            ProviderSourceMode::Auto
+            | ProviderSourceMode::Cli
+            | ProviderSourceMode::Oauth
+            | ProviderSourceMode::Web,
+        ) => Ok(()),
+        _ => Err(ProviderBootstrapError::Grok),
+    }
+}
+
+fn grok_source_mode(environment: &BTreeMap<String, String>) -> GrokSourceMode {
+    match environment
+        .get("OMARCHY_AI_BAR_GROK_USAGE_SOURCE")
+        .map(String::as_str)
+    {
+        Some("cli") => GrokSourceMode::Cli,
+        Some("oauth") => GrokSourceMode::OAuth,
+        Some("web") => GrokSourceMode::Web,
+        _ => GrokSourceMode::Auto,
+    }
+}
+
+fn grok_cookie_source(environment: &BTreeMap<String, String>) -> GrokCookieSource {
+    match environment
+        .get("OMARCHY_AI_BAR_GROK_COOKIE_SOURCE")
+        .map(String::as_str)
+    {
+        Some("manual") => GrokCookieSource::Manual,
+        Some("off") => GrokCookieSource::Off,
+        _ => GrokCookieSource::Auto,
+    }
+}
+
+fn provider_enabled(config: Option<&AppConfig>, provider: ProviderId, detected: bool) -> bool {
+    config
+        .and_then(|config| {
+            config
+                .providers
+                .iter()
+                .find(|route| route.id == provider && route.instance_id.as_str() == "default")
+        })
+        .map_or(detected, |route| route.enabled)
 }
 
 fn discover_claude(
     environment: &BTreeMap<String, String>,
     home: &std::path::Path,
-) -> Result<(AccountScope, Arc<dyn oab_runtime::actor::RefreshSource>), ProviderBootstrapError> {
+    source_mode: ClaudeSourceMode,
+) -> Result<
+    (
+        AccountScope,
+        Arc<dyn oab_runtime::actor::RefreshSource>,
+        bool,
+    ),
+    ProviderBootstrapError,
+> {
+    let explicit_credential = environment_has_any_value(
+        environment,
+        &[
+            "OMARCHY_AI_BAR_CLAUDE_OAUTH_TOKEN",
+            "CLAUDE_OAUTH_TOKEN",
+            "ANTHROPIC_OAUTH_TOKEN",
+        ],
+    );
+    let config_root = environment
+        .get("CLAUDE_SECURESTORAGE_CONFIG_DIR")
+        .or_else(|| environment.get("CLAUDE_CONFIG_DIR"))
+        .filter(|value| !value.is_empty())
+        .map_or_else(|| home.join(".claude"), PathBuf::from);
+    let config_root = if config_root.is_absolute() {
+        config_root
+    } else {
+        home.join(config_root)
+    };
+    let credential_file = config_root.join(".credentials.json");
+    let executable = resolve_executable(
+        "claude",
+        environment
+            .get("OMARCHY_AI_BAR_CLAUDE_EXECUTABLE")
+            .map(String::as_str),
+        environment.get("PATH").map(std::ffi::OsStr::new),
+        &[],
+    )
+    .map_err(|_| ProviderBootstrapError::Claude)?;
+    let cli_detected = executable.is_some();
+    let detected = explicit_credential || credential_file.is_file() || cli_detected;
     let scope = AccountScope::new(
         ProviderId::Claude,
         ProviderInstanceId::new("default").map_err(|_| ProviderBootstrapError::Identity)?,
         AccountKey::new("ambient").map_err(|_| ProviderBootstrapError::Identity)?,
     );
-    let settings =
-        ClaudeSettings::resolve(environment, home).map_err(|_| ProviderBootstrapError::Claude)?;
+    let settings = ClaudeSettings::resolve(environment, home)
+        .map_err(|_| ProviderBootstrapError::Claude)?
+        .with_source(source_mode, executable);
     let adapter =
         ClaudeProvider::new(scope.clone(), settings).map_err(|_| ProviderBootstrapError::Claude)?;
+    let bound_source = match source_mode {
+        ClaudeSourceMode::Cli => ProviderSource::Cli,
+        ClaudeSourceMode::Auto | ClaudeSourceMode::OAuth => ProviderSource::OAuth,
+    };
     let adapter = Arc::new(ConfiguredProvider::new(
         adapter,
         scope.clone(),
-        ProviderSource::OAuth,
+        bound_source,
     ));
-    let source = Arc::new(ProviderRefreshSource::new(adapter)?);
-    Ok((scope, source))
+    let source =
+        Arc::new(ProviderRefreshSource::new(adapter)?.with_claude_history_root(config_root));
+    Ok((scope, source, detected))
 }
 
 fn discover_grok(
     environment: &BTreeMap<String, String>,
-) -> Result<(AccountScope, Arc<dyn RefreshSource>), ProviderBootstrapError> {
+    home: &std::path::Path,
+) -> Result<(AccountScope, Arc<dyn RefreshSource>, bool), ProviderBootstrapError> {
     let executable_override = environment
         .get("OMARCHY_AI_BAR_GROK_EXECUTABLE")
         .map(String::as_str);
@@ -571,39 +803,307 @@ fn discover_grok(
         &[],
     )
     .map_err(|_| ProviderBootstrapError::GrokExecutable)?;
+    let grok_root = environment
+        .get("GROK_HOME")
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .map_or_else(
+            || home.join(".grok"),
+            |root| {
+                if root.is_absolute() {
+                    root
+                } else if let Ok(relative) = root.strip_prefix("~") {
+                    home.join(relative)
+                } else {
+                    home.join(root)
+                }
+            },
+        );
+    let detected = executable.is_some()
+        || environment_has_any_value(
+            environment,
+            &["OMARCHY_AI_BAR_GROK_OAUTH_TOKEN", "GROK_OAUTH_TOKEN"],
+        )
+        || grok_root.join("auth.json").is_file()
+        || environment_has_value(environment, "OMARCHY_AI_BAR_GROK_COOKIE");
     let scope = AccountScope::new(
         ProviderId::Grok,
         ProviderInstanceId::new("default").map_err(|_| ProviderBootstrapError::Identity)?,
         AccountKey::new("ambient").map_err(|_| ProviderBootstrapError::Identity)?,
     );
-    let settings = GrokSettings::new(executable, environment.clone());
-    let adapter =
-        GrokProvider::new(scope.clone(), settings).map_err(|_| ProviderBootstrapError::Grok)?;
-    let adapter = Arc::new(ConfiguredProvider::new(
-        adapter,
+    let source_mode = grok_source_mode(environment);
+    let cookie_source = grok_cookie_source(environment);
+    let bound_source = match (source_mode, cookie_source) {
+        (GrokSourceMode::OAuth, _) => ProviderSource::OAuth,
+        (GrokSourceMode::Web, GrokCookieSource::Manual) => ProviderSource::ManualCookie,
+        (GrokSourceMode::Web, GrokCookieSource::Auto | GrokCookieSource::Off) => {
+            ProviderSource::BrowserSession
+        }
+        (GrokSourceMode::Auto | GrokSourceMode::Cli, _) => ProviderSource::Cli,
+    };
+    let mut source = LazyProviderRefreshSource::new(
         scope.clone(),
-        ProviderSource::Cli,
-    ));
-    let source = Arc::new(ProviderRefreshSource::new(adapter)?);
-    Ok((scope, source))
+        bound_source,
+        Arc::new(environment.clone()),
+        build_grok,
+    )?
+    .with_grok_history_root(grok_root);
+    if cookie_source == GrokCookieSource::Auto
+        && matches!(source_mode, GrokSourceMode::Auto | GrokSourceMode::Web)
+    {
+        source = source.with_browser_fallback(build_grok_browser)?;
+    }
+    let source = Arc::new(source);
+    Ok((scope, source, detected))
 }
 
 fn discover_lazy(
     spec: LazyRegistrationSpec,
     environment: Arc<BTreeMap<String, String>>,
-) -> Result<(AccountScope, Arc<dyn RefreshSource>), ProviderBootstrapError> {
+) -> Result<(AccountScope, Arc<dyn RefreshSource>, bool), ProviderBootstrapError> {
     let scope = AccountScope::new(
         spec.provider,
         ProviderInstanceId::new("default").map_err(|_| ProviderBootstrapError::Identity)?,
         AccountKey::new("ambient").map_err(|_| ProviderBootstrapError::Identity)?,
     );
-    let source = Arc::new(LazyProviderRefreshSource::new(
-        scope.clone(),
-        spec.source,
-        environment,
-        spec.builder,
-    )?);
-    Ok((scope, source))
+    let detected = lazy_provider_detected(spec, &scope, &environment);
+    let copilot_history_root = (spec.provider == ProviderId::Copilot)
+        .then(|| {
+            environment
+                .get("HOME")
+                .filter(|value| !value.is_empty())
+                .map(|home| PathBuf::from(home).join(".copilot"))
+        })
+        .flatten();
+    let opencodego_history_root = (spec.provider == ProviderId::OpenCodeGo)
+        .then(|| opencode_data_root(&environment))
+        .flatten();
+    let vertex_history_root = (spec.provider == ProviderId::VertexAi)
+        .then(|| claude_data_root(&environment))
+        .flatten();
+    let cursor_history_root = (spec.provider == ProviderId::Cursor)
+        .then(|| cursor_cache_root(&environment))
+        .flatten();
+    let antigravity_history_roots = (spec.provider == ProviderId::Antigravity)
+        .then(|| antigravity_history_roots(&environment))
+        .flatten();
+    let mut source =
+        LazyProviderRefreshSource::new(scope.clone(), spec.source, environment, spec.builder)?;
+    if let Some(browser_fallback) = spec.browser_fallback {
+        source = source.with_browser_fallback(browser_fallback)?;
+    }
+    if let Some(history_root) = copilot_history_root {
+        source = source.with_copilot_history_root(history_root);
+    }
+    if let Some(history_root) = opencodego_history_root {
+        source = source.with_opencodego_history_root(history_root);
+    }
+    if let Some(history_root) = vertex_history_root {
+        source = source.with_vertex_history_root(history_root);
+    }
+    if let Some(history_root) = cursor_history_root {
+        source = source.with_cursor_history_root(history_root);
+    }
+    if let Some(history_roots) = antigravity_history_roots {
+        source = source.with_antigravity_history_roots(history_roots);
+    }
+    let source = Arc::new(source);
+    Ok((scope, source, detected))
+}
+
+fn lazy_provider_detected(
+    spec: LazyRegistrationSpec,
+    scope: &AccountScope,
+    environment: &BTreeMap<String, String>,
+) -> bool {
+    if (spec.builder)(scope.clone(), environment).is_err() {
+        return false;
+    }
+    match spec.provider {
+        ProviderId::OpenCodeGo => {
+            environment_has_value(environment, "OPENCODE_API_KEY")
+                || opencode_data_root(environment)
+                    .as_deref()
+                    .is_some_and(has_opencodego_local_usage)
+        }
+        ProviderId::Wayfinder => environment_has_value(environment, "WAYFINDER_GATEWAY_URL"),
+        ProviderId::Mimo => {
+            if environment_has_value(environment, "OMARCHY_AI_BAR_MIMO_COOKIE") {
+                return true;
+            }
+            local_data_path(
+                environment,
+                "MIMO_LOCAL_USAGE_PATH",
+                "mimo-local-usage.json",
+            )
+            .is_some_and(|path| path.is_file())
+        }
+        ProviderId::Windsurf => {
+            windsurf_database_path(environment).is_some_and(|path| path.is_file())
+        }
+        ProviderId::JetBrains => jetbrains_configuration_detected(environment),
+        _ => true,
+    }
+}
+
+fn resolve_lazy_source(
+    mut spec: LazyRegistrationSpec,
+    environment: &BTreeMap<String, String>,
+) -> LazyRegistrationSpec {
+    if spec.provider == ProviderId::OpenCodeGo
+        && !environment_has_value(environment, "OPENCODE_API_KEY")
+        && opencode_data_root(environment)
+            .as_deref()
+            .is_some_and(has_opencodego_local_usage)
+    {
+        spec.source = ProviderSource::LocalData;
+    }
+    spec
+}
+
+fn opencode_data_root(environment: &BTreeMap<String, String>) -> Option<PathBuf> {
+    environment
+        .get("XDG_DATA_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            environment
+                .get("HOME")
+                .filter(|value| !value.is_empty())
+                .map(|home| PathBuf::from(home).join(".local/share"))
+        })
+        .map(|root| root.join("opencode"))
+}
+
+fn claude_data_root(environment: &BTreeMap<String, String>) -> Option<PathBuf> {
+    let home = environment
+        .get("HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)?;
+    let root = environment
+        .get("CLAUDE_SECURESTORAGE_CONFIG_DIR")
+        .or_else(|| environment.get("CLAUDE_CONFIG_DIR"))
+        .filter(|value| !value.is_empty())
+        .map_or_else(|| home.join(".claude"), PathBuf::from);
+    Some(if root.is_absolute() {
+        root
+    } else {
+        home.join(root)
+    })
+}
+
+fn cursor_cache_root(environment: &BTreeMap<String, String>) -> Option<PathBuf> {
+    if let Some(root) = environment
+        .get("TOKSCALE_CONFIG_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+    {
+        return Some(root.join("cursor-cache"));
+    }
+    environment
+        .get("HOME")
+        .filter(|value| !value.is_empty())
+        .map(|home| PathBuf::from(home).join(".config/tokscale/cursor-cache"))
+}
+
+fn antigravity_history_roots(
+    environment: &BTreeMap<String, String>,
+) -> Option<AntigravityHistoryRoots> {
+    let home = environment
+        .get("HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)?;
+    let gemini_home = environment
+        .get("GEMINI_CLI_HOME")
+        .filter(|value| !value.is_empty())
+        .map_or_else(|| home.join(".gemini"), PathBuf::from);
+    let app = gemini_home.join("antigravity");
+    let config = environment
+        .get("TOKSCALE_CONFIG_DIR")
+        .filter(|value| !value.is_empty())
+        .map_or_else(|| home.join(".config/tokscale"), PathBuf::from);
+    Some(AntigravityHistoryRoots {
+        database_roots: vec![
+            gemini_home.join("antigravity-cli/conversations"),
+            app.clone(),
+            app.join("conversations"),
+        ],
+        cache_root: config.join("antigravity-cache/sessions"),
+    })
+}
+
+fn local_data_path(
+    environment: &BTreeMap<String, String>,
+    override_name: &str,
+    file_name: &str,
+) -> Option<PathBuf> {
+    if let Some(path) = environment
+        .get(override_name)
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Some(PathBuf::from(path));
+    }
+    environment
+        .get("XDG_DATA_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            environment
+                .get("HOME")
+                .filter(|value| !value.is_empty())
+                .map(|home| PathBuf::from(home).join(".local/share"))
+        })
+        .map(|root| root.join("omarchy-ai-bar").join(file_name))
+}
+
+fn windsurf_database_path(environment: &BTreeMap<String, String>) -> Option<PathBuf> {
+    environment
+        .get("WINDSURF_DATA_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            environment
+                .get("XDG_CONFIG_HOME")
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+                .or_else(|| {
+                    environment
+                        .get("HOME")
+                        .filter(|value| !value.is_empty())
+                        .map(|home| PathBuf::from(home).join(".config"))
+                })
+                .map(|root| root.join("Windsurf/User/globalStorage"))
+        })
+        .map(|root| root.join("state.vscdb"))
+}
+
+fn jetbrains_configuration_detected(environment: &BTreeMap<String, String>) -> bool {
+    if let Some(path) = environment
+        .get("OMARCHY_AI_BAR_JETBRAINS_IDE_PATH")
+        .filter(|value| !value.is_empty())
+    {
+        return PathBuf::from(path).is_dir();
+    }
+    let Some(home) = environment.get("HOME").filter(|value| !value.is_empty()) else {
+        return false;
+    };
+    let config = environment
+        .get("XDG_CONFIG_HOME")
+        .filter(|value| !value.is_empty())
+        .map_or_else(|| PathBuf::from(home).join(".config"), PathBuf::from);
+    let data = environment
+        .get("XDG_DATA_HOME")
+        .filter(|value| !value.is_empty())
+        .map_or_else(|| PathBuf::from(home).join(".local/share"), PathBuf::from);
+    [
+        config.join("JetBrains"),
+        config.join("Google"),
+        data.join("JetBrains"),
+    ]
+    .into_iter()
+    .any(|path| path.is_dir())
 }
 
 fn build_zai(
@@ -791,10 +1291,15 @@ fn build_opencodego(
     scope: AccountScope,
     environment: &BTreeMap<String, String>,
 ) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
-    Ok(Box::new(OpenCodeGoProvider::new(
-        scope,
-        OpenCodeGoProvider::resolve_credential(environment)?,
-    )?))
+    if environment_has_value(environment, "OPENCODE_API_KEY") {
+        return Ok(Box::new(OpenCodeGoProvider::new(
+            scope,
+            OpenCodeGoProvider::resolve_credential(environment)?,
+        )?));
+    }
+    let root = opencode_data_root(environment)
+        .ok_or_else(|| ClassifiedError::new(oab_domain::ErrorKind::MissingCredential))?;
+    Ok(Box::new(OpenCodeGoLocalProvider::new(scope, root)?))
 }
 
 fn build_zed(
@@ -1040,6 +1545,55 @@ fn build_amp(
     Ok(Box::new(AmpProvider::resolve(scope, source, environment)?))
 }
 
+fn build_grok(
+    scope: AccountScope,
+    environment: &BTreeMap<String, String>,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    let executable = resolve_executable(
+        "grok",
+        environment
+            .get("OMARCHY_AI_BAR_GROK_EXECUTABLE")
+            .map(String::as_str),
+        environment.get("PATH").map(std::ffi::OsStr::new),
+        &[],
+    )
+    .map_err(|_| ClassifiedError::new(oab_domain::ErrorKind::Api))?;
+    let settings = GrokSettings::new(executable, environment.clone())
+        .with_source_mode(grok_source_mode(environment))
+        .with_cookie_source(grok_cookie_source(environment));
+    Ok(Box::new(GrokProvider::new(scope, settings)?))
+}
+
+fn build_grok_browser(
+    scope: AccountScope,
+    _environment: &BTreeMap<String, String>,
+    discovery: &BrowserProfileDiscovery,
+    decryptor: &dyn ChromiumCookieDecryptor,
+    now: Timestamp,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(GrokBrowserProvider::new(
+        scope,
+        discovery,
+        decryptor,
+        now.as_offset_date_time(),
+    )?))
+}
+
+fn build_amp_browser(
+    scope: AccountScope,
+    _environment: &BTreeMap<String, String>,
+    discovery: &BrowserProfileDiscovery,
+    decryptor: &dyn ChromiumCookieDecryptor,
+    now: Timestamp,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(AmpProvider::new_browser(
+        scope,
+        discovery,
+        decryptor,
+        now.as_offset_date_time(),
+    )?))
+}
+
 fn build_doubao(
     scope: AccountScope,
     environment: &BTreeMap<String, String>,
@@ -1151,6 +1705,114 @@ manual_provider_builder!(
     "OMARCHY_AI_BAR_ZOOMMATE_COOKIE"
 );
 
+fn build_abacus_browser(
+    scope: AccountScope,
+    _environment: &BTreeMap<String, String>,
+    discovery: &BrowserProfileDiscovery,
+    decryptor: &dyn ChromiumCookieDecryptor,
+    now: Timestamp,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(AbacusProvider::new_browser_from_discovery(
+        scope,
+        discovery,
+        decryptor,
+        now.as_offset_date_time(),
+    )?))
+}
+
+fn build_command_code_browser(
+    scope: AccountScope,
+    _environment: &BTreeMap<String, String>,
+    discovery: &BrowserProfileDiscovery,
+    decryptor: &dyn ChromiumCookieDecryptor,
+    now: Timestamp,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(CommandCodeProvider::new_browser_from_discovery(
+        scope,
+        discovery,
+        decryptor,
+        now.as_offset_date_time(),
+    )?))
+}
+
+fn build_notion_browser(
+    scope: AccountScope,
+    environment: &BTreeMap<String, String>,
+    discovery: &BrowserProfileDiscovery,
+    decryptor: &dyn ChromiumCookieDecryptor,
+    now: Timestamp,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(NotionProvider::new_browser_from_discovery(
+        scope,
+        discovery,
+        decryptor,
+        now.as_offset_date_time(),
+        environment
+            .get("OMARCHY_AI_BAR_NOTION_WORKSPACE")
+            .map(String::as_str),
+    )?))
+}
+
+fn build_t3chat_browser(
+    scope: AccountScope,
+    _environment: &BTreeMap<String, String>,
+    discovery: &BrowserProfileDiscovery,
+    decryptor: &dyn ChromiumCookieDecryptor,
+    now: Timestamp,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(T3ChatProvider::new_browser_from_discovery(
+        scope,
+        discovery,
+        decryptor,
+        now.as_offset_date_time(),
+    )?))
+}
+
+fn build_mistral_browser(
+    scope: AccountScope,
+    _environment: &BTreeMap<String, String>,
+    discovery: &BrowserProfileDiscovery,
+    decryptor: &dyn ChromiumCookieDecryptor,
+    now: Timestamp,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(MistralProvider::new_browser_from_discovery(
+        scope,
+        discovery,
+        decryptor,
+        now.as_offset_date_time(),
+    )?))
+}
+
+fn build_perplexity_browser(
+    scope: AccountScope,
+    _environment: &BTreeMap<String, String>,
+    discovery: &BrowserProfileDiscovery,
+    decryptor: &dyn ChromiumCookieDecryptor,
+    now: Timestamp,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(PerplexityProvider::new_browser_from_discovery(
+        scope,
+        discovery,
+        decryptor,
+        now.as_offset_date_time(),
+    )?))
+}
+
+fn build_qwencloud_browser(
+    scope: AccountScope,
+    _environment: &BTreeMap<String, String>,
+    discovery: &BrowserProfileDiscovery,
+    decryptor: &dyn ChromiumCookieDecryptor,
+    now: Timestamp,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(QwenCloudProvider::new_browser_from_discovery(
+        scope,
+        discovery,
+        decryptor,
+        now.as_offset_date_time(),
+    )?))
+}
+
 fn build_devin(
     scope: AccountScope,
     environment: &BTreeMap<String, String>,
@@ -1164,6 +1826,22 @@ fn build_devin(
     )?))
 }
 
+fn build_devin_browser(
+    scope: AccountScope,
+    environment: &BTreeMap<String, String>,
+    discovery: &BrowserProfileDiscovery,
+    _decryptor: &dyn ChromiumCookieDecryptor,
+    _now: Timestamp,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(DevinProvider::new_browser(
+        scope,
+        discovery,
+        environment
+            .get("OMARCHY_AI_BAR_DEVIN_ORGANIZATION")
+            .map(String::as_str),
+    )?))
+}
+
 fn build_opencode(
     scope: AccountScope,
     environment: &BTreeMap<String, String>,
@@ -1171,6 +1849,24 @@ fn build_opencode(
     Ok(Box::new(OpenCodeProvider::new_manual(
         scope,
         required_environment_value(environment, "OMARCHY_AI_BAR_OPENCODE_COOKIE")?,
+        environment
+            .get("OMARCHY_AI_BAR_OPENCODE_WORKSPACE")
+            .map(String::as_str),
+    )?))
+}
+
+fn build_opencode_browser(
+    scope: AccountScope,
+    environment: &BTreeMap<String, String>,
+    discovery: &BrowserProfileDiscovery,
+    decryptor: &dyn ChromiumCookieDecryptor,
+    now: Timestamp,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(OpenCodeProvider::new_browser_from_discovery(
+        scope,
+        discovery,
+        decryptor,
+        now.as_offset_date_time(),
         environment
             .get("OMARCHY_AI_BAR_OPENCODE_WORKSPACE")
             .map(String::as_str),
@@ -1231,17 +1927,70 @@ fn build_minimax(
     Ok(Box::new(provider))
 }
 
+fn build_minimax_browser(
+    scope: AccountScope,
+    environment: &BTreeMap<String, String>,
+    discovery: &BrowserProfileDiscovery,
+    decryptor: &dyn ChromiumCookieDecryptor,
+    now: Timestamp,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(
+        MiniMaxProvider::new_browser_with_environment_and_decryptor(
+            scope,
+            MiniMaxRegion::Global,
+            environment,
+            discovery,
+            now.as_offset_date_time(),
+            decryptor,
+        )?,
+    ))
+}
+
 fn build_copilot(
     scope: AccountScope,
     environment: &BTreeMap<String, String>,
 ) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
-    Ok(Box::new(CopilotProvider::new(
+    let credential_owner = match environment
+        .get(crate::credentials::COPILOT_CREDENTIAL_OWNER_ENVIRONMENT)
+        .map(String::as_str)
+    {
+        Some(crate::credentials::COPILOT_CREDENTIAL_OWNER_APPLICATION) => {
+            CopilotCredentialOwner::Application
+        }
+        Some(crate::credentials::COPILOT_CREDENTIAL_OWNER_EXPLICIT_ENVIRONMENT) => {
+            CopilotCredentialOwner::Environment
+        }
+        _ => CopilotCredentialOwner::Unspecified,
+    };
+    let mut provider = CopilotProvider::new_with_credential_owner(
         scope,
         CopilotProvider::resolve_credential(environment)?,
         environment
             .get("OMARCHY_AI_BAR_COPILOT_ENTERPRISE_HOST")
             .map(String::as_str),
-    )?))
+        credential_owner,
+    )?;
+    if copilot_budget_extras_enabled(environment)
+        && environment
+            .get("OMARCHY_AI_BAR_COPILOT_BUDGET_COOKIE_SOURCE")
+            .is_some_and(|source| source == "manual")
+        && let Some(cookie) = environment
+            .get("OMARCHY_AI_BAR_COPILOT_BUDGET_COOKIE")
+            .map(String::as_str)
+            .map(str::trim)
+            .filter(|cookie| !cookie.is_empty())
+        && let Ok(enrichment) = CopilotBudgetEnrichment::manual(cookie)
+    {
+        provider = provider.with_budget_enrichment(enrichment);
+    }
+    Ok(Box::new(provider))
+}
+
+fn copilot_budget_extras_enabled(environment: &BTreeMap<String, String>) -> bool {
+    environment
+        .get("OMARCHY_AI_BAR_COPILOT_BUDGET_EXTRAS")
+        .map(String::as_str)
+        .is_some_and(|value| matches!(value, "1" | "true" | "yes" | "on"))
 }
 
 fn build_kimi(
@@ -1260,6 +2009,21 @@ fn build_kimi(
         )?
     };
     Ok(Box::new(provider))
+}
+
+fn build_kimi_browser(
+    scope: AccountScope,
+    _environment: &BTreeMap<String, String>,
+    discovery: &BrowserProfileDiscovery,
+    decryptor: &dyn ChromiumCookieDecryptor,
+    now: Timestamp,
+) -> Result<Box<dyn ProviderAdapter>, ClassifiedError> {
+    Ok(Box::new(KimiProvider::new_browser(
+        scope,
+        discovery,
+        decryptor,
+        now.as_offset_date_time(),
+    )?))
 }
 
 fn build_mimo(
@@ -1323,4 +2087,162 @@ fn unicode_environment() -> BTreeMap<String, String> {
     env::vars_os()
         .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codex_source_configuration_maps_only_supported_runtime_modes() {
+        for (configured, expected) in [
+            (None, CodexSourceMode::Auto),
+            (Some(ProviderSourceMode::Auto), CodexSourceMode::Auto),
+            (Some(ProviderSourceMode::Pat), CodexSourceMode::Pat),
+            (Some(ProviderSourceMode::Oauth), CodexSourceMode::OAuth),
+            (Some(ProviderSourceMode::Api), CodexSourceMode::OAuth),
+            (Some(ProviderSourceMode::ApiKey), CodexSourceMode::OAuth),
+            (Some(ProviderSourceMode::Cli), CodexSourceMode::Cli),
+        ] {
+            assert_eq!(
+                resolve_codex_source(configured).expect("supported Codex source"),
+                expected
+            );
+        }
+        for unsupported in [
+            ProviderSourceMode::Web,
+            ProviderSourceMode::ConfigurableEndpoint,
+            ProviderSourceMode::ManualCookie,
+            ProviderSourceMode::BrowserSession,
+            ProviderSourceMode::Local,
+            ProviderSourceMode::CloudCredentials,
+        ] {
+            assert!(resolve_codex_source(Some(unsupported)).is_err());
+        }
+    }
+
+    #[test]
+    fn flagship_sources_reject_settings_the_runtime_would_ignore() {
+        for (configured, expected) in [
+            (None, ClaudeSourceMode::Auto),
+            (Some(ProviderSourceMode::Auto), ClaudeSourceMode::Auto),
+            (Some(ProviderSourceMode::Oauth), ClaudeSourceMode::OAuth),
+            (Some(ProviderSourceMode::Cli), ClaudeSourceMode::Cli),
+        ] {
+            assert_eq!(
+                resolve_claude_source(configured).expect("supported Claude source"),
+                expected
+            );
+        }
+        for unsupported in [
+            ProviderSourceMode::Api,
+            ProviderSourceMode::ApiKey,
+            ProviderSourceMode::Pat,
+            ProviderSourceMode::Web,
+            ProviderSourceMode::ConfigurableEndpoint,
+            ProviderSourceMode::ManualCookie,
+            ProviderSourceMode::BrowserSession,
+            ProviderSourceMode::Local,
+            ProviderSourceMode::CloudCredentials,
+        ] {
+            assert!(resolve_claude_source(Some(unsupported)).is_err());
+        }
+
+        assert!(validate_grok_source(None).is_ok());
+        assert!(validate_grok_source(Some(ProviderSourceMode::Auto)).is_ok());
+        assert!(validate_grok_source(Some(ProviderSourceMode::Cli)).is_ok());
+        assert!(validate_grok_source(Some(ProviderSourceMode::Oauth)).is_ok());
+        assert!(validate_grok_source(Some(ProviderSourceMode::Web)).is_ok());
+        assert!(validate_grok_source(Some(ProviderSourceMode::Api)).is_err());
+    }
+
+    #[test]
+    fn grok_source_and_cookie_routes_are_closed_and_default_to_auto() {
+        assert_eq!(grok_source_mode(&BTreeMap::new()), GrokSourceMode::Auto);
+        assert_eq!(
+            grok_source_mode(&BTreeMap::from([(
+                "OMARCHY_AI_BAR_GROK_USAGE_SOURCE".to_owned(),
+                "oauth".to_owned(),
+            )])),
+            GrokSourceMode::OAuth
+        );
+        assert_eq!(
+            grok_cookie_source(&BTreeMap::from([(
+                "OMARCHY_AI_BAR_GROK_COOKIE_SOURCE".to_owned(),
+                "manual".to_owned(),
+            )])),
+            GrokCookieSource::Manual
+        );
+    }
+
+    #[test]
+    fn copilot_budget_enrichment_requires_an_explicit_true_flag() {
+        for value in ["1", "true", "yes", "on"] {
+            assert!(copilot_budget_extras_enabled(&BTreeMap::from([(
+                "OMARCHY_AI_BAR_COPILOT_BUDGET_EXTRAS".to_owned(),
+                value.to_owned(),
+            )])));
+        }
+        for value in ["", "0", "false", "TRUE", "other"] {
+            assert!(!copilot_budget_extras_enabled(&BTreeMap::from([(
+                "OMARCHY_AI_BAR_COPILOT_BUDGET_EXTRAS".to_owned(),
+                value.to_owned(),
+            )])));
+        }
+    }
+
+    #[test]
+    fn unspecified_provider_follows_detection_and_explicit_setting_wins() {
+        assert!(!provider_enabled(None, ProviderId::Claude, false));
+        assert!(provider_enabled(None, ProviderId::Claude, true));
+
+        let config = AppConfig {
+            schema_version: oab_storage::config::CURRENT_SCHEMA_VERSION,
+            providers: vec![oab_storage::config::ProviderConfig {
+                id: ProviderId::Claude,
+                instance_id: ProviderInstanceId::new("default").expect("default instance"),
+                enabled: false,
+                endpoint: None,
+                config_path: None,
+                options: oab_storage::config::ProviderOptions::default(),
+                accounts: Vec::new(),
+            }],
+            provider_order: vec![ProviderId::Claude],
+        };
+        assert!(!provider_enabled(Some(&config), ProviderId::Claude, true));
+        assert!(!provider_enabled(Some(&config), ProviderId::Codex, false));
+    }
+
+    #[test]
+    fn direct_browser_adapters_are_registered_as_ordered_fallbacks() {
+        let environment = BTreeMap::new();
+        let selected = selected_lazy_specs(&environment);
+
+        for provider in [ProviderId::Amp, ProviderId::Kimi, ProviderId::MiniMax] {
+            let spec = selected
+                .iter()
+                .find(|spec| spec.provider == provider)
+                .expect("selected provider spec");
+            assert!(spec.browser_fallback.is_some(), "{provider:?}");
+        }
+
+        for provider in [
+            ProviderId::Abacus,
+            ProviderId::CommandCode,
+            ProviderId::Devin,
+            ProviderId::Mistral,
+            ProviderId::Notion,
+            ProviderId::OpenCode,
+            ProviderId::Perplexity,
+            ProviderId::QwenCloud,
+            ProviderId::T3Chat,
+        ] {
+            let spec = LAZY_PROVIDER_SPECS
+                .iter()
+                .find(|spec| spec.provider == provider)
+                .expect("browser provider spec");
+            assert_eq!(spec.source, ProviderSource::ManualCookie, "{provider:?}");
+            assert!(spec.browser_fallback.is_some(), "{provider:?}");
+        }
+    }
 }

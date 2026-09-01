@@ -4,7 +4,7 @@ use std::time::Duration;
 use oab_domain::{
     AccountKey, AccountScope, ClassifiedError, DataConfidence, ErrorKind, Freshness,
     IdentitySnapshot, ProviderHealth, ProviderId, ProviderInstanceId, ProviderSnapshot,
-    ProviderStatus, Timestamp, UsageSample,
+    ProviderStatus, RateWindow, Timestamp, UsagePercent, UsageSample, WindowDuration, WindowUsage,
 };
 use oab_runtime::actor::{
     RefreshFuture, RefreshRegistration, RefreshSource, RuntimeActor, RuntimeConfig, RuntimeLimits,
@@ -80,6 +80,50 @@ fn sample(scope: &AccountScope, fetched_at: Timestamp) -> UsageSample {
         IdentitySnapshot::new(scope.clone(), None, None, None, None, None, None),
         fetched_at,
         None,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        DataConfidence::Exact,
+        ProviderStatus::new(
+            ProviderHealth::Operational,
+            None,
+            Some(fetched_at),
+            Vec::new(),
+        )
+        .expect("fixture provider status"),
+    )
+    .expect("fixture usage sample")
+}
+
+fn sample_with_reset(
+    scope: &AccountScope,
+    fetched_at: Timestamp,
+    resets_at: Timestamp,
+) -> UsageSample {
+    let primary = RateWindow::new(
+        WindowUsage::known(UsagePercent::new(25.0).expect("fixture percentage")),
+        Some(WindowDuration::from_seconds(60).expect("fixture duration")),
+        Some(resets_at),
+        None,
+        None,
+        false,
+    )
+    .expect("fixture rate window");
+    UsageSample::new(
+        scope.clone(),
+        IdentitySnapshot::new(scope.clone(), None, None, None, None, None, None),
+        fetched_at,
+        Some(primary),
         None,
         None,
         Vec::new(),
@@ -353,6 +397,359 @@ async fn required_failure_preserves_last_good_and_overlays_classified_error() {
         Some(ErrorKind::Network)
     );
     task.shutdown().await.expect("clean runtime shutdown");
+}
+
+#[tokio::test(start_paused = true)]
+async fn rate_limit_backoff_suppresses_periodic_work_but_manual_refresh_bypasses_it() {
+    let account_scope = scope("account-a");
+    let provider = Arc::new(ScriptedProvider::new());
+    provider.push_required(ScriptedStep::success(sample(
+        &account_scope,
+        timestamp(1_700_000_001),
+    )));
+    provider.push_required(ScriptedStep::failure(ClassifiedError::new(
+        ErrorKind::RateLimited,
+    )));
+    provider.push_required(ScriptedStep::success(sample(
+        &account_scope,
+        timestamp(1_700_000_002),
+    )));
+    let (actor, handle) = build(
+        config(8, 1, Duration::from_secs(2)),
+        account_scope.clone(),
+        Arc::clone(&provider),
+    );
+    let mut snapshots = handle.subscribe();
+    let task = actor.spawn();
+
+    assert_eq!(
+        handle
+            .refresh(account_scope.clone(), RefreshTrigger::Manual)
+            .await
+            .expect("initial refresh admitted"),
+        RefreshAdmission::Started
+    );
+    wait_for_publication(&mut snapshots, |snapshot| {
+        snapshot.last_known_good().is_some()
+    })
+    .await;
+    tokio::time::advance(Duration::from_mins(1)).await;
+    assert_eq!(
+        handle
+            .refresh(account_scope.clone(), RefreshTrigger::Periodic)
+            .await
+            .expect("rate-limited refresh admitted"),
+        RefreshAdmission::Started
+    );
+    wait_for_publication(&mut snapshots, |snapshot| {
+        snapshot
+            .error()
+            .is_some_and(|error| error.kind() == ErrorKind::RateLimited)
+    })
+    .await;
+    assert_eq!(provider.required_calls(), 2);
+    tokio::time::advance(Duration::from_mins(1)).await;
+
+    assert_eq!(
+        handle
+            .refresh(account_scope.clone(), RefreshTrigger::Periodic)
+            .await
+            .expect("periodic cooldown checked"),
+        RefreshAdmission::Coalesced
+    );
+    assert_eq!(provider.required_calls(), 2);
+    assert_eq!(
+        handle
+            .refresh(account_scope.clone(), RefreshTrigger::MenuOpen)
+            .await
+            .expect("menu-open cooldown checked"),
+        RefreshAdmission::Coalesced
+    );
+    assert_eq!(
+        handle
+            .refresh(
+                account_scope.clone(),
+                RefreshTrigger::ResetBoundary {
+                    boundary: timestamp(1_700_000_100),
+                },
+            )
+            .await
+            .expect("reset-boundary cooldown checked"),
+        RefreshAdmission::Coalesced
+    );
+    assert_eq!(provider.required_calls(), 2);
+    assert_eq!(
+        handle
+            .refresh(account_scope, RefreshTrigger::Manual)
+            .await
+            .expect("manual refresh bypasses cooldown"),
+        RefreshAdmission::Started
+    );
+    wait_for_publication(&mut snapshots, |snapshot| {
+        snapshot
+            .last_known_good()
+            .is_some_and(|sample| sample.fetched_at() == timestamp(1_700_000_002))
+    })
+    .await;
+    assert_eq!(provider.required_calls(), 3);
+    task.shutdown().await.expect("clean runtime shutdown");
+}
+
+#[tokio::test(start_paused = true)]
+async fn provider_retry_after_extends_the_automatic_cooldown() {
+    let account_scope = scope("account-a");
+    let provider = Arc::new(ScriptedProvider::new());
+    let rate_limit = ClassifiedError::new(ErrorKind::RateLimited)
+        .with_retry_after(WindowDuration::from_seconds(12 * 60).expect("retry-after duration"))
+        .expect("rate limits permit retry-after");
+    provider.push_required(ScriptedStep::failure(rate_limit));
+    provider.push_required(ScriptedStep::success(sample(
+        &account_scope,
+        timestamp(1_700_000_720),
+    )));
+    let (actor, handle) = build(
+        config(8, 1, Duration::from_secs(2)),
+        account_scope.clone(),
+        Arc::clone(&provider),
+    );
+    let mut snapshots = handle.subscribe();
+    let task = actor.spawn();
+
+    handle
+        .refresh(account_scope.clone(), RefreshTrigger::Manual)
+        .await
+        .expect("rate-limited refresh admitted");
+    wait_for_publication(&mut snapshots, |snapshot| {
+        snapshot
+            .error()
+            .is_some_and(|error| error.kind() == ErrorKind::RateLimited)
+    })
+    .await;
+
+    tokio::time::advance(Duration::from_secs(12 * 60 - 1)).await;
+    assert_eq!(
+        handle
+            .refresh(account_scope.clone(), RefreshTrigger::Periodic)
+            .await
+            .expect("retry-after cooldown checked"),
+        RefreshAdmission::Coalesced
+    );
+    assert_eq!(provider.required_calls(), 1);
+
+    tokio::time::advance(Duration::from_secs(1)).await;
+    assert_eq!(
+        handle
+            .refresh(account_scope, RefreshTrigger::Periodic)
+            .await
+            .expect("retry-after elapsed"),
+        RefreshAdmission::Started
+    );
+    wait_for_publication(&mut snapshots, |snapshot| {
+        snapshot.last_known_good().is_some()
+    })
+    .await;
+    assert_eq!(provider.required_calls(), 2);
+
+    task.shutdown().await.expect("clean runtime shutdown");
+}
+
+#[tokio::test(start_paused = true)]
+async fn retained_rate_limit_restores_the_remaining_retry_after_cooldown() {
+    let account_scope = scope("retained-account");
+    let fetched_at = timestamp(1_700_000_000);
+    let rate_limit = ClassifiedError::new(ErrorKind::RateLimited)
+        .with_retry_after(WindowDuration::from_seconds(12 * 60).expect("retry-after duration"))
+        .expect("rate limits permit retry-after");
+    let retained = ProviderSnapshot::ready(
+        sample(&account_scope, fetched_at),
+        Freshness::Stale {
+            since: timestamp(1_700_000_000),
+        },
+        oab_domain::RefreshPhase::Idle,
+        Some(rate_limit),
+    )
+    .expect("retained rate-limit snapshot");
+    let provider = Arc::new(ScriptedProvider::new());
+    provider.push_required(ScriptedStep::success(sample(
+        &account_scope,
+        timestamp(1_700_000_720),
+    )));
+    let source: Arc<dyn RefreshSource> = Arc::new(FakeSource(Arc::clone(&provider)));
+    let clock: Arc<dyn Clock> = Arc::new(TestClock::new(timestamp(1_700_000_060)));
+    let (actor, handle) = RuntimeActor::new_with_retained(
+        config(8, 1, Duration::from_secs(2)),
+        clock,
+        [RefreshRegistration::new(account_scope.clone(), source)],
+        [retained],
+    )
+    .expect("runtime with retained rate limit");
+    let mut snapshots = handle.subscribe();
+    let task = actor.spawn();
+
+    assert_eq!(
+        handle
+            .refresh(account_scope.clone(), RefreshTrigger::Periodic)
+            .await
+            .expect("startup cooldown checked"),
+        RefreshAdmission::Coalesced
+    );
+    assert_eq!(provider.required_calls(), 0);
+    assert_eq!(
+        snapshots.borrow().envelope().snapshots()[0]
+            .last_known_good()
+            .map(UsageSample::fetched_at),
+        Some(fetched_at),
+        "retained usage remains immediately displayable"
+    );
+
+    tokio::time::advance(Duration::from_secs(11 * 60 - 1)).await;
+    assert_eq!(
+        handle
+            .refresh(account_scope.clone(), RefreshTrigger::Periodic)
+            .await
+            .expect("remaining cooldown checked"),
+        RefreshAdmission::Coalesced
+    );
+    tokio::time::advance(Duration::from_secs(1)).await;
+    assert_eq!(
+        handle
+            .refresh(account_scope, RefreshTrigger::Periodic)
+            .await
+            .expect("retained retry-after elapsed"),
+        RefreshAdmission::Started
+    );
+    wait_for_publication(&mut snapshots, |snapshot| {
+        snapshot
+            .last_known_good()
+            .is_some_and(|sample| sample.fetched_at() == timestamp(1_700_000_720))
+    })
+    .await;
+    assert_eq!(provider.required_calls(), 1);
+
+    task.shutdown().await.expect("clean runtime shutdown");
+}
+
+#[tokio::test(start_paused = true)]
+async fn opening_popup_retries_missing_data_once_but_does_not_replace_fresh_data() {
+    let account_scope = scope("account-a");
+    let provider = Arc::new(ScriptedProvider::new());
+    provider.push_required(ScriptedStep::success(sample(
+        &account_scope,
+        timestamp(1_700_000_001),
+    )));
+    let (actor, handle) = build(
+        config(8, 1, Duration::from_secs(2)),
+        account_scope,
+        Arc::clone(&provider),
+    );
+    let mut snapshots = handle.subscribe();
+    let task = actor.spawn();
+
+    handle
+        .set_popup_open(true)
+        .await
+        .expect("popup state applied");
+    wait_for_publication(&mut snapshots, |snapshot| {
+        snapshot.last_known_good().is_some()
+    })
+    .await;
+    assert_eq!(provider.required_calls(), 1);
+
+    handle
+        .set_popup_open(false)
+        .await
+        .expect("popup close applied");
+    handle
+        .set_popup_open(true)
+        .await
+        .expect("popup reopen applied");
+    tokio::task::yield_now().await;
+    assert_eq!(provider.required_calls(), 1);
+
+    task.shutdown().await.expect("clean runtime shutdown");
+}
+
+#[tokio::test(start_paused = true)]
+async fn successful_usage_arms_a_graceful_reset_boundary_refresh() {
+    let account_scope = scope("account-a");
+    let provider = Arc::new(ScriptedProvider::new());
+    provider.push_required(ScriptedStep::success(sample_with_reset(
+        &account_scope,
+        timestamp(1_700_000_001),
+        timestamp(1_700_000_030),
+    )));
+    provider.push_required(ScriptedStep::success(sample(
+        &account_scope,
+        timestamp(1_700_000_060),
+    )));
+    let (actor, handle) = build(
+        config(8, 1, Duration::from_secs(2)),
+        account_scope.clone(),
+        Arc::clone(&provider),
+    );
+    let mut snapshots = handle.subscribe();
+    let task = actor.spawn();
+
+    handle
+        .refresh(account_scope, RefreshTrigger::Manual)
+        .await
+        .expect("initial refresh admitted");
+    wait_for_publication(&mut snapshots, |snapshot| {
+        snapshot
+            .last_known_good()
+            .is_some_and(|sample| sample.fetched_at() == timestamp(1_700_000_001))
+    })
+    .await;
+    assert_eq!(provider.required_calls(), 1);
+
+    tokio::time::advance(Duration::from_secs(59)).await;
+    tokio::task::yield_now().await;
+    assert_eq!(provider.required_calls(), 1);
+    tokio::time::advance(Duration::from_secs(1)).await;
+    wait_for_publication(&mut snapshots, |snapshot| {
+        snapshot
+            .last_known_good()
+            .is_some_and(|sample| sample.fetched_at() == timestamp(1_700_000_060))
+    })
+    .await;
+    assert_eq!(provider.required_calls(), 2);
+
+    task.shutdown().await.expect("clean runtime shutdown");
+}
+
+#[test]
+fn retained_ready_snapshot_is_published_stale_before_live_io() {
+    let account_scope = scope("retained-account");
+    let fetched_at = timestamp(1_700_000_001);
+    let retained = ProviderSnapshot::ready(
+        sample(&account_scope, fetched_at),
+        Freshness::Fresh,
+        oab_domain::RefreshPhase::Idle,
+        None,
+    )
+    .expect("retained fixture");
+    let provider = Arc::new(ScriptedProvider::new());
+    let source: Arc<dyn RefreshSource> = Arc::new(FakeSource(Arc::clone(&provider)));
+    let clock: Arc<dyn Clock> = Arc::new(TestClock::new(timestamp(1_700_000_100)));
+    let (_actor, handle) = RuntimeActor::new_with_retained(
+        config(8, 1, Duration::from_secs(2)),
+        clock,
+        [RefreshRegistration::new(account_scope, source)],
+        [retained],
+    )
+    .expect("runtime with retained state");
+
+    let publication = handle.subscribe().borrow().clone();
+    let snapshot = &publication.envelope().snapshots()[0];
+    assert_eq!(
+        snapshot.last_known_good().map(UsageSample::fetched_at),
+        Some(fetched_at)
+    );
+    assert!(matches!(
+        snapshot.freshness(),
+        Some(Freshness::Stale { since }) if since >= timestamp(1_700_000_100)
+    ));
+    assert_eq!(provider.required_calls(), 0);
 }
 
 #[tokio::test(start_paused = true)]

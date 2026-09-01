@@ -21,10 +21,14 @@ replace login-item management, freedesktop notifications replace UserNotificatio
 and AUR/pacman replace Sparkle updates.
 
 The StatusNotifierItem fallback supplies a desktop indicator when no compatible
-Omarchy display client is connected. Browser-cookie automation is intentionally
-not copied from macOS: supported manual-session providers use an explicit
-environment variable or Secret Service value. QuickJS plugins are local,
-explicitly evaluated, and have no network or host APIs in version 0.2.0.
+Omarchy display client is connected. Supported browser-session providers use a
+Linux-native, bounded profile reader only as a lazy authentication fallback;
+explicit environment or Secret Service credentials remain primary, browser
+sessions are not copied into application configuration, and browser discovery
+does not auto-enable a provider. Providers without a validated Linux browser
+path continue to use an explicit environment or Secret Service value. QuickJS
+plugins are local, explicitly evaluated, and have no network or host APIs in
+version 0.3.0.
 
 See [`unsupported-apple-semantics.md`](unsupported-apple-semantics.md) for the
 two Apple-only behaviors that have no equivalent contract on Omarchy.

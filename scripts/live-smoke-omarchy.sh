@@ -91,9 +91,9 @@ readonly expected_socat_sha256="c823e6f60c4657758fb4cbe0dee62e3563ad61ae734adcdb
 readonly expected_iproute2_version="iproute2 7.2.0-1"
 readonly expected_ss_sha256="b5956b0c54b348bb4d69d80fd096c861785b4aaf03b722d226de5821135ded8b"
 readonly expected_bash_sha256="575e03ac834b739349a4484de481abcd06a6f7193cefc795260a32a1943f20a5"
-readonly expected_source_sha256="912c8772f6d4b3b307d83dade8f93df58115865d43800ac999f8723b01ba34d8"
-readonly expected_release_binary_sha256="d9bf794af1697fd29e11fe85db1e637c0e407d6f063b36562159016d551c3f9f"
-readonly expected_plugin_manifest_sha256="1abf2e13c90a67f285da99e311d52c3a9d90329f7d3945417b7566f156d9a10f"
+readonly expected_source_sha256="4084764b088f546e5298dd4c4d217a6b5ada9f7216eb01c71a6146b13b684fa6"
+readonly expected_release_binary_sha256="82b1e6aca338c734e57f726cea20bb7f38c6f2a99dd6b0d13bc657f65691339b"
+readonly expected_plugin_manifest_sha256="ac2afe4143810f25bec48ffaecfb20288de1aaaa2670312d102b5e93b8e2d4ec"
 readonly expected_snapshot_fixture_sha256="ba574bf4837828b9b90659acfdb0f0b0309ca2df836c7d2bd100c7bf7462ee66"
 readonly stream_id="a11ce000000000000000000000000001"
 
@@ -1403,9 +1403,13 @@ plugin_tree_matches_frozen_manifest() {
     cd -- "$root" || exit 1
     find . -xdev -mindepth 1 -maxdepth 1 -type f -printf '%P\0' | LC_ALL=C sort -z
   )
-  [[ ${#names[@]} == 5 && ${names[0]} == BarWidget.qml &&
-    ${names[1]} == Panel.qml && ${names[2]} == Protocol.js &&
-    ${names[3]} == Service.qml && ${names[4]} == manifest.json ]] || return 1
+  [[ ${#names[@]} == 13 && ${names[0]} == AppSettings.qml &&
+    ${names[1]} == BarWidget.qml && ${names[2]} == InlineChart.qml &&
+    ${names[3]} == Panel.qml && ${names[4]} == Protocol.js &&
+    ${names[5]} == ProviderCatalog.qml && ${names[6]} == ProviderDetail.qml &&
+    ${names[7]} == QuotaMetric.qml && ${names[8]} == Service.qml &&
+    ${names[9]} == SettingsHome.qml && ${names[10]} == UsageExtraSection.qml &&
+    ${names[11]} == UsageView.qml && ${names[12]} == manifest.json ]] || return 1
   tree_manifest "$root" "$destination" || return 1
   manifest_sha256=$(sha256_file "$destination") || return 1
   [[ $manifest_sha256 == "$expected_plugin_manifest_sha256" ]]
@@ -6049,7 +6053,7 @@ temporary_binary_full_identity=$(stat -Lc '%D:%i:%u:%g:%f:%s:%Y:%Z:%W:%h' \
 /usr/bin/env -i "$temporary_binary" version --json >"$evidence_dir/binary-version.json"
 jq -e '
   .name == "omarchy-ai-bar"
-  and .version == "0.2.0"
+  and .version == "0.3.0"
   and (keys | sort) == ["name", "version"]
 ' "$evidence_dir/binary-version.json" >/dev/null || die "release binary identity is unexpected"
 [[ $(file_identity "$temporary_binary") == "$temporary_binary_identity" &&

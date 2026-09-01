@@ -11,6 +11,7 @@ use crate::output::OutputFormat;
 #[derive(Debug, Parser)]
 #[command(name = "omarchy-ai-bar")]
 #[command(about = "Omarchy-native AI provider usage monitoring")]
+#[command(version)]
 pub struct Cli {
     /// Selected process mode. No subcommand starts the desktop daemon.
     #[command(subcommand)]
@@ -38,8 +39,12 @@ pub enum Command {
     Hooks(HooksArgs),
     /// Evaluate a noninteractive quota guard.
     Guard(GuardArgs),
-    /// Manage explicit cookie input.
+    /// Manage app-owned provider credentials.
+    Credential(CookieArgs),
+    /// Manage app-owned provider credentials (legacy command name).
     Cookie(CookieArgs),
+    /// Manage the app-owned GitHub Copilot OAuth session.
+    Copilot(CopilotArgs),
     /// Inspect or clear application caches.
     Cache(CacheArgs),
     /// Manage user-provider plugins.
@@ -128,6 +133,49 @@ pub enum ConfigAction {
         #[arg(long)]
         force: bool,
     },
+    /// Describe supported provider settings without exposing secret values.
+    Describe {
+        /// Canonical provider ID. Omitting it describes every provider.
+        #[arg(value_name = "PROVIDER")]
+        provider: Option<String>,
+        /// Output format.
+        #[command(flatten)]
+        output: OutputArgs,
+    },
+    /// Enable a provider in the desktop daemon and bar.
+    Enable {
+        /// Canonical provider ID.
+        provider: String,
+    },
+    /// Disable a provider in the desktop daemon and bar.
+    Disable {
+        /// Canonical provider ID.
+        provider: String,
+    },
+    /// Set or clear a provider's non-secret API endpoint.
+    SetEndpoint {
+        /// Canonical provider ID.
+        provider: String,
+        /// Validated HTTPS URL, or a supported loopback HTTP URL.
+        #[arg(value_name = "URL", required_unless_present = "clear")]
+        endpoint: Option<String>,
+        /// Remove the configured endpoint and return to provider defaults.
+        #[arg(long, conflicts_with = "endpoint")]
+        clear: bool,
+    },
+    /// Set or clear one typed, non-secret provider option.
+    SetOption {
+        /// Canonical provider ID.
+        provider: String,
+        /// Canonical provider option key.
+        key: String,
+        /// Typed option value accepted by the provider descriptor.
+        #[arg(value_name = "VALUE", required_unless_present = "clear")]
+        value: Option<String>,
+        /// Remove the configured value and return to the provider default.
+        #[arg(long, conflicts_with = "value")]
+        clear: bool,
+    },
 }
 
 /// Application-owned cache operations.
@@ -147,7 +195,7 @@ pub enum CacheAction {
     Clear,
 }
 
-/// Secure manual-session credential operations.
+/// Secure app-owned provider credential operations.
 #[derive(Debug, Clone, Args)]
 pub struct CookieArgs {
     /// Credential operation. Omitting it lists supported providers.
@@ -155,10 +203,10 @@ pub struct CookieArgs {
     pub action: Option<CookieAction>,
 }
 
-/// Manual-session credential operation.
+/// App-owned provider credential operation.
 #[derive(Debug, Clone, Subcommand)]
 pub enum CookieAction {
-    /// List providers that accept a managed manual session.
+    /// List providers that accept a managed credential.
     List(OutputArgs),
     /// Read a credential from standard input and store it in Secret Service.
     Set {
@@ -167,6 +215,9 @@ pub enum CookieAction {
         /// Account routing ID.
         #[arg(long, default_value = "ambient")]
         account: String,
+        /// Named credential slot. Omitting it preserves legacy primary-credential behavior.
+        #[arg(long, value_name = "SLOT")]
+        slot: Option<String>,
     },
     /// Report whether an exact managed credential exists without revealing it.
     Status {
@@ -175,6 +226,9 @@ pub enum CookieAction {
         /// Account routing ID.
         #[arg(long, default_value = "ambient")]
         account: String,
+        /// Named credential slot. Omitting it preserves legacy primary-credential behavior.
+        #[arg(long, value_name = "SLOT")]
+        slot: Option<String>,
     },
     /// Delete an exact managed credential from Secret Service.
     Delete {
@@ -183,7 +237,33 @@ pub enum CookieAction {
         /// Account routing ID.
         #[arg(long, default_value = "ambient")]
         account: String,
+        /// Named credential slot. Omitting it preserves legacy primary-credential behavior.
+        #[arg(long, value_name = "SLOT")]
+        slot: Option<String>,
     },
+}
+
+/// App-owned GitHub Copilot OAuth operations.
+#[derive(Debug, Clone, Args)]
+pub struct CopilotArgs {
+    /// OAuth operation. Omitting it reports the app-owned session status.
+    #[command(subcommand)]
+    pub action: Option<CopilotAction>,
+}
+
+/// GitHub Copilot OAuth operation.
+#[derive(Debug, Clone, Subcommand)]
+pub enum CopilotAction {
+    /// Sign in through GitHub's OAuth device flow without touching Copilot CLI credentials.
+    Login {
+        /// Print the verification URL without opening the default browser.
+        #[arg(long)]
+        no_open_browser: bool,
+    },
+    /// Report whether Omarchy AI Bar owns a Copilot OAuth session.
+    Status,
+    /// Delete only Omarchy AI Bar's Copilot OAuth session.
+    Logout,
 }
 
 /// Shell-free external hook operations.
@@ -289,7 +369,7 @@ pub enum BridgeTransport {
 
 #[cfg(test)]
 mod tests {
-    use clap::CommandFactory;
+    use clap::{CommandFactory, Parser};
 
     use super::*;
 
@@ -310,7 +390,9 @@ mod tests {
             "config",
             "hooks",
             "guard",
+            "credential",
             "cookie",
+            "copilot",
             "cache",
             "plugins",
             "sessions",
@@ -352,5 +434,228 @@ mod tests {
             assert!(matches!(cli.command, Some(Command::Bridge { .. })));
         }
         assert!(Cli::try_parse_from(["omarchy-ai-bar", "bridge", "manage"]).is_err());
+    }
+
+    #[test]
+    fn copilot_auth_commands_are_explicit_and_app_scoped() {
+        let login =
+            Cli::try_parse_from(["omarchy-ai-bar", "copilot", "login", "--no-open-browser"])
+                .expect("parse Copilot login");
+        assert!(matches!(
+            login.command,
+            Some(Command::Copilot(CopilotArgs {
+                action: Some(CopilotAction::Login {
+                    no_open_browser: true
+                })
+            }))
+        ));
+
+        let logout = Cli::try_parse_from(["omarchy-ai-bar", "copilot", "logout"])
+            .expect("parse Copilot logout");
+        assert!(matches!(
+            logout.command,
+            Some(Command::Copilot(CopilotArgs {
+                action: Some(CopilotAction::Logout)
+            }))
+        ));
+    }
+
+    #[test]
+    fn provider_endpoint_configuration_is_explicit_and_clearable() {
+        let set = Cli::try_parse_from([
+            "omarchy-ai-bar",
+            "config",
+            "set-endpoint",
+            "litellm",
+            "https://llm.example.test",
+        ])
+        .expect("parse endpoint configuration");
+        assert!(matches!(
+            set.command,
+            Some(Command::Config(ConfigArgs {
+                action: Some(ConfigAction::SetEndpoint {
+                    provider,
+                    endpoint: Some(endpoint),
+                    clear: false,
+                })
+            })) if provider == "litellm" && endpoint == "https://llm.example.test"
+        ));
+
+        let clear = Cli::try_parse_from([
+            "omarchy-ai-bar",
+            "config",
+            "set-endpoint",
+            "litellm",
+            "--clear",
+        ])
+        .expect("parse endpoint removal");
+        assert!(matches!(
+            clear.command,
+            Some(Command::Config(ConfigArgs {
+                action: Some(ConfigAction::SetEndpoint {
+                    provider,
+                    endpoint: None,
+                    clear: true,
+                })
+            })) if provider == "litellm"
+        ));
+    }
+
+    #[test]
+    fn credential_and_legacy_cookie_commands_share_typed_operations() {
+        let credential = Cli::try_parse_from([
+            "omarchy-ai-bar",
+            "credential",
+            "set",
+            "claude",
+            "--account",
+            "work",
+            "--slot",
+            "oauth-token",
+        ])
+        .expect("parse named credential slot");
+        assert!(matches!(
+            credential.command,
+            Some(Command::Credential(CookieArgs {
+                action: Some(CookieAction::Set {
+                    provider,
+                    account,
+                    slot: Some(slot),
+                })
+            })) if provider == "claude" && account == "work" && slot == "oauth-token"
+        ));
+
+        let legacy = Cli::try_parse_from(["omarchy-ai-bar", "cookie", "status", "claude"])
+            .expect("parse legacy credential status");
+        assert!(matches!(
+            legacy.command,
+            Some(Command::Cookie(CookieArgs {
+                action: Some(CookieAction::Status {
+                    provider,
+                    account,
+                    slot: None,
+                })
+            })) if provider == "claude" && account == "ambient"
+        ));
+
+        let delete = Cli::try_parse_from([
+            "omarchy-ai-bar",
+            "credential",
+            "delete",
+            "claude",
+            "--slot",
+            "admin-key",
+        ])
+        .expect("parse named credential deletion");
+        assert!(matches!(
+            delete.command,
+            Some(Command::Credential(CookieArgs {
+                action: Some(CookieAction::Delete {
+                    provider,
+                    account,
+                    slot: Some(slot),
+                })
+            })) if provider == "claude" && account == "ambient" && slot == "admin-key"
+        ));
+    }
+
+    #[test]
+    fn provider_setting_descriptions_have_scoped_machine_formats() {
+        let all = Cli::try_parse_from(["omarchy-ai-bar", "config", "describe", "--format", "json"])
+            .expect("parse all-provider description");
+        assert!(matches!(
+            all.command,
+            Some(Command::Config(ConfigArgs {
+                action: Some(ConfigAction::Describe {
+                    provider: None,
+                    output: OutputArgs {
+                        format: OutputFormat::Json,
+                    },
+                })
+            }))
+        ));
+
+        let provider = Cli::try_parse_from([
+            "omarchy-ai-bar",
+            "config",
+            "describe",
+            "codex",
+            "--format",
+            "toon",
+        ])
+        .expect("parse provider description");
+        assert!(matches!(
+            provider.command,
+            Some(Command::Config(ConfigArgs {
+                action: Some(ConfigAction::Describe {
+                    provider: Some(provider),
+                    output: OutputArgs {
+                        format: OutputFormat::Toon,
+                    },
+                })
+            })) if provider == "codex"
+        ));
+    }
+
+    #[test]
+    fn provider_options_require_exactly_value_or_clear() {
+        let set = Cli::try_parse_from([
+            "omarchy-ai-bar",
+            "config",
+            "set-option",
+            "codex",
+            "source",
+            "oauth",
+        ])
+        .expect("parse typed provider option");
+        assert!(matches!(
+            set.command,
+            Some(Command::Config(ConfigArgs {
+                action: Some(ConfigAction::SetOption {
+                    provider,
+                    key,
+                    value: Some(value),
+                    clear: false,
+                })
+            })) if provider == "codex" && key == "source" && value == "oauth"
+        ));
+
+        let clear = Cli::try_parse_from([
+            "omarchy-ai-bar",
+            "config",
+            "set-option",
+            "codex",
+            "source",
+            "--clear",
+        ])
+        .expect("parse provider option removal");
+        assert!(matches!(
+            clear.command,
+            Some(Command::Config(ConfigArgs {
+                action: Some(ConfigAction::SetOption {
+                    provider,
+                    key,
+                    value: None,
+                    clear: true,
+                })
+            })) if provider == "codex" && key == "source"
+        ));
+
+        assert!(
+            Cli::try_parse_from(["omarchy-ai-bar", "config", "set-option", "codex", "source",])
+                .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "omarchy-ai-bar",
+                "config",
+                "set-option",
+                "codex",
+                "source",
+                "oauth",
+                "--clear",
+            ])
+            .is_err()
+        );
     }
 }

@@ -16,6 +16,7 @@ var PROTOCOL_MAJOR = 1;
 var PROTOCOL_MINOR = 0;
 
 var KNOWN_CAPABILITIES = ["display_snapshots", "provider_accounts", "settings", "runtime_actions", "widget_geometry", "panel_state", "notifications", "action_progress", "compatibility_errors"];
+var KNOWN_PROVIDERS = ["codex", "openai", "azureopenai", "claude", "clinepass", "cursor", "opencode", "opencodego", "alibaba", "alibabatokenplan", "qwencloud", "factory", "fireworks", "gemini", "antigravity", "copilot", "devin", "zai", "minimax", "manus", "kimi", "kilo", "kiro", "vertexai", "augment", "jetbrains", "moonshot", "amp", "t3chat", "ollama", "synthetic", "openrouter", "elevenlabs", "warp", "windsurf", "zed", "perplexity", "mimo", "doubao", "sakana", "abacus", "mistral", "deepseek", "deepinfra", "codebuff", "crof", "venice", "commandcode", "qoder", "stepfun", "bedrock", "grok", "groq", "llmproxy", "litellm", "deepgram", "poe", "chutes", "neuralwatt", "clawrouter", "longcat", "sub2api", "wayfinder", "zenmux", "aiand", "zoommate", "xai", "notion", "ibmbob"];
 
 var PROGRESS_STATES = ["queued", "running", "completed", "failed", "cancelled"];
 var COMPATIBILITY_CODES = ["unsupported_protocol_major", "hello_required", "protocol_violation"];
@@ -672,4 +673,17 @@ function closePanelLine(requestId) {
 
 function refreshAllLine(requestId) {
     return actionLine(requestId, "refresh_all");
+}
+
+function refreshProviderLine(requestId, provider) {
+    if (!isExactInteger(requestId) || KNOWN_PROVIDERS.indexOf(provider) === -1)
+        return "";
+    return JSON.stringify({
+        type: "action",
+        request_id: requestId,
+        action: {
+            id: "refresh_provider",
+            provider: provider
+        }
+    }) + "\n";
 }

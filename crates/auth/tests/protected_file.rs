@@ -3,10 +3,12 @@ use std::io;
 use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 
+use oab_auth::credential_slot::CredentialSlotId;
 use oab_auth::protected_file::{
     PROTECTED_FILE_NAME, ProtectedFileAcknowledgement, ProtectedFileError, ProtectedFileStore,
 };
-use oab_auth::secret_store::{SecretKey, SecretStore, SecretValue};
+use oab_auth::secret_store::{SecretKey, SecretStore, SecretStoreError, SecretValue};
+use oab_domain::{AccountKey, AccountScope, ProviderId, ProviderInstanceId};
 use oab_storage::atomic_file::previous_path;
 
 static NEXT_TEST_DIRECTORY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -175,5 +177,104 @@ async fn stale_plaintext_predecessor_blocks_writes_instead_of_being_retained() {
     assert_eq!(
         fs::read(predecessor).expect("predecessor left for explicit recovery or removal"),
         b"stale-secret-canary"
+    );
+}
+
+#[tokio::test]
+async fn named_slots_and_legacy_keys_coexist_without_schema_changes() {
+    let directory = TestDirectory::new("named-slots");
+    let path = directory.path().join(PROTECTED_FILE_NAME);
+    let store = acknowledged_store(path);
+    let legacy = SecretKey::new("zai", "ambient", "manual-session").expect("legacy key");
+    let named = CredentialSlotId::new(
+        AccountScope::new(
+            ProviderId::Zai,
+            ProviderInstanceId::new("default").expect("instance"),
+            AccountKey::new("ambient").expect("account"),
+        ),
+        "api-key",
+    )
+    .expect("named slot");
+
+    store
+        .put(
+            &legacy,
+            SecretValue::new(b"legacy-secret".to_vec()).expect("legacy secret"),
+        )
+        .await
+        .expect("store legacy secret");
+    store
+        .put(
+            named.secret_key(),
+            SecretValue::new(b"named-secret".to_vec()).expect("named secret"),
+        )
+        .await
+        .expect("store named secret");
+
+    assert_eq!(
+        store
+            .get(&legacy)
+            .await
+            .expect("get legacy")
+            .expect("legacy present")
+            .expose_secret(),
+        b"legacy-secret"
+    );
+    assert_eq!(
+        store
+            .get(named.secret_key())
+            .await
+            .expect("get named")
+            .expect("named present")
+            .expose_secret(),
+        b"named-secret"
+    );
+}
+
+#[tokio::test]
+async fn duplicate_named_slot_records_fail_closed() {
+    let directory = TestDirectory::new("duplicate-named-slot");
+    let path = directory.path().join(PROTECTED_FILE_NAME);
+    let named = CredentialSlotId::new(
+        AccountScope::new(
+            ProviderId::Codex,
+            ProviderInstanceId::new("default").expect("instance"),
+            AccountKey::new("ambient").expect("account"),
+        ),
+        "api-key",
+    )
+    .expect("named slot");
+    let key = named.secret_key();
+    let document = serde_json::json!({
+        "version": 1,
+        "entries": [
+            {
+                "provider": key.provider(),
+                "account": key.account(),
+                "purpose": key.purpose(),
+                "secret": [102, 105, 114, 115, 116]
+            },
+            {
+                "provider": key.provider(),
+                "account": key.account(),
+                "purpose": key.purpose(),
+                "secret": [115, 101, 99, 111, 110, 100]
+            }
+        ]
+    });
+    fs::write(
+        &path,
+        serde_json::to_vec(&document).expect("encode duplicate document"),
+    )
+    .expect("seed duplicate document");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).expect("private mode");
+    let store = acknowledged_store(path);
+
+    assert_eq!(
+        store
+            .get(key)
+            .await
+            .expect_err("duplicates must fail closed"),
+        SecretStoreError::InvalidData
     );
 }

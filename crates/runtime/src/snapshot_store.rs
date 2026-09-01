@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use oab_domain::{
     AccountScope, ClassifiedError, CostUsageSnapshot, Freshness, ProviderSnapshot, RefreshPhase,
-    SnapshotEnvelopeV1, SnapshotError, Timestamp, UsageSample,
+    RetryEligibility, SnapshotEnvelopeV1, SnapshotError, Timestamp, UsageSample,
 };
 use thiserror::Error;
 use tokio::sync::watch;
@@ -92,8 +92,17 @@ impl SnapshotStore {
     ///
     /// Returns an error for duplicate scopes or when the initial domain
     /// envelope exceeds its validated bounds.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn new(
         scopes: impl IntoIterator<Item = AccountScope>,
+        generated_at: Timestamp,
+    ) -> Result<Self, SnapshotStoreError> {
+        Self::new_with_retained(scopes, std::iter::empty(), generated_at)
+    }
+
+    pub(crate) fn new_with_retained(
+        scopes: impl IntoIterator<Item = AccountScope>,
+        retained: impl IntoIterator<Item = ProviderSnapshot>,
         generated_at: Timestamp,
     ) -> Result<Self, SnapshotStoreError> {
         let mut snapshots = BTreeMap::new();
@@ -104,6 +113,23 @@ impl SnapshotStore {
             {
                 return Err(SnapshotStoreError::DuplicateScope);
             }
+        }
+        for snapshot in retained {
+            let scope = snapshot.scope();
+            let Some(sample) = snapshot.last_known_good() else {
+                continue;
+            };
+            if !snapshots.contains_key(scope) {
+                continue;
+            }
+            let stale_since = generated_at.max(sample.fetched_at());
+            let restored = ProviderSnapshot::ready(
+                sample.clone(),
+                Freshness::Stale { since: stale_since },
+                RefreshPhase::Idle,
+                None,
+            )?;
+            snapshots.insert(scope.clone(), restored);
         }
         let envelope = build_envelope(&snapshots, generated_at)?;
         let initial = Arc::new(PublishedSnapshot {
@@ -177,10 +203,18 @@ impl SnapshotStore {
         generated_at: Timestamp,
     ) -> Result<bool, SnapshotStoreError> {
         let current = self.require_scope(scope)?;
-        let next = if let Some(last_known_good) = current.last_known_good() {
-            let stale_since = generated_at.max(last_known_good.fetched_at());
-            current.with_error_overlay(scope, error, stale_since)?
+        let next = if error.retry() == RetryEligibility::Automatic {
+            if let Some(last_known_good) = current.last_known_good() {
+                let stale_since = generated_at.max(last_known_good.fetched_at());
+                current.with_error_overlay(scope, error, stale_since)?
+            } else {
+                ProviderSnapshot::unavailable(scope.clone(), error)
+            }
         } else {
+            // Authentication, permission, missing-credential, and parse
+            // failures are not transient. Retiring old usage prevents a
+            // previous account's data from surviving a logout or credential
+            // change under the same ambient scope.
             ProviderSnapshot::unavailable(scope.clone(), error)
         };
         self.publish_change(scope, next, generated_at)
@@ -548,6 +582,25 @@ mod tests {
                 .mark_refreshing(&account, timestamp(3), timestamp(3))
                 .expect("unavailable refresh noop")
         );
+    }
+
+    #[test]
+    fn non_retryable_failure_retires_last_good_account_data() {
+        let account = scope("account");
+        let fetched = timestamp(100);
+        let failure = ClassifiedError::new(ErrorKind::AuthenticationExpired);
+        let mut store = SnapshotStore::new([account.clone()], timestamp(1)).expect("store");
+        store
+            .apply_success(&account, sample(&account, fetched, None), fetched)
+            .expect("initial success");
+
+        store
+            .apply_failure(&account, failure.clone(), timestamp(110))
+            .expect("terminal failure");
+        let snapshot = store.snapshot(&account).expect("snapshot");
+        assert!(matches!(snapshot, ProviderSnapshot::Unavailable(_)));
+        assert!(snapshot.last_known_good().is_none());
+        assert_eq!(snapshot.error(), Some(&failure));
     }
 
     #[test]

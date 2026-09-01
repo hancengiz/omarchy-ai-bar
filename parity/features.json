@@ -118,12 +118,15 @@
       ],
       "omarchy_mapping": "Typed config validation, mutation, redaction, path override, and permissions",
       "disposition": "required",
-      "status": "planned",
-      "tests": [],
+      "status": "in-progress",
+      "tests": [
+        "crates/app/tests/cli_contract.rs",
+        "crates/storage/tests/provider_options.rs"
+      ],
       "cells": {
-        "implementation": "planned",
-        "integration": "planned",
-        "verification": "planned"
+        "implementation": "in-progress",
+        "integration": "in-progress",
+        "verification": "in-progress"
       }
     },
     {
@@ -214,12 +217,16 @@
       ],
       "omarchy_mapping": "Exact Omarchy bar anchoring with CodexBar-style overview and cards",
       "disposition": "required",
-      "status": "planned",
-      "tests": [],
+      "status": "in-progress",
+      "tests": [
+        "crates/app/tests/daemon_display_e2e.rs",
+        "crates/app/tests/ui_socket_smoke.rs",
+        "tests/qml/tst_protocol.qml"
+      ],
       "cells": {
-        "implementation": "planned",
-        "integration": "planned",
-        "verification": "planned"
+        "implementation": "in-progress",
+        "integration": "in-progress",
+        "verification": "in-progress"
       }
     },
     {
@@ -230,12 +237,17 @@
       ],
       "omarchy_mapping": "Complete QML settings surface backed by typed Rust actions",
       "disposition": "required",
-      "status": "planned",
-      "tests": [],
+      "status": "in-progress",
+      "tests": [
+        "crates/app/tests/cli_contract.rs",
+        "crates/providers/tests/provider_settings_descriptor.rs",
+        "crates/storage/tests/provider_options.rs",
+        "tests/qml/tst_protocol.qml"
+      ],
       "cells": {
-        "implementation": "planned",
-        "integration": "planned",
-        "verification": "planned"
+        "implementation": "in-progress",
+        "integration": "in-progress",
+        "verification": "in-progress"
       }
     },
     {
@@ -293,12 +305,20 @@
       ],
       "omarchy_mapping": "Linux Chromium/Firefox import, Secret Service, manual capture, and device flow",
       "disposition": "required",
-      "status": "planned",
-      "tests": [],
+      "status": "in-progress",
+      "tests": [
+        "crates/providers/tests/browser_cookie.rs",
+        "crates/providers/tests/browser_profile.rs",
+        "crates/providers/tests/chromium_crypto.rs",
+        "crates/providers/tests/manual_capture.rs",
+        "crates/providers/tests/provider_browser_discovery_batch.rs",
+        "crates/providers/tests/provider_browser_discovery_batch2.rs",
+        "crates/providers/tests/provider_copilot.rs"
+      ],
       "cells": {
-        "implementation": "planned",
-        "integration": "planned",
-        "verification": "planned"
+        "implementation": "in-progress",
+        "integration": "in-progress",
+        "verification": "in-progress"
       }
     },
     {
@@ -388,12 +408,17 @@
       ],
       "omarchy_mapping": "Linux Secret Service with explicit protected-file headless fallback",
       "disposition": "required",
-      "status": "planned",
-      "tests": [],
+      "status": "in-progress",
+      "tests": [
+        "crates/app/tests/cli_contract.rs",
+        "crates/auth/tests/credential_slots.rs",
+        "crates/auth/tests/protected_file.rs",
+        "crates/providers/tests/provider_settings_descriptor.rs"
+      ],
       "cells": {
-        "implementation": "planned",
-        "integration": "planned",
-        "verification": "planned"
+        "implementation": "in-progress",
+        "integration": "in-progress",
+        "verification": "in-progress"
       }
     },
     {
@@ -435,12 +460,16 @@
       ],
       "omarchy_mapping": "Versioned bounded Unix-socket snapshots plus a separate one-shot credential channel; QML remains presentation-only",
       "disposition": "required",
-      "status": "planned",
-      "tests": [],
+      "status": "in-progress",
+      "tests": [
+        "crates/app/tests/daemon_display_e2e.rs",
+        "crates/app/tests/ui_socket_smoke.rs",
+        "tests/qml/tst_protocol.qml"
+      ],
       "cells": {
-        "implementation": "planned",
-        "integration": "planned",
-        "verification": "planned"
+        "implementation": "in-progress",
+        "integration": "in-progress",
+        "verification": "in-progress"
       }
     },
     {
@@ -499,12 +528,16 @@
       ],
       "omarchy_mapping": "Typed bounded login, logout, account switch, open-provider, and retry actions owned by Rust",
       "disposition": "required",
-      "status": "planned",
-      "tests": [],
+      "status": "in-progress",
+      "tests": [
+        "crates/app/tests/cli_contract.rs",
+        "crates/providers/tests/provider_copilot.rs",
+        "crates/providers/tests/provider_settings_descriptor.rs"
+      ],
       "cells": {
-        "implementation": "planned",
-        "integration": "planned",
-        "verification": "planned"
+        "implementation": "in-progress",
+        "integration": "in-progress",
+        "verification": "in-progress"
       }
     },
     {

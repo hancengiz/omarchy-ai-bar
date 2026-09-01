@@ -81,6 +81,15 @@ impl ApiKeyCredential {
         jwt_payload_is_object(self.value.as_bytes())
     }
 
+    /// Moves the credential bytes into an application-owned secret store.
+    ///
+    /// The caller must immediately place the returned bytes in a zeroizing
+    /// secret container and must never log or serialize them.
+    #[must_use]
+    pub fn into_secret_bytes(mut self) -> Zeroizing<Vec<u8>> {
+        Zeroizing::new(std::mem::take(&mut *self.value).into_bytes())
+    }
+
     fn authentication(&self, header: &HeaderName) -> Result<Authentication, ClassifiedError> {
         Authentication::api_key(header.as_str(), self.value.as_str().to_owned())
             .map_err(|error| error.classified())

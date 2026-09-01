@@ -148,6 +148,12 @@ impl CodexCredentialPaths {
         self.explicit_codex_home
     }
 
+    /// Provider-owned Codex root selected for credentials and local history.
+    #[must_use]
+    pub fn native_root(&self) -> &Path {
+        &self.native.root
+    }
+
     pub(crate) fn cli_environment_roots(&self) -> Option<(&str, &str)> {
         Some((self.home.to_str()?, self.native.root.to_str()?))
     }

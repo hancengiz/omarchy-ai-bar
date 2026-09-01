@@ -7,8 +7,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use oab_domain::{
-    AccountKey, AccountScope, ErrorKind, Freshness, PrivacyKey, PrivacyPolicy, PrivacySurface,
-    ProviderId, ProviderInstanceId, ProviderSnapshot, RefreshPhase, SnapshotEnvelopeV1, Timestamp,
+    AccountKey, AccountScope, DetailSensitivity, ErrorKind, Freshness, PrivacyKey, PrivacyPolicy,
+    PrivacySurface, ProviderId, ProviderInstanceId, ProviderSnapshot, RefreshPhase,
+    SnapshotEnvelopeV1, Timestamp,
 };
 use oab_providers::browser_cookie::DisabledChromiumCookieDecryptor;
 use oab_providers::browser_profile::{BrowserProfileDiscovery, BrowserProfileRoots};
@@ -17,9 +18,9 @@ use oab_providers::descriptor::ProviderSource;
 use oab_providers::endpoint::{EndpointClass, EndpointPolicy};
 use oab_providers::fixed_api::{ApiKeyCredential, FixedApiClient};
 use oab_providers::providers::copilot::{
-    CopilotBudgetEnrichment, CopilotBudgetRouteSet, CopilotDeviceFlow, CopilotProvider,
-    DeviceFlowClock, normalize_enterprise_host, normalized_billing_identifier,
-    parse_budget_windows, usage_url,
+    CopilotBudgetEnrichment, CopilotBudgetRouteSet, CopilotCredentialOwner, CopilotDeviceFlow,
+    CopilotLoginValidator, CopilotProvider, DeviceFlowClock, normalize_enterprise_host,
+    normalized_billing_identifier, parse_budget_windows, usage_url,
 };
 use oab_providers::retry::RetryPolicy;
 use oab_providers::transport::{HttpTransport, TransportConfig};
@@ -287,6 +288,14 @@ fn device_flow(
         HttpTransport::new(endpoints, config(2 * 1024 * 1024)).expect("device transport");
     CopilotDeviceFlow::with_test_transport(&server.url("/"), transport, clock)
         .expect("loopback device flow")
+}
+
+fn login_validator(server: &FakeHttpServer) -> CopilotLoginValidator {
+    CopilotLoginValidator::with_test_endpoint(
+        &server.url("/"),
+        ApiKeyCredential::new(TOKEN_CANARY).expect("login credential"),
+    )
+    .expect("loopback identity validator")
 }
 
 fn device_code_response(expires_in: u64, interval: u64) -> Vec<u8> {
@@ -1085,6 +1094,139 @@ fn token_resolution_and_enterprise_hosts_are_bounded_normalized_and_redacted() {
     assert!(CopilotDeviceFlow::new(Some("127.0.0.1")).is_err());
 }
 
+#[test]
+fn login_identity_endpoint_policy_keeps_enterprise_tokens_off_public_github() {
+    let public = CopilotLoginValidator::new(
+        ApiKeyCredential::new(TOKEN_CANARY).expect("public credential"),
+        None,
+    )
+    .expect("public validator");
+    assert_eq!(
+        public.identity_url().as_str(),
+        "https://api.github.com/user"
+    );
+
+    let enterprise = CopilotLoginValidator::new(
+        ApiKeyCredential::new(TOKEN_CANARY).expect("enterprise credential"),
+        Some("octocorp.ghe.com:8443"),
+    )
+    .expect("enterprise validator");
+    assert_eq!(
+        enterprise.identity_url().as_str(),
+        "https://api.octocorp.ghe.com:8443/user"
+    );
+    assert_ne!(enterprise.identity_url().host_str(), Some("api.github.com"));
+
+    assert!(
+        CopilotLoginValidator::with_test_endpoint(
+            &url::Url::parse("https://api.github.com/").expect("public URL"),
+            ApiKeyCredential::new(TOKEN_CANARY).expect("test credential"),
+        )
+        .is_err()
+    );
+    assert!(
+        CopilotLoginValidator::with_test_endpoint(
+            &url::Url::parse("http://127.0.0.1:12345/not-a-base/").expect("non-base loopback URL"),
+            ApiKeyCredential::new(TOKEN_CANARY).expect("test credential"),
+        )
+        .is_err()
+    );
+}
+
+#[tokio::test]
+async fn login_identity_validation_sends_exact_redacted_request() {
+    let server = FakeHttpServer::start([FakeHttpResponse::new(200, oauth_identity())]).await;
+    let validated = login_validator(&server)
+        .validate(&CancellationToken::new())
+        .await
+        .expect("valid GitHub identity");
+
+    assert!(!format!("{validated:?}").contains(TOKEN_CANARY));
+    let requests = server.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method(), "GET");
+    assert_eq!(requests[0].target(), "/user");
+    assert_eq!(
+        requests[0].header("authorization"),
+        Some("token fixture-copilot-oauth-token-canary")
+    );
+    assert_eq!(requests[0].header("accept"), Some("application/json"));
+    assert_eq!(requests[0].header("user-agent"), Some("omarchy-ai-bar"));
+    assert_eq!(
+        requests[0].header("x-github-api-version"),
+        Some("2022-11-28")
+    );
+    assert!(requests[0].header("content-type").is_none());
+}
+
+#[tokio::test]
+async fn login_identity_validation_rejects_invalid_or_oversized_identity() {
+    for invalid in [
+        br#"{"login":"octocat"}"#.to_vec(),
+        br#"{"id":123,"login":" "}"#.to_vec(),
+        br#"{"id":1.5,"login":"octocat"}"#.to_vec(),
+        br#"{"id":123,"login":"octo\u0000cat"}"#.to_vec(),
+    ] {
+        let server = FakeHttpServer::start([FakeHttpResponse::new(200, invalid)]).await;
+        assert_eq!(
+            login_validator(&server)
+                .validate(&CancellationToken::new())
+                .await
+                .expect_err("invalid GitHub identity")
+                .kind(),
+            ErrorKind::Parse
+        );
+    }
+
+    let server =
+        FakeHttpServer::start([FakeHttpResponse::new(200, vec![b'x'; 64 * 1024 + 1])]).await;
+    assert_eq!(
+        login_validator(&server)
+            .validate(&CancellationToken::new())
+            .await
+            .expect_err("oversized identity response")
+            .kind(),
+        ErrorKind::Parse
+    );
+}
+
+#[tokio::test]
+async fn login_identity_validation_classifies_401_403_and_cancellation() {
+    for (status, expected) in [
+        (401, ErrorKind::AuthenticationExpired),
+        (403, ErrorKind::PermissionDenied),
+    ] {
+        let server = FakeHttpServer::start([FakeHttpResponse::new(
+            status,
+            b"response-body-token-canary".to_vec(),
+        )])
+        .await;
+        assert_eq!(
+            login_validator(&server)
+                .validate(&CancellationToken::new())
+                .await
+                .expect_err("GitHub identity status")
+                .kind(),
+            expected
+        );
+    }
+
+    let server = FakeHttpServer::start([FakeHttpResponse::stall()]).await;
+    let cancellation = CancellationToken::new();
+    let task_cancellation = cancellation.clone();
+    let validator = login_validator(&server);
+    let task = tokio::spawn(async move { validator.validate(&task_cancellation).await });
+    server.wait_for_request_count(1).await;
+    cancellation.cancel();
+    assert_eq!(
+        task.await
+            .expect("validation task")
+            .expect_err("cancelled identity validation")
+            .kind(),
+        ErrorKind::Network
+    );
+}
+
 #[tokio::test]
 async fn device_code_request_is_exact_bounded_and_redacted() {
     let response = device_code_response(900, 5);
@@ -1460,7 +1602,8 @@ async fn device_challenge_cannot_cross_forward_to_another_origin() {
 #[tokio::test]
 async fn usage_fixture_projects_premium_chat_credits_request_and_cli_schema() {
     let server = FakeHttpServer::start([FakeHttpResponse::new(200, USAGE.to_vec())]).await;
-    let provider = provider(&server, "account-a");
+    let provider =
+        provider(&server, "account-a").with_credential_owner(CopilotCredentialOwner::Application);
     let fetched_at = timestamp(1_788_220_800);
     let sample = provider
         .fetch_at(&context("account-a"), fetched_at)
@@ -1497,6 +1640,8 @@ async fn usage_fixture_projects_premium_chat_credits_request_and_cli_schema() {
     );
     assert_eq!(row(&sample, "Credits used").value(), "31");
     assert_eq!(sample.provenance()[0].strategy(), "oauth");
+    assert_eq!(sample.provenance()[1].source(), "credential_owner");
+    assert_eq!(sample.provenance()[1].strategy(), "application");
 
     let requests = server.requests();
     assert_eq!(requests.len(), 1);
@@ -1536,6 +1681,34 @@ async fn usage_fixture_projects_premium_chat_credits_request_and_cli_schema() {
         json["snapshots"][0]["last_known_good"]["secondary"]["usage"]["used_percent"],
         20.0
     );
+}
+
+#[tokio::test]
+async fn cli_and_chat_entitlements_are_exposed_as_public_details() {
+    let mut payload: serde_json::Value =
+        serde_json::from_slice(USAGE).expect("Copilot usage fixture");
+    payload["cli_enabled"] = serde_json::json!(false);
+    payload["chat_enabled"] = serde_json::json!(true);
+    let server = FakeHttpServer::start([FakeHttpResponse::new(
+        200,
+        serde_json::to_vec(&payload).expect("entitlement fixture"),
+    )])
+    .await;
+
+    let sample = provider(&server, "account-a")
+        .fetch_at(&context("account-a"), timestamp(1))
+        .await
+        .expect("Copilot entitlement details");
+
+    let cli = row(&sample, "Copilot CLI");
+    assert_eq!(cli.value(), "Disabled");
+    assert_eq!(cli.secondary_value(), Some("Reported by GitHub"));
+    assert_eq!(cli.sensitivity(), DetailSensitivity::Public);
+    let chat = row(&sample, "Copilot Chat");
+    assert_eq!(chat.value(), "Enabled");
+    assert_eq!(chat.secondary_value(), Some("Reported by GitHub"));
+    assert_eq!(chat.sensitivity(), DetailSensitivity::Public);
+    assert_eq!(sample.detail_sections()[0].title(), Some("Entitlements"));
 }
 
 #[tokio::test]
@@ -1584,6 +1757,43 @@ async fn token_billing_and_unlimited_quotas_are_identity_only_but_keep_credits()
 }
 
 #[tokio::test]
+async fn account_identity_without_cloud_quota_snapshots_is_not_active_usage() {
+    let body = br#"{
+      "copilot_plan":"individual",
+      "login":"octocat",
+      "quota_snapshots":null,
+      "quota_reset_date":null
+    }"#;
+    let server = FakeHttpServer::start([FakeHttpResponse::new(200, body.to_vec())]).await;
+    let error = provider(&server, "account-a")
+        .fetch_at(&context("account-a"), timestamp(1))
+        .await
+        .expect_err("identity alone must not prove Copilot entitlement");
+
+    assert_eq!(error.kind(), ErrorKind::Parse);
+}
+
+#[tokio::test]
+async fn ended_subscription_is_permission_denied_instead_of_connected() {
+    let body = br#"{
+      "copilot_plan":"individual",
+      "login":"octocat",
+      "access_type_sku":"subscription_ended",
+      "chat_enabled":false,
+      "cli_enabled":false,
+      "quota_snapshots":null,
+      "quota_reset_date":null
+    }"#;
+    let server = FakeHttpServer::start([FakeHttpResponse::new(200, body.to_vec())]).await;
+    let error = provider(&server, "account-a")
+        .fetch_at(&context("account-a"), timestamp(1))
+        .await
+        .expect_err("ended subscription must not be connected");
+
+    assert_eq!(error.kind(), ErrorKind::PermissionDenied);
+}
+
+#[tokio::test]
 async fn dynamic_keys_are_deterministic_overage_is_raw_and_placeholders_do_not_win() {
     let body = br#"{
       "copilot_plan":"paid",
@@ -1610,7 +1820,10 @@ async fn dynamic_keys_are_deterministic_overage_is_raw_and_placeholders_do_not_w
 
 #[tokio::test]
 async fn statuses_parse_bounds_last_good_and_source_account_isolation_are_stable() {
-    for status in [401, 403] {
+    for (status, expected) in [
+        (401, ErrorKind::AuthenticationExpired),
+        (403, ErrorKind::PermissionDenied),
+    ] {
         let server =
             FakeHttpServer::start([FakeHttpResponse::new(status, b"secret".to_vec())]).await;
         assert_eq!(
@@ -1619,7 +1832,7 @@ async fn statuses_parse_bounds_last_good_and_source_account_isolation_are_stable
                 .await
                 .expect_err("expired OAuth")
                 .kind(),
-            ErrorKind::AuthenticationExpired
+            expected
         );
     }
     let server = FakeHttpServer::start([FakeHttpResponse::new(201, USAGE.to_vec())]).await;

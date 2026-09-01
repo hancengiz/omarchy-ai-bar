@@ -130,12 +130,17 @@ async fn a_reset_boundary_fires_exactly_once() {
     );
 
     tokio::time::advance(Duration::from_secs(30)).await;
+    assert!(scheduler.take_due(&clock).is_empty());
+    tokio::time::advance(Duration::from_secs(30)).await;
     assert_eq!(
         scheduler.take_due(&clock),
-        vec![ScheduledRefresh::ResetBoundary {
-            scope: account_scope.clone(),
-            boundary,
-        }]
+        vec![
+            ScheduledRefresh::Periodic,
+            ScheduledRefresh::ResetBoundary {
+                scope: account_scope.clone(),
+                boundary,
+            },
+        ]
     );
     assert!(scheduler.take_due(&clock).is_empty());
     assert!(
@@ -159,12 +164,18 @@ async fn projected_reset_ignores_later_wall_clock_rollback() {
     clock.rewind_wall(Duration::from_secs(3_600));
     tokio::time::advance(Duration::from_secs(25)).await;
 
+    assert!(scheduler.take_due(&clock).is_empty());
+    tokio::time::advance(Duration::from_secs(30)).await;
+
     assert_eq!(
         scheduler.take_due(&clock),
-        vec![ScheduledRefresh::ResetBoundary {
-            scope: account_scope,
-            boundary,
-        }]
+        vec![
+            ScheduledRefresh::Periodic,
+            ScheduledRefresh::ResetBoundary {
+                scope: account_scope,
+                boundary,
+            },
+        ]
     );
 }
 
@@ -173,7 +184,7 @@ async fn coincident_periodic_and_reset_boundaries_are_both_reported() {
     let clock = TestClock::new(timestamp(1_700_000_000));
     let mut scheduler = Scheduler::new(policy(), &clock);
     let account_scope = scope("account-a");
-    let boundary = timestamp(1_700_000_060);
+    let boundary = timestamp(1_700_000_030);
     scheduler
         .schedule_reset(account_scope.clone(), boundary, &clock)
         .expect("schedule reset");
@@ -188,5 +199,32 @@ async fn coincident_periodic_and_reset_boundaries_are_both_reported() {
                 boundary,
             },
         ]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn elapsed_reset_boundary_uses_a_minimum_retry_delay() {
+    let clock = TestClock::new(timestamp(1_700_000_000));
+    let start = clock.monotonic_now();
+    let mut scheduler = Scheduler::new(policy(), &clock);
+    let account_scope = scope("account-a");
+    let boundary = timestamp(1_699_999_900);
+
+    scheduler
+        .schedule_reset(account_scope.clone(), boundary, &clock)
+        .expect("schedule elapsed reset");
+    assert_eq!(
+        scheduler.next_deadline(),
+        Some(start + Duration::from_secs(5))
+    );
+    tokio::time::advance(Duration::from_secs(4)).await;
+    assert!(scheduler.take_due(&clock).is_empty());
+    tokio::time::advance(Duration::from_secs(1)).await;
+    assert_eq!(
+        scheduler.take_due(&clock),
+        vec![ScheduledRefresh::ResetBoundary {
+            scope: account_scope,
+            boundary,
+        }]
     );
 }

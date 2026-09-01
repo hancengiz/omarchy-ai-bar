@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 
-use oab_domain::{AccountScope, SurfaceSnapshotEnvelope};
+use oab_domain::{AccountScope, ProviderSnapshot, SnapshotEnvelopeV1, SurfaceSnapshotEnvelope};
 use oab_ipc::codec::{JsonLineDecoder, encode_json_line};
 use oab_ipc::frontend_presence::SniStatus;
 use oab_ipc::protocol::{
@@ -21,6 +21,7 @@ use oab_runtime::actor::{
 };
 use oab_runtime::command::RefreshTrigger;
 use oab_runtime::scheduler::{Clock, SystemClock};
+use oab_storage::atomic_file::{atomic_write, read_private_file};
 use serde_json::{Value, json};
 use thiserror::Error;
 use tokio::io::unix::AsyncFd;
@@ -39,6 +40,7 @@ use crate::single_instance::{
 const MAX_ACCEPT_BATCH: usize = 4;
 const FRONTEND_GRACE: Duration = Duration::from_secs(5);
 const TRAY_TICK: Duration = Duration::from_millis(250);
+const SNAPSHOT_CACHE_BYTES: usize = 4 * 1024 * 1024;
 
 /// Path-free daemon lifecycle failure.
 #[derive(Debug, Error)]
@@ -63,6 +65,7 @@ pub(crate) enum DaemonError {
 pub(crate) fn run(
     control_socket: DisplaySocket,
     display_socket_path: &Path,
+    snapshot_cache_path: &Path,
     providers: ProductionProviders,
 ) -> Result<(), DaemonError> {
     let display_socket = DisplaySocket::bind(display_socket_path).map_err(DaemonError::Listener)?;
@@ -70,7 +73,12 @@ pub(crate) fn run(
         .enable_all()
         .build()
         .map_err(DaemonError::Runtime)?;
-    runtime.block_on(run_loop(control_socket, display_socket, providers))
+    runtime.block_on(run_loop(
+        control_socket,
+        display_socket,
+        snapshot_cache_path,
+        providers,
+    ))
 }
 
 #[allow(
@@ -80,16 +88,29 @@ pub(crate) fn run(
 async fn run_loop(
     control_socket: DisplaySocket,
     display_socket: DisplaySocket,
+    snapshot_cache_path: &Path,
     providers: ProductionProviders,
 ) -> Result<(), DaemonError> {
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let scopes = Arc::new(providers.scopes);
-    let (actor, state) =
-        RuntimeActor::new(RuntimeConfig::default(), clock, providers.registrations)
-            .map_err(DaemonError::StateBuild)?;
+    let retained = read_retained_snapshots(snapshot_cache_path);
+    let (actor, state) = RuntimeActor::new_with_retained(
+        RuntimeConfig::default(),
+        clock,
+        providers.registrations,
+        retained,
+    )
+    .map_err(DaemonError::StateBuild)?;
+    let persistence_task = tokio::spawn(persist_snapshots(
+        state.subscribe(),
+        snapshot_cache_path.to_path_buf(),
+    ));
     let state_task = actor.spawn();
     for scope in scopes.iter().cloned() {
-        let _admission = state.refresh(scope, RefreshTrigger::Manual).await;
+        // Startup is automatic work: retained rate-limit Retry-After state
+        // must remain authoritative across a daemon restart. Explicit user
+        // refresh actions still use `Manual` and bypass that cooldown.
+        let _admission = state.refresh(scope, RefreshTrigger::Periodic).await;
     }
     let capabilities = CapabilitySet::new([
         Capability::DisplaySnapshots,
@@ -189,6 +210,8 @@ async fn run_loop(
         .shutdown()
         .await
         .map_err(DaemonError::StateJoin)?;
+    persistence_task.abort();
+    let _ = persistence_task.await;
     if let Some(tray) = tray {
         tray.shutdown().await;
     }
@@ -196,6 +219,31 @@ async fn run_loop(
         return Err(DaemonError::StateFault);
     }
     listener_result
+}
+
+fn read_retained_snapshots(path: &Path) -> Vec<ProviderSnapshot> {
+    let Ok(Some(bytes)) = read_private_file(path, SNAPSHOT_CACHE_BYTES) else {
+        return Vec::new();
+    };
+    serde_json::from_slice::<SnapshotEnvelopeV1>(&bytes)
+        .map(|envelope| envelope.snapshots().to_vec())
+        .unwrap_or_default()
+}
+
+async fn persist_snapshots(
+    mut snapshots: tokio::sync::watch::Receiver<
+        Arc<oab_runtime::snapshot_store::PublishedSnapshot>,
+    >,
+    path: std::path::PathBuf,
+) {
+    while snapshots.changed().await.is_ok() {
+        let publication = snapshots.borrow().clone();
+        let Ok(mut bytes) = serde_json::to_vec(&publication.envelope().private_view()) else {
+            continue;
+        };
+        bytes.push(b'\n');
+        let _ = atomic_write(&path, &bytes);
+    }
 }
 
 async fn run_tray_action(

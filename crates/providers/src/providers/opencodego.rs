@@ -1,6 +1,8 @@
 //! `OpenCode Go` public usage API adapter.
 
 use std::collections::BTreeMap;
+use std::fmt::{self, Debug, Formatter};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use oab_domain::{
@@ -15,6 +17,7 @@ use crate::context::{ProviderAdapter, ProviderContext, ProviderFuture};
 use crate::endpoint::EndpointClass;
 use crate::fixed_api::{ApiKeyCredential, FixedApiClient};
 use crate::normalize::{UsageSampleBuilder, system_timestamp};
+use crate::providers::opencodego_cost::scan_opencodego_local_usage;
 use crate::registry::descriptor_for;
 use crate::retry::RetryPolicy;
 use crate::transport::TransportConfig;
@@ -91,6 +94,62 @@ impl ProviderAdapter for OpenCodeGoProvider {
         Box::pin(async move {
             let fetched_at = system_timestamp()?;
             self.fetch_at(context, fetched_at).await
+        })
+    }
+}
+
+/// Native `OpenCode` Go provider backed only by the Linux `OpenCode` database.
+pub struct OpenCodeGoLocalProvider {
+    scope: AccountScope,
+    profile_root: PathBuf,
+}
+
+impl OpenCodeGoLocalProvider {
+    /// Creates a local provider for one absolute `OpenCode` data directory.
+    ///
+    /// # Errors
+    ///
+    /// Rejects relative or excessively long provider-controlled paths.
+    pub fn new(scope: AccountScope, profile_root: PathBuf) -> Result<Self, ClassifiedError> {
+        if scope.provider() != ProviderId::OpenCodeGo
+            || !profile_root.is_absolute()
+            || profile_root.as_os_str().as_encoded_bytes().len() > 4096
+        {
+            return Err(ClassifiedError::new(ErrorKind::Api));
+        }
+        Ok(Self {
+            scope,
+            profile_root,
+        })
+    }
+}
+
+impl Debug for OpenCodeGoLocalProvider {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("OpenCodeGoLocalProvider")
+            .field("scope", &"<redacted>")
+            .field("profile_root", &"<redacted>")
+            .finish()
+    }
+}
+
+impl ProviderAdapter for OpenCodeGoLocalProvider {
+    fn descriptor(&self) -> &'static crate::descriptor::ProviderDescriptor {
+        descriptor_for(ProviderId::OpenCodeGo)
+    }
+
+    fn fetch<'a>(&'a self, context: &'a ProviderContext) -> ProviderFuture<'a> {
+        Box::pin(async move {
+            if context.scope() != &self.scope
+                || context.source() != crate::descriptor::ProviderSource::LocalData
+            {
+                return Err(ClassifiedError::new(ErrorKind::Api));
+            }
+            let updated_at = system_timestamp()?;
+            scan_opencodego_local_usage(&self.profile_root, self.scope.clone(), updated_at)?
+                .map(|usage| usage.sample)
+                .ok_or_else(|| ClassifiedError::new(ErrorKind::MissingCredential))
         })
     }
 }

@@ -1,7 +1,7 @@
-# Maintainer: Omarchy AI Bar contributors
+# Maintainer: Cengiz Han <cengiz@cengizhan.com>
 
 pkgname=omarchy-ai-bar
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
 pkgdesc='Omarchy-native AI provider usage, quota, cost, and session monitoring'
 arch=('x86_64')
@@ -12,6 +12,7 @@ depends=(
   'dbus'
   'gcc-libs'
   'glibc'
+  'libnotify'
   'omarchy'
   'qt6-declarative'
   'quickshell'
@@ -22,6 +23,146 @@ install=omarchy-ai-bar.install
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('ed0237413b370e88c554a2be33d6f898f44e73c12ffecacc42b31c5e16883db7')
 
+_oab_resolve_remap_path() {
+  local label=$1 input=$2 resolved=''
+  [[ -n $input ]] || {
+    printf 'PKGBUILD: %s path is empty\n' "$label" >&2
+    return 1
+  }
+  case $input in
+  *$'\n'* | *$'\r'* | *$'\t'* | *$'\x1f'* | *=*)
+    printf 'PKGBUILD: %s path contains a character unsupported by compiler prefix maps\n' \
+      "$label" >&2
+    return 1
+    ;;
+  esac
+  resolved=$(realpath -m -- "$input") || return 1
+  [[ $resolved == /* && $resolved != / ]] || {
+    printf 'PKGBUILD: %s path is unsafe\n' "$label" >&2
+    return 1
+  }
+  printf '%s\n' "$resolved"
+}
+
+_oab_resolve_logical_remap_path() {
+  local label=$1 input=$2 resolved=''
+  [[ -n $input ]] || {
+    printf 'PKGBUILD: %s path is empty\n' "$label" >&2
+    return 1
+  }
+  case $input in
+  *$'\n'* | *$'\r'* | *$'\t'* | *$'\x1f'* | *=*)
+    printf 'PKGBUILD: %s path contains a character unsupported by compiler prefix maps\n' \
+      "$label" >&2
+    return 1
+    ;;
+  esac
+  resolved=$(realpath -ms -- "$input") || return 1
+  [[ $resolved == /* && $resolved != / ]] || {
+    printf 'PKGBUILD: %s path is unsafe\n' "$label" >&2
+    return 1
+  }
+  printf '%s\n' "$resolved"
+}
+
+_oab_append_encoded_rustflag() {
+  local output_name=$1 flag=$2 current=''
+  current=${!output_name-}
+  [[ -z $current ]] || current+=$'\x1f'
+  current+=$flag
+  printf -v "$output_name" '%s' "$current"
+}
+
+_oab_append_native_flag() {
+  local output_name=$1 flag=$2 current='' quoted=''
+  current=${!output_name-}
+  printf -v quoted '%q' "$flag"
+  [[ -z $current ]] || current+=' '
+  current+=$quoted
+  printf -v "$output_name" '%s' "$current"
+}
+
+_oab_build_paths() {
+  local output_name=$1 source_root='' cargo_home_input=''
+  local cargo_home='' cargo_home_logical=''
+  source_root=$(pwd -P) || return 1
+  cargo_home_input=${CARGO_HOME:-}
+  if [[ -z $cargo_home_input ]]; then
+    [[ -n ${HOME:-} ]] || {
+      printf 'PKGBUILD: neither CARGO_HOME nor HOME is set\n' >&2
+      return 1
+    }
+    cargo_home_input=$HOME/.cargo
+  fi
+  cargo_home=$(_oab_resolve_remap_path 'Cargo home' "$cargo_home_input") || return 1
+  cargo_home_logical=$(
+    _oab_resolve_logical_remap_path 'Cargo home' "$cargo_home_input"
+  ) || return 1
+  source_root=$(_oab_resolve_remap_path 'source root' "$source_root") || return 1
+
+  local -a resolved_paths=("$cargo_home_logical")
+  if [[ $cargo_home != "$cargo_home_logical" ]]; then
+    resolved_paths+=("$cargo_home")
+  fi
+  resolved_paths+=("$source_root")
+  local -n output=$output_name
+  output=("${resolved_paths[@]}")
+}
+
+_oab_run_cargo_with_remaps() {
+  local encoded_rustflags='' caller_rustflags='' caller_rustflag=''
+  local cflags=${CFLAGS:-} cxxflags=${CXXFLAGS:-} private_build_path=''
+  local native_destination=''
+  local -a caller_rustflag_words=() private_build_paths=()
+  _oab_build_paths private_build_paths || return 1
+
+  if [[ ${CARGO_ENCODED_RUSTFLAGS+x} ]]; then
+    encoded_rustflags=$CARGO_ENCODED_RUSTFLAGS
+  else
+    caller_rustflags=${RUSTFLAGS:-}
+    caller_rustflags=${caller_rustflags//$'\n'/ }
+    caller_rustflags=${caller_rustflags//$'\r'/ }
+    read -r -a caller_rustflag_words <<<"$caller_rustflags"
+    for caller_rustflag in "${caller_rustflag_words[@]}"; do
+      _oab_append_encoded_rustflag encoded_rustflags "$caller_rustflag"
+    done
+  fi
+
+  for private_build_path in "${private_build_paths[@]}"; do
+    if [[ $private_build_path == "${private_build_paths[-1]}" ]]; then
+      native_destination="/usr/src/debug/$pkgname-$pkgver"
+    else
+      native_destination='/usr/src/debug/cargo-home'
+    fi
+    _oab_append_encoded_rustflag encoded_rustflags \
+      "--remap-path-prefix=$private_build_path=$native_destination"
+    _oab_append_native_flag cflags \
+      "-ffile-prefix-map=$private_build_path=$native_destination"
+    _oab_append_native_flag cxxflags \
+      "-ffile-prefix-map=$private_build_path=$native_destination"
+  done
+
+  CARGO_ENCODED_RUSTFLAGS="$encoded_rustflags" \
+    CC_SHELL_ESCAPED_FLAGS=1 \
+    CFLAGS="$cflags" \
+    CXXFLAGS="$cxxflags" \
+    CARGO_TARGET_DIR=target \
+    cargo "$@"
+}
+
+_oab_verify_binary_path_privacy() {
+  local binary=$1 private_build_path=''
+  local -a private_build_paths=()
+  [[ -f $binary ]] || return 1
+  _oab_build_paths private_build_paths || return 1
+  for private_build_path in "${private_build_paths[@]}"; do
+    if LC_ALL=C grep -aFq -- "$private_build_path" "$binary"; then
+      printf 'PKGBUILD: release executable contains an unremapped private build path\n' >&2
+      return 1
+    fi
+  done
+}
+
 prepare() {
   cd "$pkgname-$pkgver"
   cargo fetch --locked --target "$CARCH-unknown-linux-gnu"
@@ -29,20 +170,14 @@ prepare() {
 
 build() {
   cd "$pkgname-$pkgver"
-  CFLAGS="${CFLAGS:-} -ffile-prefix-map=$PWD=." \
-    CXXFLAGS="${CXXFLAGS:-} -ffile-prefix-map=$PWD=." \
-    RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$PWD=." \
-    CARGO_TARGET_DIR=target \
-    cargo build --release --locked --frozen --package omarchy-ai-bar
+  _oab_run_cargo_with_remaps \
+    build --release --locked --frozen --package omarchy-ai-bar
+  _oab_verify_binary_path_privacy target/release/omarchy-ai-bar
 }
 
 check() {
   cd "$pkgname-$pkgver"
-  CFLAGS="${CFLAGS:-} -ffile-prefix-map=$PWD=." \
-    CXXFLAGS="${CXXFLAGS:-} -ffile-prefix-map=$PWD=." \
-    RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$PWD=." \
-    CARGO_TARGET_DIR=target \
-    cargo test --workspace --release --locked --frozen
+  _oab_run_cargo_with_remaps test --workspace --release --locked --frozen
   omarchy plugin validate qml/omarchy-plugin
 }
 

@@ -1342,9 +1342,10 @@ dependencies = [
 
 [[package]]
 name = "oab-auth"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "nix",
+ "oab-domain",
  "oab-storage",
  "oab-test-support",
  "oo7",
@@ -1357,7 +1358,7 @@ dependencies = [
 
 [[package]]
 name = "oab-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -1370,11 +1371,11 @@ dependencies = [
 
 [[package]]
 name = "oab-cost"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "oab-domain"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "hmac",
  "rust_decimal",
@@ -1387,7 +1388,7 @@ dependencies = [
 
 [[package]]
 name = "oab-ipc"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "futures-util",
  "getrandom 0.2.17",
@@ -1404,7 +1405,7 @@ dependencies = [
 
 [[package]]
 name = "oab-plugins"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "rquickjs",
  "serde",
@@ -1414,7 +1415,7 @@ dependencies = [
 
 [[package]]
 name = "oab-providers"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "aes",
  "base64",
@@ -1445,7 +1446,7 @@ dependencies = [
 
 [[package]]
 name = "oab-runtime"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "notify-rust",
  "oab-domain",
@@ -1458,11 +1459,11 @@ dependencies = [
 
 [[package]]
 name = "oab-sessions"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "oab-storage"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "getrandom 0.2.17",
  "nix",
@@ -1477,7 +1478,7 @@ dependencies = [
 
 [[package]]
 name = "oab-test-support"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "oab-domain",
  "tokio",
@@ -1526,7 +1527,7 @@ dependencies = [
 
 [[package]]
 name = "omarchy-ai-bar"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "nix",
@@ -1543,6 +1544,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-util",
+ "zeroize",
 ]
 
 [[package]]
@@ -3266,6 +3268,7 @@ version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
 dependencies = [
+ "serde",
  "zeroize_derive",
 ]
 

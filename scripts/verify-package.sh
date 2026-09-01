@@ -71,6 +71,32 @@ validate_layout() {
 
   bash -n "$repo_root/packaging/arch/PKGBUILD"
   bash -n "$repo_root/packaging/arch/omarchy-ai-bar.install"
+  bash -n "$repo_root/scripts/build-release.sh"
+  bash -n "$repo_root/scripts/live-smoke-omarchy.sh"
+
+  local release_builder
+  for release_builder in \
+    "$repo_root/scripts/build-release.sh" \
+    "$repo_root/packaging/arch/PKGBUILD"; do
+    search_quiet 'CARGO_ENCODED_RUSTFLAGS=' "$release_builder" \
+      || fail "$release_builder does not preserve encoded Rust flags"
+    search_quiet 'remap-path-prefix=' "$release_builder" \
+      || fail "$release_builder does not remap Rust source paths"
+    search_quiet 'ffile-prefix-map=' "$release_builder" \
+      || fail "$release_builder does not remap native source paths"
+    search_quiet 'CC_SHELL_ESCAPED_FLAGS=1' "$release_builder" \
+      || fail "$release_builder does not safely parse native prefix-map flags"
+    search_quiet 'grep -aFq --' "$release_builder" \
+      || fail "$release_builder does not reject leaked private build paths"
+  done
+  search_quiet 'CARGO_TARGET_DIR="\$release_target_dir"' \
+    "$repo_root/scripts/build-release.sh" \
+    || fail 'direct release build does not pin its Cargo target directory'
+  search_quiet "^[[:space:]]*'libnotify'$" "$repo_root/packaging/arch/PKGBUILD" \
+    || fail 'PKGBUILD is missing the notify-send runtime dependency'
+  search_quiet '^[[:space:]]*depends = libnotify$' \
+    "$repo_root/packaging/arch/.SRCINFO" \
+    || fail '.SRCINFO is missing the notify-send runtime dependency'
 
   if find "$repo_root/qml/omarchy-plugin" -type l -print -quit | grep -q .; then
     fail 'QML plugin payload contains a symlink'
@@ -89,7 +115,8 @@ validate_layout() {
   fi
 
   local binary_install_count
-  binary_install_count=$(search_count 'target/release/omarchy-ai-bar' \
+  binary_install_count=$(search_count \
+    '^[[:space:]]*install -Dm755 target/release/omarchy-ai-bar' \
     "$repo_root/packaging/arch/PKGBUILD")
   [[ $binary_install_count == 1 ]] || fail 'PKGBUILD must install exactly one project executable'
   search_quiet "^pkgname=omarchy-ai-bar$" "$repo_root/packaging/arch/PKGBUILD" \

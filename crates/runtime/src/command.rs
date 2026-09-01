@@ -11,6 +11,8 @@ use crate::scheduler::ScheduleError;
 pub enum RefreshTrigger {
     /// An explicit user, CLI, or local-API request.
     Manual,
+    /// A one-shot retry for missing or stale data when the popup opens.
+    MenuOpen,
     /// A normal or popup-accelerated scheduler tick.
     Periodic,
     /// A refresh aligned to a provider reset boundary.

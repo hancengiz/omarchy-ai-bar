@@ -17,8 +17,15 @@ use time::{Date, OffsetDateTime, PrimitiveDateTime, Time};
 use url::Url;
 use zeroize::Zeroizing;
 
+use crate::browser_cookie::{
+    BrowserCookieDomainAllowlist, BrowserCookieDomainPolicy, BrowserCookieDomainRule,
+    ChromiumCookieDecryptor, import_browser_cookie_stores_with_decryptor,
+};
+use crate::browser_profile::BrowserProfileDiscovery;
 use crate::context::{ProviderAdapter, ProviderContext, ProviderFuture};
-use crate::cookie::{CookieJar, CookieUrlPolicy, ValidatedCookieUrl};
+use crate::cookie::{
+    CookieImportOrder, CookieJar, CookieSourceId, CookieUrlPolicy, ValidatedCookieUrl,
+};
 use crate::descriptor::ProviderSource;
 use crate::endpoint::{EndpointClass, EndpointPolicy};
 use crate::manual_capture::{CaptureHeader, ManualCaptureError, ManualCapturePolicy};
@@ -51,6 +58,7 @@ const MAX_EMBEDDED_JSON_LAYERS: usize = 6;
 const MAX_COOKIE_HEADER_BYTES: usize = 16 * 1024;
 const MAX_TOKEN_BYTES: usize = 8 * 1024;
 const MAX_PLAN_BYTES: usize = 256;
+const MAX_BROWSER_PROFILES: usize = 128;
 const AUTH_TICKET_COOKIE_NAMES: [&str; 3] = [
     "login_aliyunid_ticket",
     "login_qwencloud_ticket",
@@ -366,6 +374,81 @@ impl QwenCloudProvider {
         Self::from_browser_jar_routes(scope, jar, now, QwenCloudRouteSet::production()?)
     }
 
+    /// Creates the production adapter from ordered Linux browser profiles.
+    ///
+    /// Qwen Cloud owns the `OneConsole` domain allowlist and authentication-ticket
+    /// qualification. Browser profiles and Chromium cookie stores remain
+    /// isolated; the first complete authenticated session wins, matching
+    /// `CodexBar`'s importer behavior.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable missing/expired, bounded local-data, decryption, scope,
+    /// or route failures.
+    pub fn new_browser_from_discovery(
+        scope: AccountScope,
+        discovery: &BrowserProfileDiscovery,
+        decryptor: &dyn ChromiumCookieDecryptor,
+        now: OffsetDateTime,
+    ) -> Result<Self, ClassifiedError> {
+        if scope.provider() != ProviderId::QwenCloud {
+            return Err(ClassifiedError::new(ErrorKind::Api));
+        }
+        let report = discovery.discover();
+        if report.profiles().len() > MAX_BROWSER_PROFILES {
+            return Err(ClassifiedError::new(ErrorKind::Parse));
+        }
+        let allowlist = BrowserCookieDomainAllowlist::new([
+            BrowserCookieDomainRule {
+                domain: "qwencloud.com",
+                policy: BrowserCookieDomainPolicy::DomainAndSubdomains,
+            },
+            BrowserCookieDomainRule {
+                domain: "alibabacloud.com",
+                policy: BrowserCookieDomainPolicy::DomainAndSubdomains,
+            },
+            BrowserCookieDomainRule {
+                domain: "aliyun.com",
+                policy: BrowserCookieDomainPolicy::DomainAndSubdomains,
+            },
+        ])
+        .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+        let mut saw_cookie_data = false;
+        for (index, profile) in report.profiles().iter().enumerate() {
+            let store_sources = browser_store_sources(index)?;
+            let Ok(imports) = import_browser_cookie_stores_with_decryptor(
+                profile,
+                store_sources,
+                &allowlist,
+                decryptor,
+            ) else {
+                continue;
+            };
+            let order = CookieImportOrder::new(store_sources)
+                .map_err(|_| ClassifiedError::new(ErrorKind::Api))?;
+            for import in imports {
+                let jar = CookieJar::from_imports(&order, [import])
+                    .map_err(|_| ClassifiedError::new(ErrorKind::Parse))?;
+                saw_cookie_data |= !jar.is_empty();
+                match Self::new_browser(scope.clone(), &jar, now) {
+                    Ok(provider) => return Ok(provider),
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            ErrorKind::MissingCredential | ErrorKind::AuthenticationExpired
+                        ) => {}
+                    Err(error) => return Err(error),
+                }
+            }
+        }
+        drop(scope);
+        Err(ClassifiedError::new(if saw_cookie_data {
+            ErrorKind::AuthenticationExpired
+        } else {
+            ErrorKind::MissingCredential
+        }))
+    }
+
     /// Creates a browser-session adapter with injected, fixed routes.
     ///
     /// # Errors
@@ -617,6 +700,15 @@ impl QwenCloudProvider {
         }
         Ok(response.body().to_vec())
     }
+}
+
+fn browser_store_sources(index: usize) -> Result<[CookieSourceId; 2], ClassifiedError> {
+    let first = index
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(1))
+        .and_then(|value| u16::try_from(value).ok())
+        .ok_or_else(|| ClassifiedError::new(ErrorKind::Parse))?;
+    Ok([CookieSourceId::new(first), CookieSourceId::new(first + 1)])
 }
 
 impl ProviderAdapter for QwenCloudProvider {

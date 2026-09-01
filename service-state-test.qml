@@ -33,6 +33,322 @@ ShellRoot {
     function runTests() {
         require(!service.connectionWanted, "disabled service started a connection");
         require(!service.transportConnected, "disabled service exposed a live transport");
+        equal(service.effectiveSnapshot.snapshots.length, 0, "disconnected service fabricated a preview snapshot");
+        equal(service.configuredProviderRows.length, 0, "disconnected service fabricated a configured provider");
+        equal(service.connectionStatus, "Offline", "disconnected service exposed a preview status");
+        var endpointProviders = ["azureopenai", "kimi", "ollama", "groq", "clawrouter", "openrouter", "wayfinder", "sub2api", "llmproxy", "litellm", "neuralwatt", "codebuff", "chutes", "deepgram"];
+        equal(JSON.stringify(service.endpointProviders()), JSON.stringify(endpointProviders), "endpoint provider registry drifted");
+        for (var endpointProviderIndex = 0; endpointProviderIndex < endpointProviders.length; endpointProviderIndex++)
+            require(service.supportsEndpoint(endpointProviders[endpointProviderIndex]), "supported endpoint provider was rejected");
+        require(!service.supportsEndpoint("zai"), "provider with multiple endpoint roles exposed an ambiguous endpoint field");
+        service.applyProviderConfigDocument({
+            config: {
+                providers: [
+                    {
+                        id: "litellm",
+                        instance_id: "default",
+                        enabled: false,
+                        endpoint: "https://llm.example.test"
+                    },
+                    {
+                        id: "litellm",
+                        instance_id: "work",
+                        enabled: true,
+                        endpoint: "https://ignored.example.test"
+                    },
+                    {
+                        id: "ollama",
+                        instance_id: "default",
+                        enabled: true,
+                        options: {
+                            source: "auto",
+                            region: "global",
+                            provider_options: {
+                                external_oauth_sources: false
+                            }
+                        },
+                        accounts: [
+                            {
+                                id: "ambient",
+                                enabled: true
+                            }
+                        ]
+                    }
+                ]
+            }
+        });
+        equal(service.savedEndpointFor("litellm"), "https://llm.example.test", "default route endpoint was not parsed");
+        equal(service.savedEndpointFor("ollama"), "", "missing route endpoint was not normalized");
+        require(service.providerEnabledOverrides.litellm === false, "non-default route replaced the default enabled setting");
+        equal(service.providerOptionsOverrides.ollama.source, "auto", "provider options were not retained for settings rendering");
+        require(service.providerAccountPresence.ollama === true, "provider account presence was not retained");
+        require(service.configuredProviderRows.some(function (row) {
+            return row.provider === "ollama";
+        }), "explicitly enabled provider disappeared before its first successful sample");
+        require(!service.configuredProviderRows.some(function (row) {
+            return row.provider === "litellm";
+        }), "explicitly disabled provider leaked into the usage popup");
+        var loadingRow = service.rowsFrom({
+            snapshots: [
+                {
+                    state: "loading",
+                    scope: {
+                        provider: "ollama"
+                    }
+                }
+            ]
+        }).filter(function (row) {
+            return row.provider === "ollama";
+        })[0];
+        require(loadingRow.loading, "initial provider refresh lost its loading presentation");
+        equal(loadingRow.status, "Loading…", "initial provider refresh was mislabeled as unconfigured");
+        var litellmRow = service.providerRows.filter(function (row) {
+            return row.provider === "litellm";
+        })[0];
+        require(litellmRow && litellmRow.supportsEndpoint, "provider row omitted endpoint capability");
+        equal(litellmRow.endpoint, "https://llm.example.test", "provider row omitted its saved endpoint");
+        var literalEndpoint = "https://llm.example.test/path;touch-not-a-shell";
+        var endpointCommand = service.providerEndpointCommand("litellm", literalEndpoint, false);
+        equal(endpointCommand.length, 5, "endpoint command split an endpoint argument");
+        equal(endpointCommand[4], literalEndpoint, "endpoint command changed the literal endpoint argument");
+        var clearCommand = service.providerEndpointCommand("litellm", "ignored", true);
+        equal(clearCommand.length, 5, "clear endpoint command shape changed");
+        equal(clearCommand[4], "--clear", "clear endpoint command omitted its flag");
+
+        service.applyProviderSettingsDocument({
+            schema_version: 1,
+            providers: [
+                {
+                    schema_version: 1,
+                    provider: "zai",
+                    controls: [
+                        {
+                            kind: "picker",
+                            descriptor: {
+                                id: "zai-api-region",
+                                title: "API region",
+                                subtitle: "Choose the regional API.",
+                                section: "connection",
+                                visible_when: {
+                                    condition: "always"
+                                },
+                                enabled_when: {
+                                    condition: "always"
+                                },
+                                availability: {
+                                    state: "implemented"
+                                },
+                                options: [
+                                    {
+                                        choice: "global",
+                                        title: "Global",
+                                        availability: {
+                                            state: "implemented"
+                                        }
+                                    },
+                                    {
+                                        choice: "bigmodel-cn",
+                                        title: "BigModel CN",
+                                        availability: {
+                                            state: "implemented"
+                                        }
+                                    }
+                                ],
+                                actions: []
+                            }
+                        },
+                        {
+                            kind: "secret_slot",
+                            descriptor: {
+                                id: "zai-api-key",
+                                title: "API key",
+                                subtitle: "Stored securely.",
+                                section: "credentials",
+                                visible_when: {
+                                    condition: "always"
+                                },
+                                enabled_when: {
+                                    condition: "always"
+                                },
+                                availability: {
+                                    state: "implemented"
+                                },
+                                slot: "zai-api-key",
+                                placeholder: "Paste API key",
+                                actions: []
+                            }
+                        },
+                        {
+                            kind: "toggle",
+                            descriptor: {
+                                id: "codex-openai-web-extras",
+                                title: "Unavailable fixture",
+                                subtitle: "Must not become interactive.",
+                                section: "options",
+                                visible_when: {
+                                    condition: "always"
+                                },
+                                enabled_when: {
+                                    condition: "feature",
+                                    feature: "optional-credits-and-extra-usage",
+                                    enabled: true
+                                },
+                                availability: {
+                                    state: "unavailable",
+                                    gap: "openai-web-extras"
+                                },
+                                actions: []
+                            }
+                        }
+                    ],
+                    actions: []
+                }
+            ]
+        });
+        require(service.providerSettingsDescriptorsLoaded, "typed settings document did not become ready");
+        require(service.typedSettingsDescriptor("zai") !== null, "typed provider descriptor was not indexed");
+        require(service.typedSettingsDescriptor("openai") === null, "missing typed provider fabricated a descriptor");
+        equal(service.typedControlsForSection("zai", "connection", {}).length, 1, "typed connection section was not filtered");
+        require(service.implementedCredentialSlot("zai", "zai-api-key"), "implemented credential slot was rejected");
+        require(!service.implementedCredentialSlot("zai", "unknown-slot"), "unknown credential slot was accepted");
+        var regionControl = service.typedControl("zai", "zai-api-region");
+        equal(service.providerSettingValue("zai", regionControl), "global", "typed picker default drifted");
+        require(!service.providerSettingExplicit("zai", "zai-api-region"), "missing region was reported as explicit");
+        var optionCommand = service.providerOptionCommand("zai", "zai-api-region", "bigmodel-cn", false);
+        equal(optionCommand.length, 6, "provider option command split a value argument");
+        equal(optionCommand[5], "bigmodel-cn", "provider option command changed a literal value");
+        var clearOptionCommand = service.providerOptionCommand("zai", "zai-api-region", "ignored", true);
+        equal(clearOptionCommand[5], "--clear", "provider option clear command omitted its flag");
+        service.setCredentialSlotState("zai", "zai-api-key", "configured");
+        equal(service.credentialSlotState("zai", "zai-api-key"), "configured", "credential status cache did not retain public state");
+        equal(service.regionalCredentialPageUrl("zai"), "https://z.ai/manage-apikey/apikey", "global z.ai credential URL drifted");
+        service.applyProviderConfigDocument({
+            config: {
+                providers: [
+                    {
+                        id: "zai",
+                        instance_id: "default",
+                        enabled: false,
+                        options: {
+                            region: "bigmodel-cn"
+                        }
+                    },
+                    {
+                        id: "grok",
+                        instance_id: "default",
+                        enabled: true,
+                        options: {
+                            source: "web",
+                            cookie_source: "off"
+                        }
+                    }
+                ]
+            }
+        });
+        equal(service.regionalCredentialPageUrl("zai"), "https://bigmodel.cn/usercenter/proj-mgmt/apikeys", "BigModel CN credential URL drifted");
+        equal(service.explicitProviderSettingValue("grok", "grok-usage-source"), "web", "Grok source was not restored from provider config");
+        equal(service.explicitProviderSettingValue("grok", "grok-cookie-source"), "off", "Grok cookie source was not restored from provider config");
+        equal(service.windowTitle("Primary", {
+            duration_seconds: null,
+            resets_at: new Date(Date.now() + 5 * 86400000).toISOString()
+        }, "grok"), "Weekly", "Grok timestamp-only weekly window lost its CodexBar label");
+        equal(service.windowTitle("Primary", {
+            duration_seconds: null,
+            resets_at: new Date(Date.now() + 30 * 86400000).toISOString()
+        }, "grok"), "Monthly", "Grok timestamp-only monthly window lost its CodexBar label");
+        equal(service.windowTitle("Primary", {
+            duration_seconds: null,
+            resets_at: null
+        }, "grok"), "Credits", "Grok fallback window lost its CodexBar label");
+        equal(service.windowTitle("Primary", {
+            duration_seconds: 2592000,
+            resets_at: null
+        }, "copilot"), "Premium", "Copilot primary window lost its CodexBar label");
+        equal(service.windowTitle("Secondary", {
+            duration_seconds: null,
+            resets_at: null
+        }, "copilot"), "Chat", "Copilot secondary window lost its CodexBar label");
+        var glanceRows = service.rowsFrom({
+            snapshots: [
+                {
+                    state: "ready",
+                    last_known_good: {
+                        scope: {
+                            provider: "codex"
+                        },
+                        identity: {
+                            email: "user@example.test",
+                            plan: "Plus"
+                        },
+                        fetched_at: "2026-08-31T10:00:00Z",
+                        primary: {
+                            usage: {
+                                state: "known",
+                                used_percent: 42
+                            },
+                            reset_description: "in 2h",
+                            duration_seconds: 18000
+                        },
+                        credits: {
+                            remaining: "25",
+                            events: []
+                        },
+                        cost_usage: {
+                            unit: {
+                                kind: "currency",
+                                code: "USD"
+                            },
+                            history_days: 30,
+                            session: {
+                                amount: "1.50",
+                                total_tokens: "1200"
+                            },
+                            history: {
+                                amount: "8.25",
+                                total_tokens: "9000"
+                            },
+                            daily: [
+                                {
+                                    day: "2026-08-31",
+                                    metrics: {
+                                        amount: "1.50",
+                                        total_tokens: "1200"
+                                    },
+                                    models: []
+                                }
+                            ]
+                        }
+                    },
+                    freshness: {
+                        state: "stale",
+                        since: "2026-08-31T10:05:00Z"
+                    },
+                    refresh: {
+                        state: "idle"
+                    },
+                    error: {
+                        kind: "rate_limited",
+                        message: "Slow down"
+                    }
+                }
+            ]
+        });
+        var glanceRow = glanceRows.filter(function (row) {
+            return row.provider === "codex";
+        })[0];
+        equal(glanceRow.account, "user@example.test", "glance card lost account identity");
+        equal(glanceRow.plan, "Plus", "glance card lost plan identity");
+        require(glanceRow.ready && glanceRow.stale, "last-known usage was not retained under a stale error");
+        equal(glanceRow.errorKind, "rate_limited", "stale error overlay classification was lost");
+        equal(glanceRow.windows.length, 1, "glance card lost its quota bars");
+        equal(glanceRow.windows[0].title, "Session", "glance card lost its quota window label");
+        equal(glanceRow.optionalSections[0].title, "Credits", "glance card lost its credits section");
+        equal(glanceRow.costStats.length, 4, "glance card lost its cost and token KPIs");
+        equal(glanceRow.costChart.points.length, 1, "glance card lost its daily cost chart");
+        var tokenFileCommand = service.providerTokenFileCommand("grok", "/home/test;literal");
+        equal(tokenFileCommand.length, 4, "Grok token-file command split the provider path");
+        equal(tokenFileCommand[3], "/home/test;literal/.grok/auth.json", "Grok token-file command changed the literal path");
+        equal(service.providerTokenFileCommand("claude", "/home/test").length, 0, "non-Grok provider received a token-file action");
         service.connectionWanted = true;
         service.transportConnected = true;
         service.scheduleReconnect("test_disconnect");
@@ -130,6 +446,29 @@ ShellRoot {
         }));
         require(saturationService.panelStateRequestId > Protocol.MAX_TRACKED_REQUESTS, "freed action slot did not admit pending panel intent");
         equal(Protocol.requestProgressState(saturationService.protocolState, saturationService.panelStateRequestId), "issued", "capacity recovery did not track pending close intent");
+
+        var navigationCalls = [];
+        var navigationOwner = {
+            open: function () {
+                navigationCalls.push("usage");
+            },
+            openProviderSettings: function (provider) {
+                navigationCalls.push("provider:" + String(provider || ""));
+            },
+            openProviderCatalog: function () {
+                navigationCalls.push("catalog");
+            },
+            openAppSettings: function (pane) {
+                navigationCalls.push("app:" + String(pane || ""));
+            }
+        };
+        require(service.claimPanel(navigationOwner), "navigation test owner could not claim panel");
+        require(service.openFromIpc(), "ordinary IPC open was rejected");
+        require(service.openSettingsFromIpc("codex"), "provider settings IPC open was rejected");
+        require(service.openProviderCatalogFromIpc(), "provider catalog IPC open was rejected");
+        require(service.openAppSettingsFromIpc("display"), "app settings IPC open was rejected");
+        equal(JSON.stringify(navigationCalls), JSON.stringify(["usage", "provider:codex", "catalog", "app:display"]), "IPC navigation destinations were conflated");
+        service.releasePanel(navigationOwner);
 
         var closeCount = 0;
         var first = {

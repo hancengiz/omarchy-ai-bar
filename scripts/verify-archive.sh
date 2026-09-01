@@ -24,6 +24,10 @@ tar --no-same-owner --no-same-permissions -xzf "$archive" -C "$temporary_root"
 mapfile -t roots < <(find "$temporary_root" -mindepth 1 -maxdepth 1 -type d -print)
 [[ ${#roots[@]} == 1 ]] || fail 'archive must contain exactly one root directory'
 root=${roots[0]}
+root_name=${root##*/}
+[[ $root_name =~ ^omarchy-ai-bar-([0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?)$ ]] \
+  || fail 'archive root does not identify a valid release version'
+expected_version=${BASH_REMATCH[1]}
 
 required=(
   bin/omarchy-ai-bar
@@ -63,7 +67,8 @@ done < <(find "$root" -type f -print0)
 [[ $elf_count == 1 ]] || fail "expected one ELF executable, found $elf_count"
 
 "$root/bin/omarchy-ai-bar" version --json \
-  | jq -e '.name == "omarchy-ai-bar" and (.version | type == "string")' >/dev/null \
+  | jq -e --arg version "$expected_version" \
+    '.name == "omarchy-ai-bar" and .version == $version' >/dev/null \
   || fail 'binary identity is invalid'
 
 printf 'Archive verification passed.\n'

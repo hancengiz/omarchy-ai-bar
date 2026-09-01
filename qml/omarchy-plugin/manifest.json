@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "local.omarchy-ai-bar",
   "name": "Omarchy AI Bar",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "Omarchy AI Bar contributors",
   "description": "AI provider usage, quota, reset, and cost monitoring",
   "kinds": [
@@ -24,8 +24,17 @@
       "barDisplay": "AI and usage",
       "preferredProvider": "Highest usage",
       "usageDirection": "Used",
-      "showUnavailable": true,
       "showResetTimes": true,
+      "paceVisible": true,
+      "quotaWarningMarkersVisible": true,
+      "workdayTicksVisible": true,
+      "showOptionalCreditsAndExtraUsage": true,
+      "quotaWarningsEnabled": true,
+      "hidePersonalInfo": false,
+      "showDashboardActions": false,
+      "showProviderDetails": false,
+      "showActionSection": false,
+      "panelHeight": 680,
       "warningThreshold": 90
     },
     "schema": [
@@ -130,15 +139,72 @@
         "defaultValue": "Used"
       },
       {
-        "key": "showUnavailable",
-        "type": "boolean",
-        "label": "Show providers that need setup",
-        "defaultValue": true
-      },
-      {
         "key": "showResetTimes",
         "type": "boolean",
         "label": "Show reset times",
+        "defaultValue": true
+      },
+      {
+        "key": "paceVisible",
+        "type": "boolean",
+        "label": "Show pace forecasts",
+        "defaultValue": true
+      },
+      {
+        "key": "quotaWarningMarkersVisible",
+        "type": "boolean",
+        "label": "Show quota warning markers",
+        "defaultValue": true
+      },
+      {
+        "key": "workdayTicksVisible",
+        "type": "boolean",
+        "label": "Show weekly workday ticks",
+        "defaultValue": true
+      },
+      {
+        "key": "showOptionalCreditsAndExtraUsage",
+        "type": "boolean",
+        "label": "Show credits and extra usage",
+        "defaultValue": true
+      },
+      {
+        "key": "hidePersonalInfo",
+        "type": "boolean",
+        "label": "Hide personal information",
+        "defaultValue": false
+      },
+      {
+        "key": "showDashboardActions",
+        "type": "boolean",
+        "label": "Show dashboard actions",
+        "defaultValue": false
+      },
+      {
+        "key": "showProviderDetails",
+        "type": "boolean",
+        "label": "Show provider detail actions",
+        "defaultValue": false
+      },
+      {
+        "key": "showActionSection",
+        "type": "boolean",
+        "label": "Show menu action section",
+        "defaultValue": false
+      },
+      {
+        "key": "panelHeight",
+        "type": "integer",
+        "label": "Menu height (pixels)",
+        "min": 420,
+        "max": 1600,
+        "step": 20,
+        "defaultValue": 680
+      },
+      {
+        "key": "quotaWarningsEnabled",
+        "type": "boolean",
+        "label": "Desktop quota warnings",
         "defaultValue": true
       },
       {
