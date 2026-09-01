@@ -17,7 +17,9 @@ an AUR account is not required.
 
 Run this as your normal desktop user. It downloads the latest Arch package,
 verifies its published SHA-256, installs it through pacman, activates or
-updates the Omarchy bridge, and starts the user service:
+updates the Omarchy bridge, and starts the user service. Pacman confirmation
+is non-interactive because the script itself arrives over standard input; sudo
+may still request your password through the terminal:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/hancengiz/omarchy-ai-bar/main/install.sh | bash

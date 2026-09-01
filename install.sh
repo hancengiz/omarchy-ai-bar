@@ -44,7 +44,7 @@ main() {
     "$download_url/$asset.sha256"
   sha256sum --check --strict "$asset.sha256"
 
-  sudo pacman -U --needed "./$asset"
+  sudo pacman -U --needed --noconfirm "./$asset"
   systemctl --user daemon-reload
 
   local bridge_status=''
