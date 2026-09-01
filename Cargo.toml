@@ -35,7 +35,7 @@ ksni = { version = "~0.3.3", default-features = false, features = ["tokio"] }
 nix = { version = "~0.31.3", default-features = false, features = ["fs", "process", "resource", "signal", "socket", "term", "user"] }
 notify-rust = { version = "~4.18.0", default-features = false, features = ["z-with-tokio"] }
 oo7 = { version = "~0.6.0", default-features = false, features = ["native_crypto", "tokio"] }
-pbkdf2 = "~0.12.2"
+pbkdf2 = "~0.13.0"
 rusqlite = { version = "~0.40.2", default-features = false }
 reqwest = { version = "~0.13.4", default-features = false, features = ["rustls", "stream"] }
 rquickjs = { version = "~0.12.2", default-features = false }
