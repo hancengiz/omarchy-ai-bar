@@ -56,7 +56,7 @@ daemon/display snapshots.
 
 | Provider | Runtime-backed in this slice | Still unavailable from the pinned settings surface |
 | --- | --- | --- |
-| Codex | Auto/PAT/OAuth/CLI quota source; explicit opt-in to read-only legacy Codex/OpenCode OAuth fallback | OpenAI web extras and cookies, battery saver, configurable history/cost/display filters, managed-account add/switch UI |
+| Codex | Auto/PAT/OAuth/CLI quota source; explicit opt-in to read-only legacy Codex/OpenCode OAuth fallback; isolated managed-account login, switching, removal, and per-account refresh | OpenAI web extras and cookies, battery saver, configurable history/cost/display filters, and promotion of a managed account into the native Codex CLI |
 | Claude | Auto/OAuth/CLI source selection; read-only Claude Code OAuth file/environment; bounded shell-free CLI usage fallback | Admin API, claude.ai web-cookie source, `claude-swap`, macOS Keychain policy, display/widget filters, multi-account UI |
 | Grok | Auto/CLI/OAuth/Web source and Auto/Manual/Off cookie policy; CLI, read-only OAuth proxy, manual/browser web billing, dashboard, and provider-token-file actions | SuperGrok bearer gRPC enrichment, persistent cookie cache, and multi-account token management |
 | Copilot | App-owned GitHub login with pre-storage identity validation, enterprise host, CLI/chat entitlement rows, manual budget extras/cookie slot, and refresh action | Automatic GitHub browser-cookie import, secondary menu-bar budget selection, multiple GitHub accounts |
@@ -136,12 +136,14 @@ multi-account lifecycle remain unavailable.
 
 ## Remaining account, settings, and presentation gaps
 
-The current account schema is still only a routing placeholder. Full
-CodexBar-style account support needs labels, active selection, external
-identity, per-account secret slots, organization/workspace context, independent
-refresh state, and one runtime scope per configured account. Codex managed
-accounts, Copilot account switching, Claude token accounts/`claude-swap`, Grok
-bearer accounts, and z.ai team accounts therefore remain incomplete.
+Codex now has the complete app-owned managed-account lifecycle needed for the
+bar: isolated `CODEX_HOME` login, identity-aware duplicate replacement, active
+selection, recoverable removal, independent refresh/last-known-good state, one
+runtime scope per enabled account, and account controls in both the popup and
+settings. The native `~/.codex` account remains an explicit `ambient` choice
+and is never overwritten. Promotion of a managed account into the native Codex
+CLI is still open, as are Copilot account switching, Claude token
+accounts/`claude-swap`, Grok bearer accounts, and z.ai team accounts.
 
 Global settings still need complete daemon-backed refresh policy, provider
 ordering, menu-bar layout controls, per-provider and per-window warnings,
@@ -150,9 +152,10 @@ storage reporting, localization/currency, power-aware cadence, hooks/plugins
 panes, and a documented Hyprland shortcut.
 
 The QML popup now follows CodexBar's immediate-statistics hierarchy and supports
-inline quota/cost/history content, provider settings, and a persistent
-monitor-bounded drag height. It is not yet exact presentation parity: dynamic
-multi-account menus, all provider-specific actions, share/storage surfaces,
+inline quota/cost/history content, provider settings, a persistent
+monitor-bounded drag height, and a dynamic Codex account switcher. It is not
+yet exact presentation parity: multi-account menus for the remaining providers,
+all provider-specific actions, share/storage surfaces,
 complete keyboard/accessibility behavior, localization/RTL, reduced motion,
 and multi-monitor/fractional-scale verification remain open ledger items.
 

@@ -29,7 +29,7 @@ sessions are not copied into application configuration, and browser discovery
 does not auto-enable a provider. Providers without a validated Linux browser
 path continue to use an explicit environment or Secret Service value. QuickJS
 plugins are local, explicitly evaluated, and have no network or host APIs in
-version 0.3.0.
+version 0.4.0.
 
 See [`unsupported-apple-semantics.md`](unsupported-apple-semantics.md) for the
 two Apple-only behaviors that have no equivalent contract on Omarchy.

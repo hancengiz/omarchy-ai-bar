@@ -28,6 +28,11 @@
   </provides>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.4.0" date="2026-09-01">
+      <description>
+        <p>CodexBar-style isolated Codex multi-account login, switching, removal, and per-account usage refresh.</p>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-09-01">
       <description>
         <p>CodexBar-style inline usage and cost views, provider configuration, credential isolation, persistent rate-limit backoff, and expanded native provider support.</p>

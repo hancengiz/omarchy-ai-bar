@@ -1,7 +1,7 @@
 # Maintainer: Cengiz Han <cengiz@cengizhan.com>
 
 pkgname=omarchy-ai-bar
-pkgver=0.3.0
+pkgver=0.4.0
 pkgrel=1
 pkgdesc='Omarchy-native AI provider usage, quota, cost, and session monitoring'
 arch=('x86_64')

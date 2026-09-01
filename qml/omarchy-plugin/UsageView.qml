@@ -244,6 +244,31 @@ Item {
                             elide: Text.ElideRight
                         }
 
+                        Flow {
+                            width: parent.width
+                            spacing: Style.space(6)
+                            visible: providerSurface.modelData.provider === "codex" && view.panelRoot && view.panelRoot.service && view.panelRoot.service.codexAccountChoices().length > 1
+
+                            Repeater {
+                                model: view.panelRoot && view.panelRoot.service ? view.panelRoot.service.codexAccountChoices() : []
+
+                                delegate: Button {
+                                    required property var modelData
+                                    text: {
+                                        var label = String(modelData.email || "");
+                                        if (label === "")
+                                            label = modelData.ambient ? "Native" : String(modelData.id || "Account");
+                                        return (modelData.active ? "● " : "") + label;
+                                    }
+                                    foreground: view.foreground
+                                    focusable: true
+                                    enabled: view.panelRoot && view.panelRoot.service && !modelData.active && !view.panelRoot.service.providerConfigBusy
+                                    onClicked: if (view.panelRoot && view.panelRoot.service)
+                                        view.panelRoot.service.activateCodexAccount(modelData.id)
+                                }
+                            }
+                        }
+
                         PanelSeparator {
                             width: parent.width
                             foreground: view.foreground

@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use oab_domain::{
@@ -535,18 +535,14 @@ pub(crate) enum ProviderBootstrapError {
     Grok,
 }
 
-/// Discovers production providers without accessing provider networks or
-/// starting provider child processes. Explicit environment credentials win;
-/// missing manual-session values may be hydrated from desktop Secret Service.
-pub(crate) fn discover(
+fn discover_codex(
     config: Option<&AppConfig>,
-) -> Result<ProductionProviders, ProviderBootstrapError> {
-    let home = env::var_os("HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .ok_or(ProviderBootstrapError::MissingHome)?;
+    app_data_dir: &Path,
+    home: &Path,
+    child_environment: &BTreeMap<String, String>,
+) -> Result<(Vec<RefreshRegistration>, Vec<AccountScope>, bool), ProviderBootstrapError> {
     let paths = CodexCredentialPaths::resolve(
-        &home,
+        home,
         env::var_os("CODEX_HOME").as_deref(),
         env::var_os("XDG_DATA_HOME").as_deref(),
     )
@@ -560,11 +556,13 @@ pub(crate) fn discover(
         &[],
     )
     .map_err(|_| ProviderBootstrapError::Executable)?;
-    let codex_detected = executable.is_some();
-
-    let scope = AccountScope::new(
+    let managed_accounts = crate::codex_accounts::configured_managed_accounts(config);
+    let detected = executable.is_some() || !managed_accounts.is_empty();
+    let default_instance =
+        ProviderInstanceId::new("default").map_err(|_| ProviderBootstrapError::Identity)?;
+    let ambient_scope = AccountScope::new(
         ProviderId::Codex,
-        ProviderInstanceId::new("default").map_err(|_| ProviderBootstrapError::Identity)?,
+        default_instance.clone(),
         AccountKey::new("ambient").map_err(|_| ProviderBootstrapError::Identity)?,
     );
     let codex_source = resolve_codex_source(crate::provider_config::provider_source(
@@ -584,26 +582,78 @@ pub(crate) fn discover(
         None,
     )
     .map_err(|_| ProviderBootstrapError::Coordinator)?;
-    let mut child_environment = unicode_environment();
-    crate::credentials::hydrate_environment(&mut child_environment);
-    crate::provider_config::apply_provider_route_environment(config, &mut child_environment);
     let coordinator = CodexCoordinator::production(
-        scope.clone(),
+        ambient_scope.clone(),
         settings,
         paths,
-        executable,
-        &child_environment,
+        executable.clone(),
+        child_environment,
     )
     .map_err(|_| ProviderBootstrapError::Coordinator)?;
     let source =
         Arc::new(CodexRefreshSource::new(coordinator)?.with_history_root(codex_history_root));
+    let mut registrations = vec![RefreshRegistration::new(ambient_scope.clone(), source)];
+    let mut scopes = vec![ambient_scope];
+
+    for account in managed_accounts
+        .into_iter()
+        .filter(|account| account.enabled)
+    {
+        let managed_home = app_data_dir
+            .join("codex/managed-accounts")
+            .join(account.id.as_str());
+        let managed_paths = CodexCredentialPaths::resolve(
+            home,
+            Some(managed_home.as_os_str()),
+            env::var_os("XDG_DATA_HOME").as_deref(),
+        )
+        .map_err(|_| ProviderBootstrapError::CredentialPaths)?;
+        let managed_scope =
+            AccountScope::new(ProviderId::Codex, default_instance.clone(), account.id);
+        let settings = CodexCoordinatorSettings::new(
+            codex_source,
+            CodexAccountSelection::Profile,
+            false,
+            None,
+        )
+        .map_err(|_| ProviderBootstrapError::Coordinator)?;
+        let coordinator = CodexCoordinator::production(
+            managed_scope.clone(),
+            settings,
+            managed_paths,
+            executable.clone(),
+            child_environment,
+        )
+        .map_err(|_| ProviderBootstrapError::Coordinator)?;
+        let source =
+            Arc::new(CodexRefreshSource::new(coordinator)?.with_history_root(managed_home));
+        registrations.push(RefreshRegistration::new(managed_scope.clone(), source));
+        scopes.push(managed_scope);
+    }
+    Ok((registrations, scopes, detected))
+}
+
+/// Discovers production providers without accessing provider networks or
+/// starting provider child processes. Explicit environment credentials win;
+/// missing manual-session values may be hydrated from desktop Secret Service.
+pub(crate) fn discover(
+    config: Option<&AppConfig>,
+    app_data_dir: &std::path::Path,
+) -> Result<ProductionProviders, ProviderBootstrapError> {
+    let home = env::var_os("HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .ok_or(ProviderBootstrapError::MissingHome)?;
+    let mut child_environment = unicode_environment();
+    crate::credentials::hydrate_environment(&mut child_environment);
+    crate::provider_config::apply_provider_route_environment(config, &mut child_environment);
+    let (mut registrations, mut scopes, codex_detected) =
+        discover_codex(config, app_data_dir, &home, &child_environment)?;
 
     let mut detected_providers = BTreeSet::new();
     if codex_detected {
         detected_providers.insert(ProviderId::Codex);
     }
-    let mut registrations = vec![RefreshRegistration::new(scope.clone(), source)];
-    let mut scopes = vec![scope];
     let claude_source = resolve_claude_source(crate::provider_config::provider_source(
         config,
         ProviderId::Claude,

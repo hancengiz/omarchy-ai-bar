@@ -16,9 +16,9 @@ use oab_auth::secret_store::{
     MAX_SECRET_BYTES, SecretKey, SecretServiceStore, SecretStore, SecretStoreError, SecretValue,
 };
 use oab_cli::args::{
-    BridgeTransport, CacheAction, CacheArgs, Cli, Command, CompletionShell, ConfigAction,
-    ConfigArgs, CookieAction, CookieArgs, CopilotAction, CopilotArgs, GuardArgs, HooksAction,
-    HooksArgs, OutputArgs, PluginsAction, PluginsArgs,
+    BridgeTransport, CacheAction, CacheArgs, Cli, CodexAction, CodexArgs, Command, CompletionShell,
+    ConfigAction, ConfigArgs, CookieAction, CookieArgs, CopilotAction, CopilotArgs, GuardArgs,
+    HooksAction, HooksArgs, OutputArgs, PluginsAction, PluginsArgs,
 };
 use oab_cli::commands::bridge::{
     BridgeError, BridgeManager, BridgeStatus, PACKAGED_PLUGIN_PATH, SystemOmarchyCommands,
@@ -79,6 +79,7 @@ pub(crate) fn run(cli: Cli) -> AppExitCode {
         Some(Command::Cache(arguments)) => run_cache(&arguments),
         Some(Command::Credential(arguments) | Command::Cookie(arguments)) => run_cookie(&arguments),
         Some(Command::Copilot(arguments)) => run_copilot(&arguments),
+        Some(Command::Codex(arguments)) => run_codex(&arguments),
         Some(Command::Hooks(arguments)) => run_hooks(&arguments),
         Some(Command::Plugins(arguments)) => run_plugins(&arguments),
         Some(Command::Diagnose(arguments)) => run_safe(ControlAction::Diagnose, arguments),
@@ -127,6 +128,123 @@ pub(crate) fn run(cli: Cli) -> AppExitCode {
         }) => run_bridge(BridgeLifecycleAction::Uninstall),
         Some(Command::Version { json }) => write_version(json),
         Some(Command::Completion { shell }) => run_completion(shell),
+    }
+}
+
+fn run_codex(arguments: &CodexArgs) -> AppExitCode {
+    let Some(paths) = resolved_paths() else {
+        return AppExitCode::Internal;
+    };
+    let result = match arguments.action.as_ref() {
+        None => list_codex_accounts(&paths, OutputFormat::Human),
+        Some(CodexAction::List(output)) => list_codex_accounts(&paths, output.format),
+        Some(CodexAction::Login) => match crate::codex_accounts::login(&paths) {
+            Ok(account) => {
+                println!("Added managed Codex account {}.", account.id);
+                if let Some(email) = account.email {
+                    println!("Account: {email}");
+                }
+                AppExitCode::Success
+            }
+            Err(error) => codex_account_failure(&error),
+        },
+        Some(CodexAction::Activate { account }) => {
+            match crate::codex_accounts::activate(&paths, account) {
+                Ok(()) => {
+                    println!("Activated Codex account {account} in Omarchy AI Bar.");
+                    AppExitCode::Success
+                }
+                Err(error) => codex_account_failure(&error),
+            }
+        }
+        Some(CodexAction::Remove { account }) => {
+            match crate::codex_accounts::remove(&paths, account) {
+                Ok(()) => {
+                    println!("Removed managed Codex account {account}.");
+                    println!("Native ~/.codex credentials were not changed.");
+                    AppExitCode::Success
+                }
+                Err(error) => codex_account_failure(&error),
+            }
+        }
+    };
+    if result == AppExitCode::Success
+        && matches!(
+            arguments.action,
+            Some(CodexAction::Login | CodexAction::Activate { .. } | CodexAction::Remove { .. })
+        )
+    {
+        restart_user_service_after_account_change();
+    }
+    result
+}
+
+fn list_codex_accounts(paths: &AppPaths, format: OutputFormat) -> AppExitCode {
+    let accounts = match crate::codex_accounts::list(paths) {
+        Ok(accounts) => accounts,
+        Err(error) => return codex_account_failure(&error),
+    };
+    match format {
+        OutputFormat::Human => {
+            println!("Codex accounts:");
+            for account in accounts {
+                let label = account.email.as_deref().unwrap_or("identity unavailable");
+                let flags = [
+                    account.active.then_some("active"),
+                    account.ambient.then_some("native"),
+                    (!account.enabled).then_some("disabled"),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(", ");
+                println!(
+                    "  {}  {}{}",
+                    account.id,
+                    label,
+                    if flags.is_empty() {
+                        String::new()
+                    } else {
+                        format!("  [{flags}]")
+                    }
+                );
+            }
+            AppExitCode::Success
+        }
+        OutputFormat::Json | OutputFormat::Toon => write_local_value(
+            format,
+            &json!({
+                "schema_version": 1,
+                "accounts": accounts,
+            }),
+        ),
+    }
+}
+
+fn codex_account_failure(error: &crate::codex_accounts::ManagedCodexAccountError) -> AppExitCode {
+    use crate::codex_accounts::ManagedCodexAccountError;
+    eprintln!("omarchy-ai-bar: {error}");
+    match error {
+        ManagedCodexAccountError::MissingExecutable => AppExitCode::Unavailable,
+        ManagedCodexAccountError::LoginFailed | ManagedCodexAccountError::MissingIdentity => {
+            AppExitCode::Authentication
+        }
+        ManagedCodexAccountError::UnknownAccount | ManagedCodexAccountError::InvalidAccount => {
+            AppExitCode::Usage
+        }
+        ManagedCodexAccountError::Storage => AppExitCode::Internal,
+    }
+}
+
+fn restart_user_service_after_account_change() {
+    let status = ProcessCommand::new("/usr/bin/systemctl")
+        .args(["--user", "restart", "omarchy-ai-bar.service"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    if !status.is_ok_and(|status| status.success()) {
+        eprintln!("omarchy-ai-bar: restart the user service to apply Codex account changes");
     }
 }
 
@@ -1873,13 +1991,15 @@ fn run_daemon_or_forward() -> AppExitCode {
                     return AppExitCode::Internal;
                 }
             };
-            let providers = match crate::provider_bootstrap::discover(active_config.as_ref()) {
-                Ok(providers) => providers,
-                Err(_error) => {
-                    eprintln!("{INTERNAL_MESSAGE}");
-                    return AppExitCode::Internal;
-                }
-            };
+            let providers =
+                match crate::provider_bootstrap::discover(active_config.as_ref(), paths.data_dir())
+                {
+                    Ok(providers) => providers,
+                    Err(_error) => {
+                        eprintln!("{INTERNAL_MESSAGE}");
+                        return AppExitCode::Internal;
+                    }
+                };
             let snapshot_cache = paths.cache_dir().join("last-known-good.json");
             match daemon::run(socket, &display_socket, &snapshot_cache, providers) {
                 Ok(()) => AppExitCode::Success,

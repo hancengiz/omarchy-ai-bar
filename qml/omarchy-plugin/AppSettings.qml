@@ -638,7 +638,7 @@ Item {
                         }
                         Text {
                             width: parent.width
-                            text: "Version 0.3.0"
+                            text: "Version 0.4.0"
                             color: view.muted
                             font.family: view.fontFamily()
                             font.pixelSize: Style.font.bodySmall

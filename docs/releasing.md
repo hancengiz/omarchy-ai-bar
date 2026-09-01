@@ -5,11 +5,11 @@
 2. Build and verify the deterministic direct archive:
 
    ```sh
-   scripts/build-release.sh 0.3.0
-   scripts/verify-archive.sh dist/omarchy-ai-bar-0.3.0-linux-x86_64.tar.gz
+   scripts/build-release.sh 0.4.0
+   scripts/verify-archive.sh dist/omarchy-ai-bar-0.4.0-linux-x86_64.tar.gz
    ```
 
-3. Tag the exact audited commit as `v0.3.0`. The release workflow builds and
+3. Tag the exact audited commit as `v0.4.0`. The release workflow builds and
    verifies the direct archive and Arch package in separate jobs. A final job
    publishes both artifacts and their adjacent checksums with GitHub's built-in
    workflow token; release files are never uploaded manually through the web

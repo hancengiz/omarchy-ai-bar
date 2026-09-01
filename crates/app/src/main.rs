@@ -22,6 +22,7 @@ use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Number, Value};
 
+mod codex_accounts;
 mod credentials;
 mod daemon;
 mod hyprland_events;

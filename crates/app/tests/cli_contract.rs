@@ -33,6 +33,7 @@ fn help_registers_the_complete_command_surface() {
         "credential",
         "cookie",
         "copilot",
+        "codex",
         "cache",
         "plugins",
         "sessions",
@@ -43,6 +44,32 @@ fn help_registers_the_complete_command_surface() {
     ] {
         assert!(help.contains(command), "help omitted {command}");
     }
+}
+
+#[test]
+fn codex_account_cli_exposes_native_account_and_rejects_unknown_activation() {
+    let fixture = DaemonFixture::new("codex-accounts");
+    let listed = fixture
+        .command()
+        .args(["codex", "list", "--format", "json"])
+        .output()
+        .expect("list Codex accounts");
+    assert!(listed.status.success());
+    assert!(listed.stderr.is_empty());
+    let listed: Value = serde_json::from_slice(&listed.stdout).expect("Codex account JSON");
+    assert_eq!(listed["schema_version"], 1);
+    assert_eq!(listed["accounts"][0]["id"], "ambient");
+    assert_eq!(listed["accounts"][0]["active"], true);
+    assert_eq!(listed["accounts"][0]["ambient"], true);
+
+    let rejected = fixture
+        .command()
+        .args(["codex", "activate", "acct-unknown"])
+        .output()
+        .expect("reject unknown Codex account");
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(rejected.stdout.is_empty());
+    assert!(!rejected.stderr.is_empty());
 }
 
 #[test]

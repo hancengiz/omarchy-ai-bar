@@ -199,14 +199,18 @@
         "docs/configuration.md",
         "docs/claude-multi-account-and-status-items.md"
       ],
-      "omarchy_mapping": "Provider-instance and account-scoped state and UI",
+      "omarchy_mapping": "Provider-instance and account-scoped state and UI; Codex has isolated managed homes and active switching",
       "disposition": "required",
-      "status": "planned",
-      "tests": [],
+      "status": "in-progress",
+      "tests": [
+        "crates/app/tests/cli_contract.rs",
+        "crates/providers/tests/provider_codex_runner.rs",
+        "crates/runtime/tests/actor.rs"
+      ],
       "cells": {
-        "implementation": "planned",
-        "integration": "planned",
-        "verification": "planned"
+        "implementation": "in-progress",
+        "integration": "in-progress",
+        "verification": "in-progress"
       }
     },
     {

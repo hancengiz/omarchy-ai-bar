@@ -34,7 +34,7 @@ Download the package and its checksum, verify it, then install it through
 pacman so upgrades and removal remain package-managed:
 
 ```sh
-release=0.3.0
+release=0.4.0
 asset="omarchy-ai-bar-$release-1-x86_64.pkg.tar.zst"
 base_url="https://github.com/hancengiz/omarchy-ai-bar/releases/download/v$release"
 curl --fail --location --remote-name "$base_url/$asset"
@@ -59,7 +59,7 @@ and configure providers.
 If the Arch package cannot be used, install the verified release archive:
 
 ```sh
-release=0.3.0
+release=0.4.0
 archive="omarchy-ai-bar-$release-linux-x86_64.tar.gz"
 base_url="https://github.com/hancengiz/omarchy-ai-bar/releases/download/v$release"
 curl --fail --location --remote-name "$base_url/$archive"
@@ -115,7 +115,8 @@ current implementation and gap audit is in
 [`docs/codexbar-parity.md`](docs/codexbar-parity.md):
 
 - Codex: native Codex credential files, HTTP usage, and `codex app-server`
-  fallback, with runtime-backed Auto/PAT/OAuth/CLI source selection.
+  fallback, with runtime-backed Auto/PAT/OAuth/CLI source selection and
+  CodexBar-style isolated multi-account login, refresh, and switching.
 - Claude: Claude Code's `~/.claude/.credentials.json` OAuth credential (or
   `CLAUDE_OAUTH_TOKEN`) and Anthropic's OAuth usage endpoint, plus a bounded
   shell-free interactive Claude CLI `/usage` capture and Auto fallback.
@@ -205,6 +206,30 @@ omarchy-ai-bar guard --max-used 90
 omarchy-ai-bar config describe codex --format json
 omarchy-ai-bar config set-option claude claude-usage-source auto
 ```
+
+### Multiple Codex accounts
+
+Open **Codex → Provider accounts → Add account** in settings. Each login runs
+in its own private `CODEX_HOME`, so adding, switching, or removing an account
+does not overwrite the account used by the native Codex CLI in `~/.codex`.
+The active account can be changed directly from the Codex usage card or its
+settings page. Every enabled account refreshes independently and keeps its own
+last-known-good usage state.
+
+The same lifecycle is available from the terminal:
+
+```sh
+omarchy-ai-bar codex login
+omarchy-ai-bar codex list
+omarchy-ai-bar codex activate ambient
+omarchy-ai-bar codex activate acct-0123456789abcdef01234567
+omarchy-ai-bar codex remove acct-0123456789abcdef01234567
+```
+
+`ambient` means the native Codex CLI account. Signing in again with an account
+already managed by Omarchy AI Bar replaces its previous isolated login instead
+of creating a duplicate entry. Removed managed homes are moved to the private
+application data recovery directory rather than deleted.
 
 Configuration validation, Secret Service credentials, cache management,
 hooks, local JavaScript providers, and the loopback JSON API are documented in

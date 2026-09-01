@@ -45,6 +45,8 @@ pub enum Command {
     Cookie(CookieArgs),
     /// Manage the app-owned GitHub Copilot OAuth session.
     Copilot(CopilotArgs),
+    /// Manage isolated Codex OAuth accounts owned by Omarchy AI Bar.
+    Codex(CodexArgs),
     /// Inspect or clear application caches.
     Cache(CacheArgs),
     /// Manage user-provider plugins.
@@ -266,6 +268,33 @@ pub enum CopilotAction {
     Logout,
 }
 
+/// App-owned Codex managed-account operations.
+#[derive(Debug, Clone, Args)]
+pub struct CodexArgs {
+    /// Account operation. Omitting it lists configured accounts.
+    #[command(subcommand)]
+    pub action: Option<CodexAction>,
+}
+
+/// Codex managed-account operation.
+#[derive(Debug, Clone, Subcommand)]
+pub enum CodexAction {
+    /// Sign in to a new isolated Codex home and add it to Omarchy AI Bar.
+    Login,
+    /// List the ambient and app-managed Codex accounts.
+    List(OutputArgs),
+    /// Select the account displayed as the active Codex account.
+    Activate {
+        /// Managed account ID, or `ambient` for the native Codex account.
+        account: String,
+    },
+    /// Remove an app-managed account without changing native Codex credentials.
+    Remove {
+        /// Managed account ID.
+        account: String,
+    },
+}
+
 /// Shell-free external hook operations.
 #[derive(Debug, Clone, Args)]
 pub struct HooksArgs {
@@ -393,6 +422,7 @@ mod tests {
             "credential",
             "cookie",
             "copilot",
+            "codex",
             "cache",
             "plugins",
             "sessions",
@@ -457,6 +487,32 @@ mod tests {
             Some(Command::Copilot(CopilotArgs {
                 action: Some(CopilotAction::Logout)
             }))
+        ));
+    }
+
+    #[test]
+    fn codex_managed_account_commands_are_typed() {
+        let login = Cli::try_parse_from(["omarchy-ai-bar", "codex", "login"])
+            .expect("parse managed Codex login");
+        assert!(matches!(
+            login.command,
+            Some(Command::Codex(CodexArgs {
+                action: Some(CodexAction::Login)
+            }))
+        ));
+
+        let activate = Cli::try_parse_from([
+            "omarchy-ai-bar",
+            "codex",
+            "activate",
+            "acct-0123456789abcdef01234567",
+        ])
+        .expect("parse Codex activation");
+        assert!(matches!(
+            activate.command,
+            Some(Command::Codex(CodexArgs {
+                action: Some(CodexAction::Activate { account })
+            })) if account == "acct-0123456789abcdef01234567"
         ));
     }
 

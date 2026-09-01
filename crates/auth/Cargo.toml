@@ -10,8 +10,8 @@ workspace = true
 
 [dependencies]
 nix.workspace = true
-oab-domain = { path = "../domain", version = "=0.3.0" }
-oab-storage = { path = "../storage", version = "=0.3.0" }
+oab-domain = { path = "../domain", version = "=0.4.0" }
+oab-storage = { path = "../storage", version = "=0.4.0" }
 oo7.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -19,5 +19,5 @@ thiserror.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
-oab-test-support = { path = "../test-support", version = "=0.3.0" }
+oab-test-support = { path = "../test-support", version = "=0.4.0" }
 tokio.workspace = true

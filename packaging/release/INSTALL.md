@@ -20,12 +20,12 @@ installer and its own adjacent checksum with every release.
 ## GitHub Arch package (recommended)
 
 Download the package and adjacent checksum from the
-[v0.3.0 release](https://github.com/hancengiz/omarchy-ai-bar/releases/tag/v0.3.0),
+[v0.4.0 release](https://github.com/hancengiz/omarchy-ai-bar/releases/tag/v0.4.0),
 then verify and install it through pacman:
 
 ```sh
-sha256sum --check omarchy-ai-bar-0.3.0-1-x86_64.pkg.tar.zst.sha256
-sudo pacman -U --needed ./omarchy-ai-bar-0.3.0-1-x86_64.pkg.tar.zst
+sha256sum --check omarchy-ai-bar-0.4.0-1-x86_64.pkg.tar.zst.sha256
+sudo pacman -U --needed ./omarchy-ai-bar-0.4.0-1-x86_64.pkg.tar.zst
 ```
 
 ## Direct release archive
@@ -35,9 +35,9 @@ and `share` trees into `/usr` without preserving the extracting user's
 ownership:
 
 ```sh
-sha256sum --check omarchy-ai-bar-0.3.0-linux-x86_64.tar.gz.sha256
-tar -xzf omarchy-ai-bar-0.3.0-linux-x86_64.tar.gz
-cd omarchy-ai-bar-0.3.0
+sha256sum --check omarchy-ai-bar-0.4.0-linux-x86_64.tar.gz.sha256
+tar -xzf omarchy-ai-bar-0.4.0-linux-x86_64.tar.gz
+cd omarchy-ai-bar-0.4.0
 sudo cp -a --no-preserve=ownership --remove-destination -- bin lib share /usr/
 systemctl --user daemon-reload
 ```

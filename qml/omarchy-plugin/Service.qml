@@ -26,6 +26,8 @@ Item {
     property var providerEndpointOverrides: ({})
     property var providerOptionsOverrides: ({})
     property var providerAccountPresence: ({})
+    property var providerAccountRoutes: ({})
+    property var activeProviderAccounts: ({})
     property var providerSettingsDescriptors: ({})
     property bool providerSettingsDescriptorsLoaded: false
     property var credentialSlotStates: ({})
@@ -274,6 +276,14 @@ Item {
         return "";
     }
 
+    function accountIdFromSnapshot(snapshot) {
+        if (snapshot && snapshot.scope && snapshot.scope.account)
+            return String(snapshot.scope.account);
+        if (snapshot && snapshot.last_known_good && snapshot.last_known_good.scope)
+            return String(snapshot.last_known_good.scope.account || "");
+        return "";
+    }
+
     function sampleFrom(providerSnapshot) {
         return providerSnapshot && providerSnapshot.state === "ready" ? providerSnapshot.last_known_good : null;
     }
@@ -283,11 +293,32 @@ Item {
         var indexed = {};
         for (var snapshotIndex = 0; snapshotIndex < snapshots.length; snapshotIndex++) {
             var indexedProvider = providerIdFromSnapshot(snapshots[snapshotIndex]);
-            if (indexedProvider !== "")
-                indexed[indexedProvider] = snapshots[snapshotIndex];
+            if (indexedProvider !== "") {
+                if (!Array.isArray(indexed[indexedProvider]))
+                    indexed[indexedProvider] = [];
+                indexed[indexedProvider].push(snapshots[snapshotIndex]);
+            }
         }
         return providerIds().map(function (provider) {
-            var snapshot = indexed[provider] || null;
+            var candidates = indexed[provider] || [];
+            var activeAccount = activeProviderAccounts[provider] || "ambient";
+            var snapshot = null;
+            for (var candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
+                if (accountIdFromSnapshot(candidates[candidateIndex]) === activeAccount) {
+                    snapshot = candidates[candidateIndex];
+                    break;
+                }
+            }
+            if (!snapshot) {
+                for (var readyIndex = 0; readyIndex < candidates.length; readyIndex++) {
+                    if (sampleFrom(candidates[readyIndex])) {
+                        snapshot = candidates[readyIndex];
+                        break;
+                    }
+                }
+            }
+            if (!snapshot && candidates.length > 0)
+                snapshot = candidates[0];
             var sample = sampleFrom(snapshot);
             var primary = sample && sample.primary ? sample.primary : null;
             var errorKind = snapshot && snapshot.error && snapshot.error.kind ? String(snapshot.error.kind) : "";
@@ -471,6 +502,8 @@ Item {
         switch (String(action.target || "")) {
         case "login":
             return launchLogin(provider);
+        case "add_managed_account":
+            return launchManagedCodexAccount();
         case "open_usage_dashboard":
             return openDashboard(provider);
         case "refresh_provider":
@@ -482,6 +515,105 @@ Item {
         default:
             return false;
         }
+    }
+
+    function launchManagedCodexAccount() {
+        if (loginLauncher.running || bridgeExecutable === "")
+            return false;
+        loginLauncher.command = ["omarchy", "launch", "terminal", bridgeExecutable, "codex", "login"];
+        loginLauncher.running = true;
+        providerConfigResult = "Managed Codex login opened in a terminal";
+        return true;
+    }
+
+    function managedCodexAccounts() {
+        var routes = providerAccountRoutes.codex || [];
+        var active = activeProviderAccounts.codex || "ambient";
+        var snapshots = effectiveSnapshot && Array.isArray(effectiveSnapshot.snapshots) ? effectiveSnapshot.snapshots : [];
+        return routes.map(function (route) {
+            var id = String(route.id || "");
+            var snapshot = null;
+            for (var index = 0; index < snapshots.length; index++) {
+                var candidate = snapshots[index];
+                var scope = candidate && candidate.scope ? candidate.scope : (candidate && candidate.last_known_good ? candidate.last_known_good.scope : null);
+                if (scope && String(scope.provider || "") === "codex" && String(scope.account || "") === id) {
+                    snapshot = candidate;
+                    break;
+                }
+            }
+            var sample = sampleFrom(snapshot);
+            return {
+                id: id,
+                email: sample && sample.identity ? String(sample.identity.email || sample.identity.account_label || "") : "",
+                plan: sample && sample.identity ? String(sample.identity.plan || "") : "",
+                active: active === id,
+                enabled: route.enabled === true,
+                state: snapshot ? String(snapshot.state || "") : "missing"
+            };
+        });
+    }
+
+    function ambientCodexAccount() {
+        var snapshots = effectiveSnapshot && Array.isArray(effectiveSnapshot.snapshots) ? effectiveSnapshot.snapshots : [];
+        for (var index = 0; index < snapshots.length; index++) {
+            var candidate = snapshots[index];
+            if (providerIdFromSnapshot(candidate) !== "codex" || accountIdFromSnapshot(candidate) !== "ambient")
+                continue;
+            var sample = sampleFrom(candidate);
+            return {
+                email: sample && sample.identity ? String(sample.identity.email || sample.identity.account_label || "") : "",
+                plan: sample && sample.identity ? String(sample.identity.plan || "") : ""
+            };
+        }
+        return {
+            email: "",
+            plan: ""
+        };
+    }
+
+    function codexAccountChoices() {
+        var ambient = ambientCodexAccount();
+        var active = activeProviderAccounts.codex || "ambient";
+        var choices = [
+            {
+                id: "ambient",
+                email: ambient.email,
+                plan: ambient.plan,
+                active: active === "ambient",
+                ambient: true
+            }
+        ];
+        return choices.concat(managedCodexAccounts().map(function (account) {
+            return {
+                id: account.id,
+                email: account.email,
+                plan: account.plan,
+                active: account.active,
+                ambient: false
+            };
+        }));
+    }
+
+    function activateCodexAccount(account) {
+        var id = String(account || "");
+        if (id === "" || providerConfigBusy || codexAccountWriter.running)
+            return false;
+        providerConfigBusy = true;
+        providerConfigResult = "Activating Codex account…";
+        codexAccountWriter.command = [bridgeExecutable, "codex", "activate", id];
+        codexAccountWriter.running = true;
+        return true;
+    }
+
+    function removeCodexAccount(account) {
+        var id = String(account || "");
+        if (id === "" || id === "ambient" || providerConfigBusy || codexAccountWriter.running)
+            return false;
+        providerConfigBusy = true;
+        providerConfigResult = "Removing Codex account…";
+        codexAccountWriter.command = [bridgeExecutable, "codex", "remove", id];
+        codexAccountWriter.running = true;
+        return true;
     }
 
     function openRegionalCredentialPage(provider) {
@@ -1706,6 +1838,8 @@ Item {
         var endpoints = {};
         var options = {};
         var accounts = {};
+        var accountRoutes = {};
+        var activeAccounts = {};
         var providers = document && document.config && Array.isArray(document.config.providers) ? document.config.providers : [];
         for (var index = 0; index < providers.length; index++) {
             var route = providers[index];
@@ -1716,11 +1850,16 @@ Item {
             endpoints[provider] = typeof route.endpoint === "string" ? route.endpoint : "";
             options[provider] = route.options && typeof route.options === "object" ? route.options : {};
             accounts[provider] = Array.isArray(route.accounts) && route.accounts.length > 0;
+            accountRoutes[provider] = Array.isArray(route.accounts) ? route.accounts : [];
+            var extensions = route.options && route.options.provider_options && typeof route.options.provider_options === "object" ? route.options.provider_options : {};
+            activeAccounts[provider] = typeof extensions.active_account === "string" ? extensions.active_account : "ambient";
         }
         providerEnabledOverrides = overrides;
         providerEndpointOverrides = endpoints;
         providerOptionsOverrides = options;
         providerAccountPresence = accounts;
+        providerAccountRoutes = accountRoutes;
+        activeProviderAccounts = activeAccounts;
         providerConfigLoaded = true;
     }
 
@@ -2212,6 +2351,24 @@ Item {
         }
         stderr: StdioCollector {
             waitForEnd: true
+        }
+    }
+
+    Process {
+        id: codexAccountWriter
+        running: false
+        stdout: StdioCollector {
+            waitForEnd: true
+        }
+        stderr: StdioCollector {
+            waitForEnd: true
+        }
+        onExited: function (exitCode) {
+            root.providerConfigBusy = false;
+            root.providerConfigResult = exitCode === 0 ? "Codex accounts updated" : "Could not update Codex accounts";
+            root.loadProviderConfig();
+            if (exitCode === 0)
+                root.scheduleReconnect("codex_accounts_changed");
         }
     }
 

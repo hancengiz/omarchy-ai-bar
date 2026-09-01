@@ -986,6 +986,92 @@ Item {
                         wrapMode: Text.WordWrap
                     }
 
+                    Row {
+                        width: parent.width
+                        visible: view.provider && view.provider.provider === "codex"
+                        spacing: Style.space(8)
+
+                        Text {
+                            width: parent.width - nativeCodexButton.width - parent.spacing
+                            text: {
+                                var account = view.service ? view.service.ambientCodexAccount() : null;
+                                return account && account.email !== "" ? account.email + " · native" : "Native Codex account (~/.codex)";
+                            }
+                            color: view.foreground
+                            font.family: view.fontFamily()
+                            font.pixelSize: Style.font.caption
+                            elide: Text.ElideMiddle
+                        }
+
+                        Button {
+                            id: nativeCodexButton
+                            text: view.service && view.service.activeProviderAccounts.codex === "ambient" ? "Active" : "Activate"
+                            foreground: view.foreground
+                            focusable: true
+                            enabled: view.service && view.service.activeProviderAccounts.codex !== "ambient" && !view.service.providerConfigBusy
+                            onClicked: if (view.service)
+                                view.service.activateCodexAccount("ambient")
+                        }
+                    }
+
+                    Repeater {
+                        model: view.provider && view.provider.provider === "codex" && view.service ? view.service.managedCodexAccounts() : []
+
+                        delegate: Column {
+                            required property var modelData
+                            width: typedAccountsColumn.width
+                            spacing: Style.space(4)
+
+                            PanelSeparator {
+                                width: parent.width
+                                foreground: view.foreground
+                            }
+
+                            Text {
+                                width: parent.width
+                                text: modelData.email !== "" ? modelData.email : modelData.id
+                                color: view.foreground
+                                font.family: view.fontFamily()
+                                font.pixelSize: Style.font.caption
+                                font.bold: modelData.active
+                                elide: Text.ElideMiddle
+                            }
+
+                            Text {
+                                width: parent.width
+                                text: [modelData.plan, modelData.state, modelData.active ? "active" : ""].filter(function (value) {
+                                    return value !== "";
+                                }).join(" · ")
+                                color: view.muted
+                                font.family: view.fontFamily()
+                                font.pixelSize: Style.font.caption
+                                elide: Text.ElideRight
+                            }
+
+                            Row {
+                                spacing: Style.space(7)
+
+                                Button {
+                                    text: modelData.active ? "Active" : "Activate"
+                                    foreground: view.foreground
+                                    focusable: true
+                                    enabled: view.service && !modelData.active && !view.service.providerConfigBusy
+                                    onClicked: if (view.service)
+                                        view.service.activateCodexAccount(modelData.id)
+                                }
+
+                                Button {
+                                    text: "Remove"
+                                    foreground: view.foreground
+                                    focusable: true
+                                    enabled: view.service && !view.service.providerConfigBusy
+                                    onClicked: if (view.service)
+                                        view.service.removeCodexAccount(modelData.id)
+                                }
+                            }
+                        }
+                    }
+
                     Text {
                         width: parent.width
                         visible: !(view.service && view.typedSettingsDescriptor && view.service.availabilityImplemented(view.typedSettingsDescriptor.accounts.availability))

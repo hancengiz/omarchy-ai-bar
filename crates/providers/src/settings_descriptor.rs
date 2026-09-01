@@ -757,7 +757,7 @@ const CODEX_ACTIONS: &[ProviderSettingsActionDescriptor] = &[ProviderSettingsAct
     standalone: false,
     target: ProviderSettingsActionTarget::AddManagedAccount,
     visible_when: ALWAYS,
-    availability: unavailable(ProviderSettingsGap::ManagedAccountLifecycle),
+    availability: IMPLEMENTED,
 }];
 
 const CODEX_ACCOUNT_CREDENTIALS: &[ProviderAccountCredentialKind] =
@@ -773,7 +773,7 @@ const CODEX_ACCOUNTS: ProviderAccountSupportDescriptor = ProviderAccountSupportD
     primary_action: Some(ProviderSettingsActionId::AddCodexAccount),
     token_file_action: None,
     visible_when: ALWAYS,
-    availability: unavailable(ProviderSettingsGap::ManagedAccountLifecycle),
+    availability: IMPLEMENTED,
 };
 
 const CODEX_SETTINGS: ProviderSettingsDescriptor = ProviderSettingsDescriptor {

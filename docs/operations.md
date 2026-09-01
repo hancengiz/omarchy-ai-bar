@@ -136,9 +136,16 @@ omarchy-ai-bar credential status cursor
 omarchy-ai-bar credential delete cursor
 ```
 
-Add `--account NAME` to isolate more than one stored credential. The current
-desktop daemon uses the `ambient` account; account selection is reserved for
-the multi-account routing surface.
+Add `--account NAME` to isolate more than one stored credential for providers
+using the generic credential store.
+
+Codex has a dedicated CodexBar-compatible account lifecycle. Use **Add
+account** on the Codex settings page or run `omarchy-ai-bar codex login`; each
+login receives a private application-owned `CODEX_HOME`. Use
+`omarchy-ai-bar codex list`, `codex activate <ID>`, and `codex remove <ID>` to
+manage the same accounts from a terminal. `ambient` selects the native Codex
+CLI account. Managed accounts refresh in independent daemon scopes, and none
+of these operations overwrite `~/.codex/auth.json`.
 
 Typed providers may expose more than one purpose-specific credential. Supply
 the exact descriptor slot with `--slot`; unsupported provider/slot pairs are

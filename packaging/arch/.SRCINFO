@@ -1,6 +1,6 @@
 pkgbase = omarchy-ai-bar
 	pkgdesc = Omarchy-native AI provider usage, quota, cost, and session monitoring
-	pkgver = 0.3.0
+	pkgver = 0.4.0
 	pkgrel = 1
 	url = https://github.com/hancengiz/omarchy-ai-bar
 	install = omarchy-ai-bar.install
@@ -17,7 +17,7 @@ pkgbase = omarchy-ai-bar
 	depends = sqlite
 	options = !lto
 	options = !debug
-	source = omarchy-ai-bar-0.3.0.tar.gz::https://github.com/hancengiz/omarchy-ai-bar/archive/refs/tags/v0.3.0.tar.gz
+	source = omarchy-ai-bar-0.4.0.tar.gz::https://github.com/hancengiz/omarchy-ai-bar/archive/refs/tags/v0.4.0.tar.gz
 	sha256sums = 0f4f40303bf95f288095467e3a12063240ca0b15bcea657802fffd0c5fe1745e
 
 pkgname = omarchy-ai-bar
