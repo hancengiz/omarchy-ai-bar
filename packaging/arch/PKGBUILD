@@ -21,7 +21,7 @@ depends=(
 makedepends=('cargo')
 install=omarchy-ai-bar.install
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('ed0237413b370e88c554a2be33d6f898f44e73c12ffecacc42b31c5e16883db7')
+sha256sums=('0f4f40303bf95f288095467e3a12063240ca0b15bcea657802fffd0c5fe1745e')
 
 _oab_resolve_remap_path() {
   local label=$1 input=$2 resolved=''
