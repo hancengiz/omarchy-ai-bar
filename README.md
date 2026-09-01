@@ -7,6 +7,88 @@ Omarchy AI Bar was ported from
 and customized for Omarchy by [Cengiz Han](https://cengizhan.bio). Source code:
 [github.com/hancengiz/omarchy-ai-bar](https://github.com/hancengiz/omarchy-ai-bar).
 
+## Install on Omarchy
+
+Omarchy AI Bar supports Omarchy 4.0.1 or newer on x86-64. Releases are
+published on the [GitHub Releases page](https://github.com/hancengiz/omarchy-ai-bar/releases/latest);
+an AUR account is not required.
+
+### Recommended: install the Arch package
+
+Download the package and its checksum, verify it, then install it through
+pacman so upgrades and removal remain package-managed:
+
+```sh
+release=0.3.0
+asset="omarchy-ai-bar-$release-1-x86_64.pkg.tar.zst"
+base_url="https://github.com/hancengiz/omarchy-ai-bar/releases/download/v$release"
+curl --fail --location --remote-name "$base_url/$asset"
+curl --fail --location --remote-name "$base_url/$asset.sha256"
+sha256sum --check "$asset.sha256"
+sudo pacman -U --needed "./$asset"
+```
+
+Activate the Omarchy bar plugin and start the user service:
+
+```sh
+omarchy-ai-bar bridge install
+systemctl --user enable --now omarchy-ai-bar.service
+omarchy-ai-bar bridge status
+```
+
+The plugin should now appear in the Omarchy bar. Open its gear menu to enable
+and configure providers.
+
+### Direct archive fallback
+
+If the Arch package cannot be used, install the verified release archive:
+
+```sh
+release=0.3.0
+archive="omarchy-ai-bar-$release-linux-x86_64.tar.gz"
+base_url="https://github.com/hancengiz/omarchy-ai-bar/releases/download/v$release"
+curl --fail --location --remote-name "$base_url/$archive"
+curl --fail --location --remote-name "$base_url/$archive.sha256"
+sha256sum --check "$archive.sha256"
+tar -xzf "$archive"
+cd "omarchy-ai-bar-$release"
+sudo cp -a --no-preserve=ownership --remove-destination -- bin lib share /usr/
+systemctl --user daemon-reload
+omarchy-ai-bar bridge install
+systemctl --user enable --now omarchy-ai-bar.service
+```
+
+`omarchy plugin add` alone is not sufficient: it clones the QML surface but
+cannot install the Rust daemon or systemd user unit.
+
+### Upgrade or uninstall
+
+For a package upgrade, download the newer GitHub package, verify it, run
+`sudo pacman -U ./omarchy-ai-bar-<version>-1-x86_64.pkg.tar.zst`, then refresh
+the user-owned QML copy:
+
+```sh
+omarchy-ai-bar bridge update
+systemctl --user restart omarchy-ai-bar.service
+```
+
+For direct-archive upgrades, stop the service, repeat the verified extraction
+and `cp` command above with the newer archive, then run the same bridge update
+and service restart.
+
+To uninstall a package-managed installation:
+
+```sh
+systemctl --user disable --now omarchy-ai-bar.service
+omarchy-ai-bar bridge uninstall
+omarchy pkg drop omarchy-ai-bar
+```
+
+See the [complete installation guide](packaging/release/INSTALL.md) for direct
+archive upgrades and exact manual-removal paths, and
+[`docs/operations.md`](docs/operations.md) for provider credentials,
+configuration, diagnostics, hooks, and the local API.
+
 ## Current provider coverage
 
 The daemon, private display socket, Rust-to-QML bridge, refresh actions, and
@@ -83,33 +165,6 @@ runtime and unavailable CodexBar controls remain visibly disabled. Credentials
 are never serialized into provider descriptors, JSON configuration, or the
 daemon display protocol; secure fields use a bounded one-shot helper input and
 retain only configured status.
-
-## Install
-
-Once the package is published to AUR, install it on Omarchy and activate the
-per-user plugin and service:
-
-```sh
-omarchy pkg aur add omarchy-ai-bar
-omarchy-ai-bar bridge install
-systemctl --user enable --now omarchy-ai-bar.service
-```
-
-Package upgrades remain under pacman/AUR control. After an upgrade, refresh
-the user-owned QML copy without changing its bar placement or settings:
-
-```sh
-omarchy-ai-bar bridge update
-```
-
-`bridge update` already asks the running Omarchy shell to rescan the plugin.
-Do not immediately chain `omarchy restart shell`; that can race Quickshell's
-live plugin replacement. Restart the shell only if the rescan reports an error
-or the widget does not update.
-
-Direct release archives contain the same single executable and support files.
-See [`packaging/release/INSTALL.md`](packaging/release/INSTALL.md) for the
-system-wide copy and removal commands.
 
 ## Use
 

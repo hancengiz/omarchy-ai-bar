@@ -8,6 +8,9 @@ omarchy-ai-bar-VERSION/share/omarchy-ai-bar/omarchy-plugin/
 omarchy-ai-bar-VERSION/share/bash-completion/completions/omarchy-ai-bar
 omarchy-ai-bar-VERSION/share/fish/vendor_completions.d/omarchy-ai-bar.fish
 omarchy-ai-bar-VERSION/share/zsh/site-functions/_omarchy-ai-bar
+omarchy-ai-bar-VERSION/share/doc/omarchy-ai-bar/INSTALL.md
+omarchy-ai-bar-VERSION/share/licenses/omarchy-ai-bar/LICENSE
+omarchy-ai-bar-VERSION/share/licenses/omarchy-ai-bar/NOTICE
 omarchy-ai-bar-VERSION/LICENSE
 omarchy-ai-bar-VERSION/NOTICE
 omarchy-ai-bar-VERSION/INSTALL.md

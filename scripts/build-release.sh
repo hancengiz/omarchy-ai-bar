@@ -144,6 +144,10 @@ cp -a -- qml/omarchy-plugin/. "$stage/share/omarchy-ai-bar/omarchy-plugin/"
 install -Dm644 LICENSE "$stage/LICENSE"
 install -Dm644 NOTICE "$stage/NOTICE"
 install -Dm644 packaging/release/INSTALL.md "$stage/INSTALL.md"
+install -Dm644 LICENSE "$stage/share/licenses/omarchy-ai-bar/LICENSE"
+install -Dm644 NOTICE "$stage/share/licenses/omarchy-ai-bar/NOTICE"
+install -Dm644 packaging/release/INSTALL.md \
+  "$stage/share/doc/omarchy-ai-bar/INSTALL.md"
 
 install -dm755 \
   "$stage/share/bash-completion/completions" \

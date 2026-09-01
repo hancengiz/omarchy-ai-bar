@@ -39,6 +39,9 @@ required=(
   share/bash-completion/completions/omarchy-ai-bar
   share/fish/vendor_completions.d/omarchy-ai-bar.fish
   share/zsh/site-functions/_omarchy-ai-bar
+  share/doc/omarchy-ai-bar/INSTALL.md
+  share/licenses/omarchy-ai-bar/LICENSE
+  share/licenses/omarchy-ai-bar/NOTICE
   LICENSE
   NOTICE
   INSTALL.md

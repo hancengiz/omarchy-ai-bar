@@ -1,22 +1,34 @@
 # Installing Omarchy AI Bar
 
-The archive and Arch package install system-owned files only. They never copy
-anything into a user's home directory during package installation.
+GitHub releases provide an Arch package and a direct archive for Omarchy
+4.0.1 or newer on x86-64. Both install one Rust executable plus its QML and
+desktop support files. Neither changes a user's home directory during the
+system installation.
+
+## GitHub Arch package (recommended)
+
+Download the package and adjacent checksum from the
+[v0.3.0 release](https://github.com/hancengiz/omarchy-ai-bar/releases/tag/v0.3.0),
+then verify and install it through pacman:
+
+```sh
+sha256sum --check omarchy-ai-bar-0.3.0-1-x86_64.pkg.tar.zst.sha256
+sudo pacman -U --needed ./omarchy-ai-bar-0.3.0-1-x86_64.pkg.tar.zst
+```
 
 ## Direct release archive
 
 Verify the adjacent checksum, extract the archive, then copy its `bin`, `lib`,
-and `share` trees into `/usr`:
+and `share` trees into `/usr` without preserving the extracting user's
+ownership:
 
 ```sh
 sha256sum --check omarchy-ai-bar-0.3.0-linux-x86_64.tar.gz.sha256
 tar -xzf omarchy-ai-bar-0.3.0-linux-x86_64.tar.gz
 cd omarchy-ai-bar-0.3.0
-sudo cp -a bin lib share /usr/
+sudo cp -a --no-preserve=ownership --remove-destination -- bin lib share /usr/
 systemctl --user daemon-reload
 ```
-
-The AUR package performs the same system-owned installation through pacman.
 
 After installing the files, run these commands as the desktop user:
 
@@ -43,10 +55,23 @@ the credential flow you use:
 `/usr/share/omarchy-ai-bar` directory, validates it with Omarchy, atomically
 places it under the user's Omarchy plugin directory, rescans, and enables it.
 
-After an AUR/pacman or direct-archive upgrade, refresh only the user bridge:
+After a GitHub package upgrade, refresh the user bridge and restart the daemon:
 
 ```sh
 omarchy-ai-bar bridge update
+systemctl --user restart omarchy-ai-bar.service
+```
+
+For a direct-archive upgrade, stop the running executable, repeat the verified
+extraction with the newer version, and copy the three trees using the same
+ownership-safe command above. Then reload, update, and restart:
+
+```sh
+systemctl --user stop omarchy-ai-bar.service
+sudo cp -a --no-preserve=ownership --remove-destination -- bin lib share /usr/
+systemctl --user daemon-reload
+omarchy-ai-bar bridge update
+systemctl --user start omarchy-ai-bar.service
 ```
 
 The bridge command already asks Omarchy to rescan the plugin. Do not immediately
@@ -55,15 +80,42 @@ does not update.
 
 The update refuses unrecognized or locally modified plugin trees. Omarchy's
 placement, enabled state, and settings are stored outside that tree and remain
-unchanged. There is no application self-updater; install package updates through
-AUR/pacman or replace the direct-release files yourself.
+unchanged. There is no application self-updater; install newer packages or
+direct archives from GitHub Releases.
 
-Before uninstalling system-owned files, run:
+## Uninstall
+
+Before removing system-owned files, run these commands as the desktop user:
 
 ```sh
 systemctl --user disable --now omarchy-ai-bar.service
 omarchy-ai-bar bridge uninstall
 ```
 
-Then remove the package with pacman, or remove the exact direct-archive paths
-listed in `SHA256SUMS`. Do not recursively remove shared `/usr` directories.
+For a package-managed installation, finish with:
+
+```sh
+omarchy pkg drop omarchy-ai-bar
+```
+
+For a direct-archive installation, remove only these application-owned paths:
+
+```sh
+sudo rm -f -- \
+  /usr/bin/omarchy-ai-bar \
+  /usr/lib/systemd/user/omarchy-ai-bar.service \
+  /usr/share/applications/org.omarchy_ai_bar.App.desktop \
+  /usr/share/bash-completion/completions/omarchy-ai-bar \
+  /usr/share/fish/vendor_completions.d/omarchy-ai-bar.fish \
+  /usr/share/icons/hicolor/scalable/apps/org.omarchy_ai_bar.App.svg \
+  /usr/share/metainfo/org.omarchy_ai_bar.App.metainfo.xml \
+  /usr/share/zsh/site-functions/_omarchy-ai-bar \
+  /usr/share/doc/omarchy-ai-bar/INSTALL.md \
+  /usr/share/licenses/omarchy-ai-bar/LICENSE \
+  /usr/share/licenses/omarchy-ai-bar/NOTICE
+sudo rm -rf -- /usr/share/omarchy-ai-bar
+systemctl --user daemon-reload
+```
+
+Do not recursively remove any shared `/usr` directory other than the exact
+application-owned `/usr/share/omarchy-ai-bar` path above.

@@ -1,9 +1,9 @@
 # Operations
 
 `omarchy-ai-bar daemon` is the single long-running backend used by the Omarchy
-widget, CLI projections, local API, and StatusNotifierItem fallback. The
-repository's Arch package definition supplies a user service; AUR publication
-is still a release task:
+widget, CLI projections, local API, and StatusNotifierItem fallback. GitHub
+Releases distribute the Arch package and direct archive; the package definition
+supplies a user service:
 
 ```sh
 systemctl --user enable --now omarchy-ai-bar.service

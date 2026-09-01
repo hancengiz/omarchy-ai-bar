@@ -31,8 +31,8 @@ blocked until `scripts/verify-parity-ledger.sh --all-complete` passes.
 - Supported Linux browser sessions are lazy authentication fallbacks. They do
   not run during provider detection, do not auto-enable providers, and never
   replace an explicit manual credential.
-- AUR/pacman is the planned update authority replacing Sparkle; publication is
-  still a release task. systemd user services replace the login item,
+- GitHub Releases and pacman-installed release packages replace Sparkle; AUR
+  publication is deferred. systemd user services replace the login item,
   freedesktop notifications replace Apple notifications, and Quickshell QML
   replaces the native status menu and WidgetKit surface.
 

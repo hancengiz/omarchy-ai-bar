@@ -18,7 +18,8 @@ and keyboard-capable panel. Omarchy's widget settings replace Apple preferences
 for display mode, provider selection, used/remaining presentation, reset
 visibility, unavailable providers, and warning threshold. systemd user units
 replace login-item management, freedesktop notifications replace UserNotifications,
-and AUR/pacman replace Sparkle updates.
+and verified GitHub releases plus pacman-installed packages replace Sparkle
+updates.
 
 The StatusNotifierItem fallback supplies a desktop indicator when no compatible
 Omarchy display client is connected. Supported browser-session providers use a
