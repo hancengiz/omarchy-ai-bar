@@ -46,6 +46,7 @@ search_count() {
 
 validate_layout() {
   local required=(
+    install.sh
     packaging/arch/PKGBUILD
     packaging/arch/.SRCINFO
     packaging/arch/omarchy-ai-bar.install
@@ -71,6 +72,7 @@ validate_layout() {
 
   bash -n "$repo_root/packaging/arch/PKGBUILD"
   bash -n "$repo_root/packaging/arch/omarchy-ai-bar.install"
+  bash -n "$repo_root/install.sh"
   bash -n "$repo_root/scripts/build-release.sh"
   bash -n "$repo_root/scripts/live-smoke-omarchy.sh"
 

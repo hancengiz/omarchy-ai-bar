@@ -13,7 +13,21 @@ Omarchy AI Bar supports Omarchy 4.0.1 or newer on x86-64. Releases are
 published on the [GitHub Releases page](https://github.com/hancengiz/omarchy-ai-bar/releases/latest);
 an AUR account is not required.
 
-### Recommended: install the Arch package
+### One-line install
+
+Run this as your normal desktop user. It downloads the latest Arch package,
+verifies its published SHA-256, installs it through pacman, activates or
+updates the Omarchy bridge, and starts the user service:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/hancengiz/omarchy-ai-bar/main/install.sh | bash
+```
+
+The URL follows `main`, so review [`install.sh`](install.sh) first if you do
+not want to execute a mutable remote script. The package itself is always
+checksum-verified before installation.
+
+### Manual package install
 
 Download the package and its checksum, verify it, then install it through
 pacman so upgrades and removal remain package-managed:

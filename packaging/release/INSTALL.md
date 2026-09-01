@@ -5,6 +5,18 @@ GitHub releases provide an Arch package and a direct archive for Omarchy
 desktop support files. Neither changes a user's home directory during the
 system installation.
 
+## One-line installer
+
+Run the hosted installer as the normal desktop user:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/hancengiz/omarchy-ai-bar/main/install.sh | bash
+```
+
+It resolves the latest GitHub release and verifies the Arch package against
+its adjacent SHA-256 file before invoking pacman. Review `install.sh` first if
+you do not want to execute a script from the mutable `main` branch.
+
 ## GitHub Arch package (recommended)
 
 Download the package and adjacent checksum from the
