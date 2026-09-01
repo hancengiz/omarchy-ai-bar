@@ -1,0 +1,34 @@
+name: Publish current installer
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-installer-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the installer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate and checksum the installer
+        run: |
+          bash -n install.sh
+          sha256sum install.sh >install.sh.sha256
+
+      - name: Attach installer to the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release view --repo "$GITHUB_REPOSITORY" \
+            --json tagName --jq .tagName)
+          gh release upload "$tag" install.sh install.sh.sha256 \
+            --clobber --repo "$GITHUB_REPOSITORY"

@@ -10,12 +10,12 @@ system installation.
 Run the hosted installer as the normal desktop user:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/hancengiz/omarchy-ai-bar/6ff37e6e16b62360a4aa5c7d7be7f36915f1e97b/install.sh | bash
+curl -fsSL https://github.com/hancengiz/omarchy-ai-bar/releases/latest/download/install.sh | bash
 ```
 
 It resolves the latest GitHub release and verifies the Arch package against
-its adjacent SHA-256 file before invoking pacman. The installer itself is
-pinned to the immutable commit shown in the URL.
+its adjacent SHA-256 file before invoking pacman. GitHub Actions publishes the
+installer and its own adjacent checksum with every release.
 
 ## GitHub Arch package (recommended)
 

@@ -22,12 +22,11 @@ is non-interactive because the script itself arrives over standard input; sudo
 may still request your password through the terminal:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/hancengiz/omarchy-ai-bar/6ff37e6e16b62360a4aa5c7d7be7f36915f1e97b/install.sh | bash
+curl -fsSL https://github.com/hancengiz/omarchy-ai-bar/releases/latest/download/install.sh | bash
 ```
 
-The installer URL is pinned to an immutable reviewed commit while the script
-resolves the latest published package. The package is always checksum-verified
-before installation.
+The installer and its checksum are published by GitHub Actions alongside each
+release. The package is always checksum-verified before installation.
 
 ### Manual package install
 
