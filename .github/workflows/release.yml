@@ -91,7 +91,9 @@ jobs:
           useradd --create-home builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
           runuser -u builder -- bash -lc \
-            "cd '$GITHUB_WORKSPACE/packaging/arch' && makepkg --nodeps --nocheck --cleanbuild --clean --force"
+            "cd '$GITHUB_WORKSPACE/packaging/arch' && \
+             makepkg --printsrcinfo >.SRCINFO && \
+             makepkg --nodeps --nocheck --cleanbuild --clean --force"
 
       - name: Verify and checksum the Arch package
         shell: bash
