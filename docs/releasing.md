@@ -9,15 +9,22 @@
    scripts/verify-archive.sh dist/omarchy-ai-bar-0.3.0-linux-x86_64.tar.gz
    ```
 
-3. Tag the exact audited commit as `v0.3.0`. The release workflow builds the
-   archive again and attaches it and its checksum to the GitHub release.
-4. Replace the PKGBUILD source checksum with the SHA-256 of GitHub's tag
-   archive, regenerate `.SRCINFO`, and test with `makepkg --cleanbuild`.
-5. Generate a SHA-256 file for the resulting `.pkg.tar.zst` and attach both to
-   the GitHub release. Commit and push the finalized PKGBUILD checksum.
-6. If AUR publishing access is available, copy only `PKGBUILD`, `.SRCINFO`,
+3. Tag the exact audited commit as `v0.3.0`. The release workflow builds and
+   verifies the direct archive and Arch package in separate jobs. A final job
+   publishes both artifacts and their adjacent checksums with GitHub's built-in
+   workflow token; release files are never uploaded manually through the web
+   interface.
+4. Replace the repository PKGBUILD source checksum with the SHA-256 of GitHub's
+   tag archive, regenerate `.SRCINFO`, test with `makepkg --cleanbuild`, and
+   commit the finalized recipe. The release workflow independently derives and
+   verifies the tag checksum before its package build.
+5. If AUR publishing access is available, copy only `PKGBUILD`, `.SRCINFO`,
    `omarchy-ai-bar.install`, and the repository `LICENSE` to the AUR Git
    repository and push a reviewable commit.
+
+To rebuild an existing release tag, run the `Release` workflow manually with
+the exact tag name. The same jobs rebuild and replace all four release assets;
+the browser does not receive local files.
 
 The repository PKGBUILD may temporarily contain the previous release checksum
 in the version-bump commit because a GitHub tag archive does not exist before

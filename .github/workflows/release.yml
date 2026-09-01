@@ -4,9 +4,18 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build and publish
+        required: true
+        type: string
 
 permissions:
   contents: write
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 jobs:
   archive:
@@ -15,7 +24,13 @@ jobs:
       - name: Check out the tagged source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
+
+      - name: Validate release tag
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+          git tag --points-at HEAD | grep -Fx -- "$RELEASE_TAG"
 
       - name: Install pinned Rust toolchain
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
@@ -23,9 +38,107 @@ jobs:
           toolchain: 1.98.0
 
       - name: Build and verify the direct archive
-        run: scripts/build-release.sh "${GITHUB_REF_NAME#v}"
+        run: scripts/build-release.sh "${RELEASE_TAG#v}"
 
-      - name: Publish the GitHub release
+      - name: Stage direct archive assets
+        run: |
+          mkdir -p release-assets
+          cp -- dist/*.tar.gz dist/*.tar.gz.sha256 release-assets/
+
+      - name: Upload direct archive artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: direct-archive
+          path: release-assets/
+          if-no-files-found: error
+
+  arch-package:
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - name: Install build dependencies
+        run: pacman -Syu --noconfirm cargo curl dbus git
+
+      - name: Check out the tagged source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - name: Validate tag and finalize package source checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git tag --points-at HEAD | grep -Fx -- "$RELEASE_TAG"
+
+          version=${RELEASE_TAG#v}
+          source_archive=$(mktemp)
+          curl --fail --location --silent --show-error \
+            --output "$source_archive" \
+            "https://github.com/$GITHUB_REPOSITORY/archive/refs/tags/$RELEASE_TAG.tar.gz"
+          source_sha=$(sha256sum "$source_archive" | cut -d' ' -f1)
+          sed -Ei \
+            -e "s/^pkgver=.*/pkgver=$version/" \
+            -e "s/^sha256sums=.*/sha256sums=('$source_sha')/" \
+            packaging/arch/PKGBUILD
+
+      - name: Build the Arch package
+        shell: bash
+        run: |
+          set -euo pipefail
+          useradd --create-home builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          runuser -u builder -- bash -lc \
+            "cd '$GITHUB_WORKSPACE/packaging/arch' && makepkg --nodeps --nocheck --cleanbuild --clean --force"
+
+      - name: Verify and checksum the Arch package
+        shell: bash
+        run: |
+          set -euo pipefail
+          package=$(find packaging/arch -maxdepth 1 -type f \
+            -name 'omarchy-ai-bar-*.pkg.tar.zst' -print -quit)
+          test -n "$package"
+          package_root=$(mktemp -d)
+          bsdtar -xf "$package" -C "$package_root"
+          scripts/verify-package.sh --package-root "$package_root"
+          if grep -aFq -- "$GITHUB_WORKSPACE" "$package_root/usr/bin/omarchy-ai-bar"; then
+            echo 'release executable contains the Actions workspace path' >&2
+            exit 1
+          fi
+          (cd "$(dirname "$package")" && sha256sum "$(basename "$package")" \
+            >"$(basename "$package").sha256")
+          mkdir -p release-assets
+          cp -- "$package" "$package.sha256" release-assets/
+
+      - name: Upload Arch package artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: arch-package
+          path: release-assets/
+          if-no-files-found: error
+
+  publish:
+    needs:
+      - archive
+      - arch-package
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download verified release artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create or update the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --verify-tag
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release-assets/* \
+              --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG" release-assets/* \
+              --generate-notes --verify-tag --repo "$GITHUB_REPOSITORY"
+          fi
