@@ -268,6 +268,32 @@ ShellRoot {
             duration_seconds: null,
             resets_at: null
         }, "copilot"), "Chat", "Copilot secondary window lost its CodexBar label");
+        var zaiResetAt = "2026-09-05T09:30:00Z";
+        var zaiTimedWindow = service.windowRow("Session", {
+            usage: {
+                state: "known",
+                used_percent: 42
+            },
+            duration_seconds: 18000,
+            resets_at: zaiResetAt,
+            reset_description: "5-hour",
+            next_regen_percent: null,
+            synthetic_placeholder: false
+        });
+        equal(zaiTimedWindow.reset, service.formatResetAt(zaiResetAt), "z.ai concrete reset time was hidden by its cadence description");
+        equal(zaiTimedWindow.resetsAt, zaiResetAt, "z.ai concrete reset timestamp was not preserved for pace calculations");
+        var zaiPeriodicWindow = service.windowRow("Session", {
+            usage: {
+                state: "known",
+                used_percent: 42
+            },
+            duration_seconds: 18000,
+            resets_at: null,
+            reset_description: "5-hour",
+            next_regen_percent: null,
+            synthetic_placeholder: false
+        });
+        equal(zaiPeriodicWindow.reset, "5-hour", "z.ai cadence fallback disappeared without a concrete reset time");
         var glanceRows = service.rowsFrom({
             snapshots: [
                 {

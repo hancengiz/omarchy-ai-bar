@@ -1072,7 +1072,7 @@ Item {
             title: title,
             known: known,
             percent: known ? Math.max(0, Math.min(100, Number(window.usage.used_percent))) : 0,
-            reset: window.reset_description ? String(window.reset_description) : formatResetAt(window.resets_at),
+            reset: window.resets_at ? formatResetAt(window.resets_at) : (window.reset_description ? String(window.reset_description) : ""),
             resetsAt: window.resets_at ? String(window.resets_at) : "",
             durationSeconds: window.duration_seconds !== null && window.duration_seconds !== undefined ? Number(window.duration_seconds) : 0,
             nextRegenPercent: window.next_regen_percent,
