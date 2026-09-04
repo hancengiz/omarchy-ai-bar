@@ -154,6 +154,13 @@ pub enum ConfigAction {
         /// Canonical provider ID.
         provider: String,
     },
+    /// Persist the display order for one or more providers.
+    Reorder {
+        /// Canonical provider IDs from first to last. Providers omitted from
+        /// this list retain their existing relative order afterward.
+        #[arg(value_name = "PROVIDER", num_args = 1.., required = true)]
+        providers: Vec<String>,
+    },
     /// Set or clear a provider's non-secret API endpoint.
     SetEndpoint {
         /// Canonical provider ID.
@@ -555,6 +562,27 @@ mod tests {
                 })
             })) if provider == "litellm"
         ));
+    }
+
+    #[test]
+    fn provider_reordering_requires_one_or_more_provider_ids() {
+        let reordered = Cli::try_parse_from([
+            "omarchy-ai-bar",
+            "config",
+            "reorder",
+            "zai",
+            "codex",
+            "claude",
+        ])
+        .expect("parse provider order");
+        assert!(matches!(
+            reordered.command,
+            Some(Command::Config(ConfigArgs {
+                action: Some(ConfigAction::Reorder { providers })
+            })) if providers == ["zai", "codex", "claude"]
+        ));
+
+        assert!(Cli::try_parse_from(["omarchy-ai-bar", "config", "reorder"]).is_err());
     }
 
     #[test]

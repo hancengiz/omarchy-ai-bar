@@ -1,6 +1,6 @@
 //! Process-mode selection, dependency wiring, and stdout/stderr separation.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, BufRead, IsTerminal, Read, Write};
@@ -1210,6 +1210,7 @@ fn run_config(arguments: &ConfigArgs) -> AppExitCode {
         }
         Some(ConfigAction::Enable { provider }) => set_provider_enabled(&paths, provider, true),
         Some(ConfigAction::Disable { provider }) => set_provider_enabled(&paths, provider, false),
+        Some(ConfigAction::Reorder { providers }) => set_provider_order(&paths, providers),
         Some(ConfigAction::SetEndpoint {
             provider,
             endpoint,
@@ -1725,6 +1726,88 @@ fn set_provider_enabled(paths: &AppPaths, provider: &str, enabled: bool) -> AppE
         if enabled { "Enabled" } else { "Disabled" },
         provider.as_str()
     );
+    AppExitCode::Success
+}
+
+fn set_provider_order(paths: &AppPaths, providers: &[String]) -> AppExitCode {
+    let mut requested = Vec::with_capacity(providers.len());
+    let mut seen = BTreeSet::new();
+    for value in providers {
+        let Ok(provider) = value.parse::<ProviderId>() else {
+            eprintln!("omarchy-ai-bar: unknown provider");
+            return AppExitCode::Usage;
+        };
+        if !seen.insert(provider) {
+            eprintln!("omarchy-ai-bar: provider order contains a duplicate");
+            return AppExitCode::Usage;
+        }
+        requested.push(provider);
+    }
+    if requested.is_empty() || requested.len() > ProviderId::ALL.len() {
+        eprintln!("omarchy-ai-bar: provider order is invalid");
+        return AppExitCode::Usage;
+    }
+    if paths.create_private_directories().is_err() {
+        eprintln!("{INTERNAL_MESSAGE}");
+        return AppExitCode::Internal;
+    }
+    let file = paths.config_file();
+    let mut config = match read_private_file(&file, MAX_CONFIG_BYTES) {
+        Ok(Some(bytes)) => match load_config_bytes(&bytes) {
+            Ok(config) => config,
+            Err(error) => {
+                eprintln!("omarchy-ai-bar: invalid configuration ({})", error.code());
+                return AppExitCode::Usage;
+            }
+        },
+        Ok(None) => AppConfig {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            providers: Vec::new(),
+            provider_order: Vec::new(),
+        },
+        Err(_error) => {
+            eprintln!("{INTERNAL_MESSAGE}");
+            return AppExitCode::Internal;
+        }
+    };
+
+    let default_instance = ProviderInstanceId::new("default")
+        .expect("the fixed default provider instance is canonical");
+    for provider in &requested {
+        if !config.providers.iter().any(|route| route.id == *provider) {
+            config.providers.push(ProviderConfig {
+                id: *provider,
+                instance_id: default_instance.clone(),
+                enabled: true,
+                endpoint: None,
+                config_path: None,
+                options: ProviderOptions::default(),
+                accounts: Vec::new(),
+            });
+        }
+    }
+
+    let previous_order = std::mem::take(&mut config.provider_order);
+    config.provider_order = requested;
+    config.provider_order.extend(
+        previous_order
+            .into_iter()
+            .filter(|provider| !seen.contains(provider)),
+    );
+    if let Err(error) = validate_config(&config) {
+        eprintln!("omarchy-ai-bar: invalid configuration ({})", error.code());
+        return AppExitCode::Usage;
+    }
+    let mut bytes = match serde_json::to_vec_pretty(&config) {
+        Ok(bytes) => bytes,
+        Err(_error) => return AppExitCode::Internal,
+    };
+    bytes.push(b'\n');
+    if atomic_write(&file, &bytes).is_err() {
+        eprintln!("{INTERNAL_MESSAGE}");
+        return AppExitCode::Internal;
+    }
+    println!("Updated provider display order.");
     AppExitCode::Success
 }
 

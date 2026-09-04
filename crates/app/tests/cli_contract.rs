@@ -218,6 +218,32 @@ fn config_init_show_and_validate_use_the_private_xdg_file() {
         .output()
         .expect("enable provider");
     assert!(enabled.status.success());
+
+    let reordered = fixture
+        .command()
+        .args(["config", "reorder", "zai", "claude"])
+        .output()
+        .expect("reorder providers");
+    assert!(reordered.status.success());
+    let shown = fixture
+        .command()
+        .args(["config", "show", "--format", "json"])
+        .output()
+        .expect("show reordered providers");
+    let shown: Value = serde_json::from_slice(&shown.stdout).expect("reordered provider JSON");
+    assert_eq!(
+        shown["config"]["provider_order"],
+        serde_json::json!(["zai", "claude"])
+    );
+    assert_eq!(shown["config"]["providers"][1]["id"], "zai");
+    assert_eq!(shown["config"]["providers"][1]["enabled"], true);
+
+    let duplicate = fixture
+        .command()
+        .args(["config", "reorder", "zai", "zai"])
+        .output()
+        .expect("reject duplicate provider order");
+    assert_eq!(duplicate.status.code(), Some(2));
     let invalid = fixture
         .command()
         .args(["config", "disable", "not-a-provider"])

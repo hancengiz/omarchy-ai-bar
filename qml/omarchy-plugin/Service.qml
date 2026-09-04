@@ -23,6 +23,7 @@ Item {
     property string panelActionError: ""
     property var panelGeometrySources: []
     property var providerEnabledOverrides: ({})
+    property var providerOrder: []
     property var providerEndpointOverrides: ({})
     property var providerOptionsOverrides: ({})
     property var providerAccountPresence: ({})
@@ -348,7 +349,7 @@ Item {
                 errorKind: errorKind,
                 errorMessage: errorMessage,
                 status: status,
-                reset: primary && primary.reset_description ? String(primary.reset_description) : "",
+                reset: primary ? (primary.resets_at ? formatResetAt(primary.resets_at) : (primary.reset_description ? String(primary.reset_description) : "")) : "",
                 plan: provider === "copilot" && errorKind !== "" ? "" : identityPlanFrom(sample),
                 account: sample && sample.identity ? String(sample.identity.email || sample.identity.account_label || "") : "",
                 loginMethod: authenticationFrom(sample, provider),
@@ -378,6 +379,22 @@ Item {
     }
 
     function providerIds() {
+        var catalog = catalogProviderIds();
+        var values = [];
+        var configuredOrder = Array.isArray(providerOrder) ? providerOrder : [];
+        for (var orderIndex = 0; orderIndex < configuredOrder.length; orderIndex++) {
+            var orderedProvider = String(configuredOrder[orderIndex] || "");
+            if (catalog.indexOf(orderedProvider) !== -1 && values.indexOf(orderedProvider) === -1)
+                values.push(orderedProvider);
+        }
+        for (var catalogIndex = 0; catalogIndex < catalog.length; catalogIndex++) {
+            if (values.indexOf(catalog[catalogIndex]) === -1)
+                values.push(catalog[catalogIndex]);
+        }
+        return values;
+    }
+
+    function catalogProviderIds() {
         return ["codex", "openai", "azureopenai", "claude", "clinepass", "cursor", "opencode", "opencodego", "alibaba", "alibabatokenplan", "qwencloud", "factory", "fireworks", "gemini", "antigravity", "copilot", "devin", "zai", "minimax", "manus", "kimi", "kilo", "kiro", "vertexai", "augment", "jetbrains", "moonshot", "amp", "t3chat", "ollama", "synthetic", "openrouter", "elevenlabs", "warp", "windsurf", "zed", "perplexity", "mimo", "doubao", "sakana", "abacus", "mistral", "deepseek", "deepinfra", "codebuff", "crof", "venice", "commandcode", "qoder", "stepfun", "bedrock", "grok", "groq", "llmproxy", "litellm", "deepgram", "poe", "chutes", "neuralwatt", "clawrouter", "longcat", "sub2api", "wayfinder", "zenmux", "aiand", "zoommate", "xai", "notion", "ibmbob"];
     }
 
@@ -1835,11 +1852,19 @@ Item {
 
     function applyProviderConfigDocument(document) {
         var overrides = {};
+        var order = [];
         var endpoints = {};
         var options = {};
         var accounts = {};
         var accountRoutes = {};
         var activeAccounts = {};
+        var configuredOrder = document && document.config && Array.isArray(document.config.provider_order) ? document.config.provider_order : [];
+        var catalog = catalogProviderIds();
+        for (var orderIndex = 0; orderIndex < configuredOrder.length; orderIndex++) {
+            var orderedProvider = String(configuredOrder[orderIndex] || "");
+            if (catalog.indexOf(orderedProvider) !== -1 && order.indexOf(orderedProvider) === -1)
+                order.push(orderedProvider);
+        }
         var providers = document && document.config && Array.isArray(document.config.providers) ? document.config.providers : [];
         for (var index = 0; index < providers.length; index++) {
             var route = providers[index];
@@ -1855,12 +1880,44 @@ Item {
             activeAccounts[provider] = typeof extensions.active_account === "string" ? extensions.active_account : "ambient";
         }
         providerEnabledOverrides = overrides;
+        providerOrder = order;
         providerEndpointOverrides = endpoints;
         providerOptionsOverrides = options;
         providerAccountPresence = accounts;
         providerAccountRoutes = accountRoutes;
         activeProviderAccounts = activeAccounts;
         providerConfigLoaded = true;
+    }
+
+    function providerReorderCommand(providers) {
+        if (!Array.isArray(providers) || providers.length === 0 || providers.length > catalogProviderIds().length)
+            return [];
+        var catalog = catalogProviderIds();
+        var values = [];
+        for (var index = 0; index < providers.length; index++) {
+            var provider = String(providers[index] || "");
+            if (catalog.indexOf(provider) === -1 || values.indexOf(provider) !== -1)
+                return [];
+            values.push(provider);
+        }
+        return [bridgeExecutable, "config", "reorder"].concat(values);
+    }
+
+    function setProviderOrder(providers) {
+        var command = providerReorderCommand(providers);
+        if (providerConfigBusy || providerOrderWriter.running || bridgeExecutable === "" || command.length === 0)
+            return false;
+        var next = providers.slice(0);
+        for (var index = 0; index < providerOrder.length; index++) {
+            if (next.indexOf(providerOrder[index]) === -1)
+                next.push(providerOrder[index]);
+        }
+        providerOrder = next;
+        providerConfigBusy = true;
+        providerConfigResult = "Saving provider order…";
+        providerOrderWriter.command = command;
+        providerOrderWriter.running = true;
+        return true;
     }
 
     function setProviderEnabled(provider, enabled) {
@@ -2152,6 +2209,22 @@ Item {
                 root.providerConfigResult = "Could not save provider setting";
                 root.loadProviderConfig();
             }
+        }
+    }
+
+    Process {
+        id: providerOrderWriter
+        running: false
+        stdout: StdioCollector {
+            waitForEnd: true
+        }
+        stderr: StdioCollector {
+            waitForEnd: true
+        }
+        onExited: function (exitCode) {
+            root.providerConfigBusy = false;
+            root.providerConfigResult = exitCode === 0 ? "Provider order saved" : "Could not save provider order";
+            root.loadProviderConfig();
         }
     }
 

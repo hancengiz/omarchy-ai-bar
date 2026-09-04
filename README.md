@@ -173,6 +173,8 @@ The usage menu shows only configured, enabled providers. Providers are off by
 default unless a concrete local client, credential, or account is detected, or
 the user explicitly enables one. The normal settings page therefore stays
 compact; **Add Provider** opens the searchable 69-provider catalog separately.
+Use the up/down controls on the Providers screen to persist the order used by
+the settings list and usage menu.
 Provider pages include account/source details, quota windows, reset times,
 credits, errors, secure credential or native login actions, dashboard links,
 menu-bar selection, and warning controls. Codex, Claude, Grok, Copilot, and z.ai

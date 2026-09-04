@@ -43,6 +43,7 @@ ShellRoot {
         require(!service.supportsEndpoint("zai"), "provider with multiple endpoint roles exposed an ambiguous endpoint field");
         service.applyProviderConfigDocument({
             config: {
+                provider_order: ["ollama", "litellm"],
                 providers: [
                     {
                         id: "litellm",
@@ -80,6 +81,10 @@ ShellRoot {
         equal(service.savedEndpointFor("litellm"), "https://llm.example.test", "default route endpoint was not parsed");
         equal(service.savedEndpointFor("ollama"), "", "missing route endpoint was not normalized");
         require(service.providerEnabledOverrides.litellm === false, "non-default route replaced the default enabled setting");
+        equal(JSON.stringify(service.providerIds().slice(0, 2)), JSON.stringify(["ollama", "litellm"]), "configured provider order was ignored");
+        var reorderCommand = service.providerReorderCommand(["zai", "codex", "claude"]);
+        equal(reorderCommand.slice(1).join(" "), "config reorder zai codex claude", "provider reorder command changed its argument boundaries");
+        equal(service.providerReorderCommand(["zai", "zai"]).length, 0, "duplicate provider reorder input was accepted");
         equal(service.providerOptionsOverrides.ollama.source, "auto", "provider options were not retained for settings rendering");
         require(service.providerAccountPresence.ollama === true, "provider account presence was not retained");
         require(service.configuredProviderRows.some(function (row) {
@@ -312,7 +317,8 @@ ShellRoot {
                                 state: "known",
                                 used_percent: 42
                             },
-                            reset_description: "in 2h",
+                            resets_at: zaiResetAt,
+                            reset_description: "5-hour",
                             duration_seconds: 18000
                         },
                         credits: {
@@ -366,6 +372,7 @@ ShellRoot {
         equal(glanceRow.plan, "Plus", "glance card lost plan identity");
         require(glanceRow.ready && glanceRow.stale, "last-known usage was not retained under a stale error");
         equal(glanceRow.errorKind, "rate_limited", "stale error overlay classification was lost");
+        equal(glanceRow.reset, service.formatResetAt(zaiResetAt), "glance card concrete reset time was hidden by its cadence description");
         equal(glanceRow.windows.length, 1, "glance card lost its quota bars");
         equal(glanceRow.windows[0].title, "Session", "glance card lost its quota window label");
         equal(glanceRow.optionalSections[0].title, "Credits", "glance card lost its credits section");

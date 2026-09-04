@@ -17,6 +17,19 @@ Item {
         return panelRoot && panelRoot.bar ? panelRoot.bar.fontFamily : Style.font.family;
     }
 
+    function moveProvider(index, offset) {
+        var targetIndex = index + offset;
+        if (!panelRoot || !panelRoot.service || index < 0 || targetIndex < 0 || index >= enabledRows.length || targetIndex >= enabledRows.length)
+            return false;
+        var providers = enabledRows.map(function (row) {
+            return row.provider;
+        });
+        var moved = providers[index];
+        providers[index] = providers[targetIndex];
+        providers[targetIndex] = moved;
+        return panelRoot.service.setProviderOrder(providers);
+    }
+
     Flickable {
         id: settingsScroll
         anchors.fill: parent
@@ -167,6 +180,16 @@ Item {
                 }
             }
 
+            Text {
+                width: parent.width
+                visible: view.enabledRows.length > 1
+                text: "Use the arrows to set the provider order in the menu."
+                color: view.muted
+                font.family: view.fontFamily()
+                font.pixelSize: Style.font.caption
+                wrapMode: Text.WordWrap
+            }
+
             BorderSurface {
                 width: parent.width
                 implicitHeight: noProviders.implicitHeight + Style.space(24)
@@ -197,6 +220,7 @@ Item {
                     delegate: BorderSurface {
                         id: providerRow
                         required property var modelData
+                        required property int index
                         width: settingsColumn.width
                         height: Style.space(52)
                         color: providerMouse.containsMouse ? Style.hoverFillFor(view.foreground, Color.accent) : Style.normalFillFor(view.foreground, Color.accent)
@@ -218,7 +242,7 @@ Item {
                             }
 
                             Column {
-                                width: parent.width - providerToggle.width - Style.space(38)
+                                width: parent.width - providerOrderControls.width - providerToggle.width - Style.space(47)
                                 anchors.verticalCenter: parent.verticalCenter
                                 spacing: Style.space(1)
 
@@ -241,6 +265,40 @@ Item {
                                 }
                             }
 
+                            Row {
+                                id: providerOrderControls
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: Style.space(2)
+
+                                Button {
+                                    width: Style.space(27)
+                                    height: Style.space(30)
+                                    text: "↑"
+                                    tooltipText: "Move " + providerRow.modelData.label + " up"
+                                    foreground: view.foreground
+                                    horizontalPadding: 0
+                                    verticalPadding: 0
+                                    focusable: true
+                                    enabled: providerRow.index > 0 && !(view.panelRoot && view.panelRoot.service && view.panelRoot.service.providerConfigBusy)
+                                    opacity: enabled ? 1 : 0.35
+                                    onClicked: view.moveProvider(providerRow.index, -1)
+                                }
+
+                                Button {
+                                    width: Style.space(27)
+                                    height: Style.space(30)
+                                    text: "↓"
+                                    tooltipText: "Move " + providerRow.modelData.label + " down"
+                                    foreground: view.foreground
+                                    horizontalPadding: 0
+                                    verticalPadding: 0
+                                    focusable: true
+                                    enabled: providerRow.index + 1 < view.enabledRows.length && !(view.panelRoot && view.panelRoot.service && view.panelRoot.service.providerConfigBusy)
+                                    opacity: enabled ? 1 : 0.35
+                                    onClicked: view.moveProvider(providerRow.index, 1)
+                                }
+                            }
+
                             ToggleSwitch {
                                 id: providerToggle
                                 anchors.verticalCenter: parent.verticalCenter
@@ -255,7 +313,7 @@ Item {
                         MouseArea {
                             id: providerMouse
                             anchors.fill: parent
-                            anchors.rightMargin: providerToggle.width + Style.space(20)
+                            anchors.rightMargin: providerOrderControls.width + providerToggle.width + Style.space(29)
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             onClicked: if (view.panelRoot)

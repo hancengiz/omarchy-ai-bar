@@ -52,6 +52,7 @@ omarchy-ai-bar config validate ./config.json
 omarchy-ai-bar config describe codex --format json
 omarchy-ai-bar config enable claude
 omarchy-ai-bar config disable claude
+omarchy-ai-bar config reorder zai codex claude
 omarchy-ai-bar config set-option codex codex-usage-source oauth
 omarchy-ai-bar config set-option codex codex-usage-source --clear
 omarchy-ai-bar config set-endpoint litellm https://llm.example.net
