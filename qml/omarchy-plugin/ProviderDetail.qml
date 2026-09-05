@@ -967,7 +967,7 @@ Item {
                     id: typedAccountsColumn
                     anchors.centerIn: parent
                     width: parent.width - Style.space(24)
-                    spacing: Style.space(5)
+                    spacing: Style.space(12)
 
                     Text {
                         width: parent.width
@@ -980,7 +980,7 @@ Item {
 
                     Text {
                         width: parent.width
-                        text: view.typedSettingsDescriptor && view.typedSettingsDescriptor.accounts ? String(view.typedSettingsDescriptor.accounts.subtitle || "") : ""
+                        text: view.provider && view.provider.provider === "codex" ? "Choose how accounts appear in the usage view. Showing an account does not switch your Codex CLI login." : (view.typedSettingsDescriptor && view.typedSettingsDescriptor.accounts ? String(view.typedSettingsDescriptor.accounts.subtitle || "") : "")
                         color: view.muted
                         font.family: view.fontFamily()
                         font.pixelSize: Style.font.caption
@@ -991,17 +991,60 @@ Item {
                         width: parent.width
                         visible: view.provider && view.provider.provider === "codex"
                         spacing: Style.space(8)
-
                         Text {
-                            width: parent.width - nativeCodexButton.width - parent.spacing
-                            text: {
-                                var account = view.service ? view.service.ambientCodexAccount() : null;
-                                return (account && account.email !== "" ? account.email + " · native" : "Native Codex account (~/.codex)") + " · " + (account ? account.resetLabel : "Banked resets unavailable");
-                            }
+                            width: parent.width - accountTabs.width - accountList.width - parent.spacing * 2
+                            text: "Usage layout"
                             color: view.foreground
                             font.family: view.fontFamily()
-                            font.pixelSize: Style.font.caption
-                            elide: Text.ElideMiddle
+                            font.pixelSize: Style.font.body
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        Button {
+                            id: accountTabs
+                            text: "Tabs"
+                            foreground: view.foreground
+                            enabled: view.setting("codexAccountLayout", "Tabs") !== "Tabs"
+                            onClicked: view.panelRoot.persistSetting("codexAccountLayout", "Tabs")
+                        }
+                        Button {
+                            id: accountList
+                            text: "List"
+                            foreground: view.foreground
+                            enabled: view.setting("codexAccountLayout", "Tabs") !== "List"
+                            onClicked: view.panelRoot.persistSetting("codexAccountLayout", "Tabs")
+                        }
+                    }
+
+                    Row {
+                        width: parent.width
+                        visible: view.provider && view.provider.provider === "codex"
+                        spacing: Style.space(8)
+
+                        Column {
+                            width: parent.width - nativeCodexButton.width - parent.spacing
+                            spacing: Style.space(4)
+                            Text {
+                                width: parent.width
+                                text: {
+                                    var account = view.service ? view.service.ambientCodexAccount() : null;
+                                    return account && account.email !== "" ? account.email : "Native Codex account";
+                                }
+                                color: view.foreground
+                                font.family: view.fontFamily()
+                                font.pixelSize: Style.font.caption
+                                elide: Text.ElideMiddle
+                            }
+                            Text {
+                                width: parent.width
+                                text: {
+                                    var account = view.service ? view.service.ambientCodexAccount() : null;
+                                    return "Native CLI · " + (account ? account.resetLabel : "Banked resets unavailable");
+                                }
+                                color: view.muted
+                                font.family: view.fontFamily()
+                                font.pixelSize: Style.font.caption
+                                wrapMode: Text.WordWrap
+                            }
                         }
 
                         Button {
@@ -1040,7 +1083,7 @@ Item {
 
                             Text {
                                 width: parent.width
-                                text: [modelData.plan, modelData.state, modelData.resetLabel, modelData.active ? "active" : ""].filter(function (value) {
+                                text: [modelData.plan, modelData.state, modelData.resetLabel, modelData.active ? "selected for display" : ""].filter(function (value) {
                                     return value !== "";
                                 }).join(" · ")
                                 color: view.muted
