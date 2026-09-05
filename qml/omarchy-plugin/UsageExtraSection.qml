@@ -65,12 +65,13 @@ Item {
             model: root.section && Array.isArray(root.section.rows) ? root.section.rows : []
 
             delegate: Row {
+                id: detailRow
                 required property var modelData
                 width: sectionColumn.width
 
                 Text {
                     width: parent.width * 0.58
-                    text: String(modelData.label || "")
+                    text: String(detailRow.modelData.label || "")
                     color: root.muted
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
@@ -79,7 +80,7 @@ Item {
 
                 Text {
                     width: parent.width * 0.42
-                    text: root.valueFor(modelData)
+                    text: root.valueFor(detailRow.modelData)
                     horizontalAlignment: Text.AlignRight
                     color: root.foreground
                     font.family: root.fontFamily
