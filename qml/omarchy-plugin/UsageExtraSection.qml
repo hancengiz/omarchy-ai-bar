@@ -62,7 +62,7 @@ Item {
         }
 
         Repeater {
-            model: root.section && Array.isArray(root.section.rows) ? root.section.rows : []
+            model: root.section ? (root.section.rows || []) : []
 
             delegate: Row {
                 id: detailRow
