@@ -72,7 +72,7 @@ Item {
                 Text {
                     width: parent.width * 0.58
                     text: String(detailRow.modelData.label || "")
-                    color: root.muted
+                    color: detailRow.modelData.urgent === true ? "#ef5350" : root.muted
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
                     elide: Text.ElideRight
@@ -82,7 +82,7 @@ Item {
                     width: parent.width * 0.42
                     text: root.valueFor(detailRow.modelData)
                     horizontalAlignment: Text.AlignRight
-                    color: root.foreground
+                    color: detailRow.modelData.urgent === true ? "#ef5350" : root.foreground
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
                     font.bold: true

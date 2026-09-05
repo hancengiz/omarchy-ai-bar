@@ -234,6 +234,29 @@ ShellRoot {
             reported_available_count: 0,
             credits: []
         }, true).rows[0].value, "0 resets", "zero reset inventory was hidden");
+        var resetRows = accountService.resetCreditsSectionFrom(inventory, true).rows;
+        equal(resetRows.length, 3, "available resets were not listed individually");
+        require(resetRows[1].urgent, "soon-expiring reset was not highlighted");
+        var boundaryRows = accountService.resetCreditsSectionFrom({
+            reported_available_count: 3,
+            credits: [
+                {
+                    status: "available",
+                    expires_at: "2026-09-07T12:00:00Z"
+                },
+                {
+                    status: "available",
+                    expires_at: "2026-09-05T13:00:00Z"
+                },
+                {
+                    status: "available",
+                    expires_at: null
+                }
+            ]
+        }, true).rows;
+        require(boundaryRows[1].urgent, "earliest expiry was not sorted first");
+        require(!boundaryRows[2].urgent, "exactly 48h was highlighted");
+        equal(boundaryRows[3].value, "Expiry not provided", "unknown expiry was fabricated");
         equal(accountService.resetCreditsSectionFrom(null, true).rows[0].value, "Unavailable", "failed inventory was rendered as zero");
         accountService.protocolState = Protocol.reconnectingState(accountService.protocolState);
         accountService.accountConfigFixture.config.providers[0].options.provider_options.active_account = "alpha";

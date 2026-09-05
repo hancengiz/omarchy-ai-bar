@@ -1346,19 +1346,29 @@ Item {
                 sensitivity: "public"
             }
         ];
-        if (inventory && inventory.available > 0 && inventory.expiresAt) {
+        var credits = inventory && resetCredits.credits ? Array.from(resetCredits.credits).filter(function (credit) {
+            return String(credit.status || "") === "available" && (!credit.expires_at || Date.parse(credit.expires_at) > resetInventoryNow);
+        }) : [];
+        credits.sort(function (left, right) {
+            return (left.expires_at ? Date.parse(left.expires_at) : Infinity) - (right.expires_at ? Date.parse(right.expires_at) : Infinity);
+        });
+        credits.forEach(function (credit, index) {
+            var expiry = credit.expires_at ? Date.parse(credit.expires_at) : NaN;
+            var urgent = isFinite(expiry) && expiry - resetInventoryNow < 48 * 60 * 60 * 1000;
             rows.push({
-                label: "Next expiry",
-                value: formatResetAt(inventory.expiresAt),
+                label: "Reset " + (index + 1) + (urgent ? " · <48h" : ""),
+                value: isFinite(expiry) ? Qt.formatDateTime(new Date(expiry), "dd MMM HH:mm") : "Expiry not provided",
+                urgent: urgent,
                 sensitivity: "public"
             });
-        }
+        });
+        var missing = inventory ? Math.max(0, inventory.available - credits.length) : 0;
         return {
             id: "reset-credits",
             title: "Banked resets",
             metric: null,
             rows: rows,
-            caption: "",
+            caption: missing > 0 ? "Expiry details unavailable for " + missing + (missing === 1 ? " reset." : " resets.") : "",
             captionSensitivity: "public"
         };
     }
