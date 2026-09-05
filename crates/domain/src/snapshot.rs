@@ -1457,6 +1457,13 @@ impl UsageSample {
         self.cost_usage.as_ref()
     }
 
+    /// Clears activity when its source ownership changes.
+    #[must_use]
+    pub fn without_cost_usage(mut self) -> Self {
+        self.cost_usage = None;
+        self
+    }
+
     /// Attaches an already validated typed cost/history snapshot.
     #[must_use]
     pub fn with_cost_usage(mut self, cost_usage: CostUsageSnapshot) -> Self {
@@ -1716,15 +1723,61 @@ pub enum ProviderSnapshot {
     Unavailable(UnavailableSnapshot),
 }
 
+/// Ownership of local activity, independent of the selected quota identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalHistoryScope {
+    Account,
+    Machine,
+}
+
+/// Acquisition state; retained data can accompany scanning or failed work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalHistoryState {
+    Scanning,
+    Ready,
+    Empty,
+    Failed,
+}
+
+/// Local activity has its own state and never fabricates a successful quota read.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocalHistorySnapshot {
+    pub scope: LocalHistoryScope,
+    pub state: LocalHistoryState,
+    pub data: Option<CostUsageSnapshot>,
+}
+
+#[derive(Serialize)]
+struct PrivateLocalHistorySnapshot<'a> {
+    scope: LocalHistoryScope,
+    state: LocalHistoryState,
+    data: Option<PrivateCostUsageSnapshot<'a>>,
+}
+
+impl<'a> From<&'a LocalHistorySnapshot> for PrivateLocalHistorySnapshot<'a> {
+    fn from(history: &'a LocalHistorySnapshot) -> Self {
+        Self {
+            scope: history.scope,
+            state: history.state,
+            data: history.data.as_ref().map(CostUsageSnapshot::private_view),
+        }
+    }
+}
+
 /// A provider/account scope for which the initial fetch is still pending.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LoadingSnapshot {
+    local_history: Option<LocalHistorySnapshot>,
     scope: AccountScope,
 }
 
 /// A validated last-known-good sample plus its current refresh state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReadySnapshot {
+    local_history: Option<LocalHistorySnapshot>,
     last_known_good: Box<UsageSample>,
     freshness: Freshness,
     refresh: RefreshPhase,
@@ -1732,16 +1785,39 @@ pub struct ReadySnapshot {
 }
 
 /// A provider/account scope with no sample that can safely be displayed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UnavailableSnapshot {
+    local_history: Option<LocalHistorySnapshot>,
     scope: AccountScope,
     error: ClassifiedError,
 }
 
 impl ProviderSnapshot {
     #[must_use]
+    pub const fn local_history(&self) -> Option<&LocalHistorySnapshot> {
+        match self {
+            Self::Loading(snapshot) => snapshot.local_history.as_ref(),
+            Self::Ready(snapshot) => snapshot.local_history.as_ref(),
+            Self::Unavailable(snapshot) => snapshot.local_history.as_ref(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_local_history(mut self, history: Option<LocalHistorySnapshot>) -> Self {
+        match &mut self {
+            Self::Loading(snapshot) => snapshot.local_history = history,
+            Self::Ready(snapshot) => snapshot.local_history = history,
+            Self::Unavailable(snapshot) => snapshot.local_history = history,
+        }
+        self
+    }
+
+    #[must_use]
     pub const fn loading(scope: AccountScope) -> Self {
-        Self::Loading(LoadingSnapshot { scope })
+        Self::Loading(LoadingSnapshot {
+            scope,
+            local_history: None,
+        })
     }
 
     /// Creates a validated ready snapshot.
@@ -1765,6 +1841,7 @@ impl ProviderSnapshot {
             return Err(SnapshotError::ErrorRequiresStaleSnapshot);
         }
         Ok(Self::Ready(ReadySnapshot {
+            local_history: None,
             last_known_good: Box::new(last_known_good),
             freshness,
             refresh,
@@ -1774,7 +1851,11 @@ impl ProviderSnapshot {
 
     #[must_use]
     pub const fn unavailable(scope: AccountScope, error: ClassifiedError) -> Self {
-        Self::Unavailable(UnavailableSnapshot { scope, error })
+        Self::Unavailable(UnavailableSnapshot {
+            scope,
+            error,
+            local_history: None,
+        })
     }
 
     #[must_use]
@@ -1847,7 +1928,7 @@ impl ProviderSnapshot {
 
     pub(crate) fn redacted(&self, privacy_key: &PrivacyKey) -> Self {
         let scope = self.scope().public_projection(privacy_key);
-        match self {
+        let projected = match self {
             Self::Loading(_) => Self::loading(scope),
             Self::Ready(snapshot) => Self::ready(
                 snapshot.last_known_good.redacted(&scope),
@@ -1862,7 +1943,17 @@ impl ProviderSnapshot {
             Self::Unavailable(snapshot) => {
                 Self::unavailable(scope, snapshot.error.public_projection())
             }
-        }
+        };
+        projected.with_local_history(self.local_history().map(|history| {
+            LocalHistorySnapshot {
+                scope: history.scope,
+                state: history.state,
+                data: history
+                    .data
+                    .as_ref()
+                    .map(CostUsageSnapshot::without_personal_information),
+            }
+        }))
     }
 }
 
@@ -1870,15 +1961,21 @@ impl ProviderSnapshot {
 #[serde(tag = "state", rename_all = "snake_case")]
 enum ProviderSnapshotRef<'a> {
     Loading {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        local_history: Option<PrivateLocalHistorySnapshot<'a>>,
         scope: &'a AccountScope,
     },
     Ready {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        local_history: Option<PrivateLocalHistorySnapshot<'a>>,
         last_known_good: Box<PrivateUsageSample<'a>>,
         freshness: Freshness,
         refresh: RefreshPhase,
         error: Option<&'a ClassifiedError>,
     },
     Unavailable {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        local_history: Option<PrivateLocalHistorySnapshot<'a>>,
         scope: &'a AccountScope,
         error: &'a ClassifiedError,
     },
@@ -1893,9 +1990,17 @@ impl Serialize for PrivateProviderSnapshot<'_> {
     {
         match self.0 {
             ProviderSnapshot::Loading(snapshot) => ProviderSnapshotRef::Loading {
+                local_history: snapshot
+                    .local_history
+                    .as_ref()
+                    .map(PrivateLocalHistorySnapshot::from),
                 scope: &snapshot.scope,
             },
             ProviderSnapshot::Ready(snapshot) => ProviderSnapshotRef::Ready {
+                local_history: snapshot
+                    .local_history
+                    .as_ref()
+                    .map(PrivateLocalHistorySnapshot::from),
                 last_known_good: Box::new(PrivateUsageSample::from(
                     snapshot.last_known_good.as_ref(),
                 )),
@@ -1904,6 +2009,10 @@ impl Serialize for PrivateProviderSnapshot<'_> {
                 error: snapshot.error.as_ref(),
             },
             ProviderSnapshot::Unavailable(snapshot) => ProviderSnapshotRef::Unavailable {
+                local_history: snapshot
+                    .local_history
+                    .as_ref()
+                    .map(PrivateLocalHistorySnapshot::from),
                 scope: &snapshot.scope,
                 error: &snapshot.error,
             },
@@ -1916,15 +2025,18 @@ impl Serialize for PrivateProviderSnapshot<'_> {
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 enum ProviderSnapshotRepr {
     Loading {
+        local_history: Option<LocalHistorySnapshot>,
         scope: AccountScope,
     },
     Ready {
+        local_history: Option<LocalHistorySnapshot>,
         last_known_good: Box<UsageSample>,
         freshness: Freshness,
         refresh: RefreshPhase,
         error: Option<ClassifiedError>,
     },
     Unavailable {
+        local_history: Option<LocalHistorySnapshot>,
         scope: AccountScope,
         error: ClassifiedError,
     },
@@ -1936,18 +2048,24 @@ impl<'de> Deserialize<'de> for ProviderSnapshot {
         D: Deserializer<'de>,
     {
         match ProviderSnapshotRepr::deserialize(deserializer)? {
-            ProviderSnapshotRepr::Loading { scope } => Ok(Self::loading(scope)),
+            ProviderSnapshotRepr::Loading {
+                scope,
+                local_history,
+            } => Ok(Self::loading(scope).with_local_history(local_history)),
             ProviderSnapshotRepr::Ready {
+                local_history,
                 last_known_good,
                 freshness,
                 refresh,
                 error,
-            } => {
-                Self::ready(*last_known_good, freshness, refresh, error).map_err(de::Error::custom)
-            }
-            ProviderSnapshotRepr::Unavailable { scope, error } => {
-                Ok(Self::unavailable(scope, error))
-            }
+            } => Self::ready(*last_known_good, freshness, refresh, error)
+                .map(|snapshot| snapshot.with_local_history(local_history))
+                .map_err(de::Error::custom),
+            ProviderSnapshotRepr::Unavailable {
+                scope,
+                error,
+                local_history,
+            } => Ok(Self::unavailable(scope, error).with_local_history(local_history)),
         }
     }
 }

@@ -8,6 +8,26 @@ TestCase {
     readonly property string streamA: "00000000000000000000000000000001"
     readonly property string streamB: "00000000000000000000000000000002"
 
+    function test_localHistoryIsIndependentAndBounded() {
+        var snapshot = loadingSnapshot("history-account");
+        snapshot.local_history = {
+            scope: "machine",
+            state: "empty",
+            data: null
+        };
+        verify(Protocol.validProviderSnapshot(snapshot));
+        snapshot.local_history.scope = "another-account";
+        verify(!Protocol.validProviderSnapshot(snapshot));
+        snapshot.local_history.scope = "account";
+        snapshot.local_history.state = "failed";
+        verify(Protocol.validProviderSnapshot(snapshot));
+        snapshot.local_history.data = [];
+        verify(!Protocol.validProviderSnapshot(snapshot));
+        snapshot.local_history.data = null;
+        snapshot.local_history.extra = true;
+        verify(!Protocol.validProviderSnapshot(snapshot));
+    }
+
     function scope(account) {
         return {
             provider: "codex",

@@ -1400,6 +1400,7 @@ enum ProviderOptionUpdate {
     Source(Option<ProviderSourceMode>),
     ExternalOauthSources(Option<bool>),
     CodexSparkVisible(Option<bool>),
+    DisplayToggle(&'static str, Option<bool>),
     ExtrasEnabled(Option<bool>),
     CookieSource(Option<ProviderCookieSource>),
     EnterpriseHost(Option<String>),
@@ -1529,6 +1530,16 @@ fn provider_option_update(
         ProviderSettingId::GrokCookieSource => Ok(ProviderOptionUpdate::CookieSource(
             value.map(parse_grok_cookie_source).transpose()?,
         )),
+        ProviderSettingId::CodexLocalSessionCostLedger => Ok(ProviderOptionUpdate::DisplayToggle(
+            "local_session_cost_ledger",
+            value.map(parse_boolean).transpose()?,
+        )),
+        ProviderSettingId::ClaudeDailyRoutinesUsageVisible => {
+            Ok(ProviderOptionUpdate::DisplayToggle(
+                "daily_routines_usage_visible",
+                value.map(parse_boolean).transpose()?,
+            ))
+        }
         ProviderSettingId::CodexSparkUsageVisible => Ok(ProviderOptionUpdate::CodexSparkVisible(
             value.map(parse_boolean).transpose()?,
         )),
@@ -1647,6 +1658,17 @@ fn parse_copilot_enterprise_host(value: &str) -> Result<String, &'static str> {
 
 fn apply_provider_option_update(route: &mut ProviderConfig, update: ProviderOptionUpdate) {
     match update {
+        ProviderOptionUpdate::DisplayToggle(key, value) => match value {
+            Some(value) => {
+                route
+                    .options
+                    .extensions
+                    .insert(key.to_owned(), ProviderOptionValue::Boolean(value));
+            }
+            None => {
+                route.options.extensions.remove(key);
+            }
+        },
         ProviderOptionUpdate::Source(value) => route.options.source = value,
         ProviderOptionUpdate::ExternalOauthSources(value) => match value {
             Some(value) => {

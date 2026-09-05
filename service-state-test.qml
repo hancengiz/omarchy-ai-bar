@@ -267,6 +267,110 @@ ShellRoot {
 
     function runTests() {
         runCodexAccountTests();
+        var routineWindow = {
+            usage: {
+                state: "known",
+                used_percent: 30
+            }
+        };
+        var claudeUsage = {
+            extra_windows: [
+                {
+                    id: "claude-routines",
+                    title: "Daily Routines",
+                    window: routineWindow
+                },
+                {
+                    id: "claude-weekly-scoped-test",
+                    title: "Model weekly",
+                    window: routineWindow
+                }
+            ]
+        };
+        equal(service.windowsFrom(claudeUsage, "claude").length, 2, "Claude quotas should be visible by default");
+        service.providerOptionsOverrides = {
+            claude: {
+                provider_options: {
+                    daily_routines_usage_visible: false
+                }
+            }
+        };
+        equal(service.windowsFrom(claudeUsage, "claude").length, 1, "Daily Routines toggle did not filter display");
+        equal(claudeUsage.extra_windows.length, 2, "display filtering mutated collected quotas");
+        service.providerOptionsOverrides = {};
+        equal(service.windowsForDisplay({
+            windows: service.windowsFrom(claudeUsage, "claude")
+        }, false).length, 1, "optional-extras master switch did not hide Daily Routines");
+        var historyCost = {
+            updated_at: "2026-09-05T23:50:00Z",
+            history_days: 3,
+            history_coverage_established: false,
+            unit: {
+                kind: "currency",
+                code: "USD"
+            },
+            daily: [
+                {
+                    day: "2026-09-04",
+                    metrics: {
+                        amount: "0",
+                        total_tokens: "0",
+                        coverage: {
+                            unpriced: "0"
+                        }
+                    }
+                },
+                {
+                    day: "2026-09-05",
+                    metrics: {
+                        amount: "2",
+                        total_tokens: "42",
+                        coverage: {
+                            unpriced: "1"
+                        }
+                    }
+                }
+            ]
+        };
+        var costChart = service.costChartFrom(historyCost, "cost");
+        equal(costChart.points.length, 3, "history calendar dropped dates");
+        equal(costChart.points[0].value, null, "unscanned day became zero");
+        equal(costChart.points[1].value, 0, "confirmed zero disappeared");
+        equal(costChart.points[2].value, null, "partial pricing became a complete total");
+        equal(service.costChartFrom(historyCost, "tokens").points[2].value, 42, "missing prices hid tokens");
+        historyCost.history_coverage_established = true;
+        equal(service.costChartFrom(historyCost, "tokens").points[0].value, 0, "covered empty day was unknown");
+        var historyRows = service.rowsFrom({
+            snapshots: [
+                {
+                    state: "unavailable",
+                    scope: {
+                        provider: "codex",
+                        instance: "default",
+                        account: "ambient"
+                    },
+                    error: {
+                        kind: "missing_credential"
+                    },
+                    local_history: {
+                        scope: "machine",
+                        state: "ready",
+                        data: historyCost
+                    }
+                }
+            ]
+        });
+        var historyRow = historyRows.filter(function (row) {
+            return row.provider === "codex";
+        })[0];
+        require(historyRow.costUsage === historyCost && !historyRow.ready, "local history fabricated quota success or disappeared");
+        require(service.localHistoryMessage({
+            localHistory: {
+                scope: "account",
+                state: "empty",
+                data: null
+            }
+        }).indexOf("Signing in") !== -1, "empty account history has no explanation");
         require(!service.connectionWanted, "disabled service started a connection");
         require(!service.transportConnected, "disabled service exposed a live transport");
         equal(service.effectiveSnapshot.snapshots.length, 0, "disconnected service fabricated a preview snapshot");
@@ -614,7 +718,7 @@ ShellRoot {
         equal(glanceRow.windows[0].title, "Session", "glance card lost its quota window label");
         equal(glanceRow.optionalSections[0].title, "Credits", "glance card lost its credits section");
         equal(glanceRow.costStats.length, 4, "glance card lost its cost and token KPIs");
-        equal(glanceRow.costChart.points.length, 1, "glance card lost its daily cost chart");
+        equal(glanceRow.costChart.points.length, 30, "glance card lost its daily cost chart");
         var tokenFileCommand = service.providerTokenFileCommand("grok", "/home/test;literal");
         equal(tokenFileCommand.length, 4, "Grok token-file command split the provider path");
         equal(tokenFileCommand[3], "/home/test;literal/.grok/auth.json", "Grok token-file command changed the literal path");

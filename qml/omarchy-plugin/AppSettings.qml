@@ -754,7 +754,7 @@ Item {
 
                 Text {
                     width: parent.width
-                    text: "Linux equivalents are used for secure credentials, login terminals, notifications, and startup. Apple-only Keychain, Sparkle, Dock, and macOS menu-bar APIs do not apply. AUR/pacman updates are planned but not published yet; use a source build or direct release until then."
+                    text: "Linux equivalents are used for secure credentials, login terminals, notifications, and startup. Apple-only Keychain, Sparkle, Dock, and macOS menu-bar APIs do not apply. Install and update using the verified Arch packages on GitHub Releases."
                     color: view.muted
                     font.family: view.fontFamily()
                     font.pixelSize: Style.font.bodySmall

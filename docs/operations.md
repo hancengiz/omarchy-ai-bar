@@ -336,3 +336,32 @@ successful bridge update with `omarchy restart shell`: the update already
 requests a live rescan, and a simultaneous full restart can race Quickshell's
 plugin replacement. Restart only when the rescan fails or the widget remains
 on the previous payload.
+
+
+## Local activity controls
+
+Codex account quotas and local session activity have separate sources. A managed
+account can have valid quota bars and no local sessions; the popup now explains
+that state. To show this machine's native Codex activity alongside managed
+account quotas, enable **Use this machine's Codex history** under **History & costs**,
+or run:
+
+```sh
+omarchy-ai-bar config set-option codex codex-local-session-cost-ledger true
+```
+
+Set it to `false` to return managed accounts to their own session directories.
+The native Codex home remains machine-local, and neither choice switches your
+Codex CLI login. Local scans also work when quota authentication fails. Manual
+Refresh bypasses the local history cache. Charts distinguish unavailable prices
+from zero; use **Tokens** to inspect activity that cannot be fully priced.
+
+Claude's **Show Daily Routines usage** is a working display option:
+
+```sh
+omarchy-ai-bar config set-option claude claude-daily-routines-usage-visible false
+```
+
+It hides the routines row in the popup and preview. Other model-scoped limits,
+collected quota data, and CLI output remain unchanged. The global optional-credit
+and extra-usage display switch also hides Daily Routines.

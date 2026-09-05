@@ -4,6 +4,24 @@ The next product milestone should make Codex and Claude complete, understandable
 
 The core product promise should be: **know which account you are looking at, how much capacity remains, when it resets, and what your local activity represents. Every missing number must have an explanation.**
 
+## First implementation delivered
+
+The first implementation adds independently refreshed Codex/Claude local activity,
+explicit empty/loading/failure states and account/machine labels, an operative
+Codex machine-local history option, Tokens/Cost charts with unknown-value and
+calendar semantics, working Claude Daily Routines filtering, and usable settings
+groups with a compact pending-feature summary. Native Codex activity is always
+labelled machine-local; managed history remains isolated unless explicitly changed.
+
+Validation covers history before quota, auth failure, quota backoff, manual cache
+bypass, empty-result clearing, private/public serialization, config persistence,
+chart coverage, and display-only filtering. This implements the first usability
+milestone; persistent history, expanded pricing, web/account integrations and
+notification delivery work below remain follow-ups. The audit below is the
+original baseline assessment, not a description of the updated implementation.
+
+Synthetic visual proofs using the installed Omarchy components: [activity states](screenshots/local-activity-2026-09-05.png) and [provider settings](screenshots/provider-settings-2026-09-05.png). These fixtures contain no real account identities.
+
 ## Audit scope and evidence
 
 - Omarchy AI Bar reviewed at `3239fbc`, with a clean working tree before this document. The installed daemon is active and reports version `0.4.0`; this does not establish that its binary and installed QML match every current source change.

@@ -360,7 +360,7 @@ Item {
                                 }
 
                                 Repeater {
-                                    model: providerSurface.modelData.ready ? (providerSurface.modelData.windows || []) : []
+                                    model: providerSurface.modelData.ready && view.panelRoot && view.panelRoot.service ? view.panelRoot.service.windowsForDisplay(providerSurface.modelData, view.setting("showOptionalCreditsAndExtraUsage", true) === true) : []
 
                                     delegate: QuotaMetric {
                                         required property var modelData
@@ -407,70 +407,13 @@ Item {
                                     }
                                 }
 
-                                Column {
+                                LocalActivity {
                                     width: parent.width
-                                    spacing: Style.space(7)
-                                    visible: (providerSurface.modelData.costStats || []).length > 0
-
-                                    PanelSeparator {
-                                        width: parent.width
-                                        foreground: view.foreground
-                                    }
-
-                                    Grid {
-                                        id: costGrid
-                                        width: parent.width
-                                        columns: 2
-                                        columnSpacing: Style.space(12)
-                                        rowSpacing: Style.space(7)
-
-                                        Repeater {
-                                            model: providerSurface.modelData.costStats || []
-
-                                            delegate: Column {
-                                                required property var modelData
-                                                width: (costGrid.width - costGrid.columnSpacing) / 2
-                                                spacing: Style.space(1)
-
-                                                Text {
-                                                    width: parent.width
-                                                    text: modelData.label
-                                                    color: view.muted
-                                                    font.family: view.fontFamily()
-                                                    font.pixelSize: Style.font.caption
-                                                    elide: Text.ElideRight
-                                                }
-
-                                                Text {
-                                                    width: parent.width
-                                                    text: modelData.value
-                                                    color: view.foreground
-                                                    font.family: view.fontFamily()
-                                                    font.pixelSize: Style.font.bodySmall
-                                                    font.bold: true
-                                                    elide: Text.ElideRight
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    InlineChart {
-                                        width: parent.width
-                                        chart: providerSurface.modelData.costChart || null
-                                        foreground: view.foreground
-                                        muted: view.muted
-                                        accent: providerSurface.providerAccent
-                                    }
-
-                                    Text {
-                                        width: parent.width
-                                        text: providerSurface.modelData.costCaption || ""
-                                        visible: text !== ""
-                                        color: view.muted
-                                        font.family: view.fontFamily()
-                                        font.pixelSize: Style.font.caption
-                                        wrapMode: Text.WordWrap
-                                    }
+                                    row: providerSurface.modelData
+                                    service: view.panelRoot ? view.panelRoot.service : null
+                                    foreground: view.foreground
+                                    muted: view.muted
+                                    accent: providerSurface.providerAccent
                                 }
 
                                 Repeater {

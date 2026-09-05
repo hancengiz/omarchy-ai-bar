@@ -835,3 +835,228 @@ async fn actor_shutdown_aborts_cancellation_ignoring_work_at_the_grace_deadline(
     assert!(exit.shutdown_report().timed_out());
     assert_eq!(exit.shutdown_report().cancelled(), 1);
 }
+
+struct IndependentHistorySource {
+    scope: AccountScope,
+    provider: Arc<ScriptedProvider>,
+}
+
+impl RefreshSource for IndependentHistorySource {
+    fn fetch_required(
+        &self,
+        scope: AccountScope,
+        cancellation: CancellationToken,
+    ) -> RefreshFuture<Result<UsageSample, ClassifiedError>> {
+        let provider = Arc::clone(&self.provider);
+        Box::pin(async move { provider.run_required(scope, cancellation).await })
+    }
+
+    fn local_history_scope(&self) -> Option<oab_domain::LocalHistoryScope> {
+        Some(oab_domain::LocalHistoryScope::Machine)
+    }
+
+    fn fetch_local_history(
+        &self,
+        at: Timestamp,
+        cancellation: CancellationToken,
+        _manual: bool,
+    ) -> RefreshFuture<Result<Option<oab_domain::CostUsageSnapshot>, ClassifiedError>> {
+        let provider = Arc::clone(&self.provider);
+        let scope = self.scope.clone();
+        Box::pin(async move {
+            provider
+                .run_optional(sample(&scope, at), cancellation)
+                .await
+        })
+    }
+}
+
+fn history_data() -> oab_domain::CostUsageSnapshot {
+    use oab_domain::{
+        CostProvenance, CostUnit, CostUsageCoverage, CostUsageMetrics, CostUsageSnapshot,
+        CostUsageTokenMix, CurrencyCode,
+    };
+    let metrics = CostUsageMetrics::new(
+        CostUsageTokenMix::default(),
+        Some(42),
+        Some(1),
+        None,
+        CostUsageCoverage::new(0, 1, 0, 0).unwrap(),
+    )
+    .unwrap();
+    CostUsageSnapshot::new(
+        CostUnit::currency(CurrencyCode::new("USD").unwrap()),
+        metrics.clone(),
+        metrics,
+        None,
+        30,
+        true,
+        None,
+        None,
+        vec![],
+        vec![],
+        vec![],
+        vec![],
+        timestamp(1_700_000_000),
+        CostProvenance::ListPriceEstimate,
+    )
+    .unwrap()
+}
+
+#[tokio::test(start_paused = true)]
+async fn local_history_publishes_before_quota_and_survives_auth_failure() {
+    use oab_domain::LocalHistoryState;
+    let account_scope = scope("independent");
+    let provider = Arc::new(ScriptedProvider::new());
+    let gate = FakeGate::closed();
+    provider.push_required(
+        ScriptedStep::failure(ClassifiedError::new(ErrorKind::MissingCredential))
+            .behind(gate.clone()),
+    );
+    provider.push_optional(ScriptedStep::success(Some(history_data())));
+    let source: Arc<dyn RefreshSource> = Arc::new(IndependentHistorySource {
+        scope: account_scope.clone(),
+        provider,
+    });
+    let (actor, handle) = RuntimeActor::new(
+        config(4, 1, Duration::from_secs(2)),
+        Arc::new(TestClock::new(timestamp(1_700_000_000))),
+        [RefreshRegistration::new(account_scope.clone(), source)],
+    )
+    .unwrap();
+    let mut snapshots = handle.subscribe();
+    let task = actor.spawn();
+    handle
+        .refresh(account_scope, RefreshTrigger::Manual)
+        .await
+        .unwrap();
+    let publication = wait_for_publication(&mut snapshots, |snapshot| {
+        snapshot
+            .local_history()
+            .is_some_and(|history| history.state == LocalHistoryState::Ready)
+    })
+    .await;
+    assert!(
+        publication.envelope().snapshots()[0]
+            .last_known_good()
+            .is_none(),
+        "local activity must not invent quota success"
+    );
+    gate.release();
+    let publication =
+        wait_for_publication(&mut snapshots, |snapshot| snapshot.error().is_some()).await;
+    let history = publication.envelope().snapshots()[0]
+        .local_history()
+        .unwrap();
+    assert_eq!(
+        history.data.as_ref().unwrap().history().total_tokens(),
+        Some(42)
+    );
+    assert!(task.shutdown().await.unwrap().fault().is_none());
+}
+
+#[tokio::test(start_paused = true)]
+async fn history_failure_retains_data_and_new_empty_result_clears_it() {
+    use oab_domain::LocalHistoryState;
+    let account_scope = scope("history-recovery");
+    let provider = Arc::new(ScriptedProvider::new());
+    for _ in 0..3 {
+        provider.push_required(ScriptedStep::failure(ClassifiedError::new(
+            ErrorKind::MissingCredential,
+        )));
+    }
+    provider.push_optional(ScriptedStep::success(Some(history_data())));
+    provider.push_optional(ScriptedStep::failure(ClassifiedError::new(
+        ErrorKind::ProviderUnavailable,
+    )));
+    provider.push_optional(ScriptedStep::success(None));
+    let source: Arc<dyn RefreshSource> = Arc::new(IndependentHistorySource {
+        scope: account_scope.clone(),
+        provider,
+    });
+    let (actor, handle) = RuntimeActor::new(
+        config(4, 1, Duration::from_secs(2)),
+        Arc::new(TestClock::new(timestamp(1_700_000_000))),
+        [RefreshRegistration::new(account_scope.clone(), source)],
+    )
+    .unwrap();
+    let mut snapshots = handle.subscribe();
+    let task = actor.spawn();
+    for state in [
+        LocalHistoryState::Ready,
+        LocalHistoryState::Failed,
+        LocalHistoryState::Empty,
+    ] {
+        handle
+            .refresh(account_scope.clone(), RefreshTrigger::Manual)
+            .await
+            .unwrap();
+        let publication = wait_for_publication(&mut snapshots, |snapshot| {
+            snapshot.error().is_some()
+                && snapshot
+                    .local_history()
+                    .is_some_and(|history| history.state == state)
+        })
+        .await;
+        assert_eq!(
+            publication.envelope().snapshots()[0]
+                .local_history()
+                .unwrap()
+                .data
+                .is_some(),
+            state != LocalHistoryState::Empty
+        );
+    }
+    assert!(task.shutdown().await.unwrap().fault().is_none());
+}
+
+#[tokio::test(start_paused = true)]
+async fn quota_backoff_does_not_block_local_history_refresh() {
+    use oab_domain::LocalHistoryState;
+    let account_scope = scope("backoff-history");
+    let provider = Arc::new(ScriptedProvider::new());
+    provider.push_required(ScriptedStep::failure(ClassifiedError::new(
+        ErrorKind::RateLimited,
+    )));
+    provider.push_optional(ScriptedStep::success(Some(history_data())));
+    provider.push_optional(ScriptedStep::success(None));
+    let source: Arc<dyn RefreshSource> = Arc::new(IndependentHistorySource {
+        scope: account_scope.clone(),
+        provider: provider.clone(),
+    });
+    let (actor, handle) = RuntimeActor::new(
+        config(4, 1, Duration::from_secs(2)),
+        Arc::new(TestClock::new(timestamp(1_700_000_000))),
+        [RefreshRegistration::new(account_scope.clone(), source)],
+    )
+    .unwrap();
+    let mut snapshots = handle.subscribe();
+    let task = actor.spawn();
+    handle
+        .refresh(account_scope.clone(), RefreshTrigger::Manual)
+        .await
+        .unwrap();
+    wait_for_publication(&mut snapshots, |snapshot| {
+        snapshot.error().is_some()
+            && snapshot
+                .local_history()
+                .is_some_and(|history| history.state == LocalHistoryState::Ready)
+    })
+    .await;
+    assert_eq!(
+        handle
+            .refresh(account_scope, RefreshTrigger::Periodic)
+            .await
+            .unwrap(),
+        RefreshAdmission::Coalesced
+    );
+    wait_for_publication(&mut snapshots, |snapshot| {
+        snapshot
+            .local_history()
+            .is_some_and(|history| history.state == LocalHistoryState::Empty)
+    })
+    .await;
+    assert_eq!(provider.required_calls(), 1);
+    assert_eq!(provider.optional_calls(), 2);
+    assert!(task.shutdown().await.unwrap().fault().is_none());
+}

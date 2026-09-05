@@ -6,6 +6,32 @@ Item {
 
     property var chart: null
     property string sectionTitle: ""
+    property int selectedIndex: -1
+    activeFocusOnTab: visible
+    Accessible.role: Accessible.Graphic
+    Accessible.name: chart ? String(chart.title || "History") : "History"
+    Accessible.description: detailText.text
+
+    function known(point) {
+        return point && point.value !== null && point.value !== undefined && isFinite(Number(point.value));
+    }
+
+    function select(index) {
+        selectedIndex = Math.max(0, Math.min(points.length - 1, index));
+        plot.requestPaint();
+    }
+
+    Keys.onLeftPressed: select((selectedIndex < 0 ? points.length - 1 : selectedIndex) - 1)
+    Keys.onRightPressed: select((selectedIndex < 0 ? -1 : selectedIndex) + 1)
+    Keys.onPressed: event => {
+        if (event.key === Qt.Key_Home) {
+            select(0);
+            event.accepted = true;
+        } else if (event.key === Qt.Key_End) {
+            select(points.length - 1);
+            event.accepted = true;
+        }
+    }
     property color foreground: Color.foreground
     property color muted: Qt.darker(foreground, 1.55)
     property color accent: Color.accent
@@ -14,7 +40,10 @@ Item {
     visible: points.length > 0
     implicitHeight: visible ? chartColumn.implicitHeight : 0
 
-    onChartChanged: plot.requestPaint()
+    onChartChanged: {
+        selectedIndex = -1;
+        plot.requestPaint();
+    }
     onWidthChanged: plot.requestPaint()
     onForegroundChanged: plot.requestPaint()
     onAccentChanged: plot.requestPaint()
@@ -53,6 +82,13 @@ Item {
             width: parent.width
             height: Style.space(104)
 
+            MouseArea {
+                anchors.fill: parent
+                hoverEnabled: true
+                onPositionChanged: mouse => root.select(Math.floor(mouse.x / width * root.points.length))
+                onClicked: root.forceActiveFocus()
+            }
+
             onPaint: {
                 var context = getContext("2d");
                 context.clearRect(0, 0, width, height);
@@ -62,7 +98,8 @@ Item {
                 var chartHeight = height - Style.space(22);
                 var maximum = 0;
                 for (var index = 0; index < values.length; index++)
-                    maximum = Math.max(maximum, Number(values[index].value || 0));
+                    if (root.known(values[index]))
+                        maximum = Math.max(maximum, Number(values[index].value));
                 maximum = Math.max(1, maximum);
                 var step = width / Math.max(1, values.length);
                 context.strokeStyle = root.muted;
@@ -78,24 +115,40 @@ Item {
                     context.strokeStyle = root.accent;
                     context.lineWidth = 2;
                     context.beginPath();
+                    var connected = false;
                     for (var lineIndex = 0; lineIndex < values.length; lineIndex++) {
+                        if (!root.known(values[lineIndex])) {
+                            connected = false;
+                            continue;
+                        }
                         var x = step * lineIndex + step / 2;
                         var y = chartHeight - Math.max(0, Number(values[lineIndex].value || 0)) / maximum * (chartHeight - 4);
-                        if (lineIndex === 0)
+                        if (!connected)
                             context.moveTo(x, y);
                         else
                             context.lineTo(x, y);
+                        connected = true;
                     }
                     context.stroke();
                 } else {
                     context.fillStyle = root.accent;
                     var barWidth = Math.max(2, Math.min(step * 0.68, Style.space(12)));
                     for (var barIndex = 0; barIndex < values.length; barIndex++) {
+                        if (!root.known(values[barIndex])) {
+                            context.fillStyle = root.muted;
+                            context.globalAlpha = 0.35;
+                            context.fillRect(step * barIndex + (step - barWidth) / 2, chartHeight - 4, barWidth, 2);
+                            context.globalAlpha = 1;
+                            continue;
+                        }
+                        context.fillStyle = root.accent;
+                        context.globalAlpha = root.selectedIndex < 0 || root.selectedIndex === barIndex ? 1 : 0.5;
                         var barHeight = Math.max(1, Math.max(0, Number(values[barIndex].value || 0)) / maximum * (chartHeight - 4));
                         context.fillRect(step * barIndex + (step - barWidth) / 2, chartHeight - barHeight, barWidth, barHeight);
                     }
                 }
 
+                context.globalAlpha = 1;
                 context.fillStyle = root.muted;
                 context.font = Style.font.caption + "px " + Style.font.family;
                 context.textBaseline = "bottom";
@@ -108,6 +161,34 @@ Item {
                     context.fillText(last, width, height);
                 }
             }
+        }
+        Text {
+            width: parent.width
+            visible: root.points.some(function (point) {
+                return !root.known(point);
+            })
+            text: "Dashes indicate unavailable values"
+            color: root.muted
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+        }
+
+        Text {
+            id: detailText
+            width: parent.width
+            text: {
+                if (root.points.length === 0)
+                    return "";
+                var point = root.points[root.selectedIndex < 0 ? root.points.length - 1 : root.selectedIndex];
+                var exact = point.exact !== undefined ? point.exact : String(point.value);
+                var unit = String(root.chart.unit || "");
+                var value = root.known(point) ? (unit === "$" ? "$" + exact : exact + " " + unit) : (point.note || "Unknown");
+                return String(point.date || point.label || "") + " · " + value;
+            }
+            color: root.activeFocus ? root.accent : root.muted
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
         }
     }
 }

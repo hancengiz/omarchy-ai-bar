@@ -5,8 +5,9 @@ use std::fmt::{self, Debug, Formatter};
 use std::sync::Arc;
 
 use oab_domain::{
-    AccountScope, ClassifiedError, CostUsageSnapshot, Freshness, ProviderSnapshot, RefreshPhase,
-    RetryEligibility, SnapshotEnvelopeV1, SnapshotError, Timestamp, UsageSample,
+    AccountScope, ClassifiedError, CostUsageSnapshot, Freshness, LocalHistorySnapshot,
+    LocalHistoryState, ProviderSnapshot, RefreshPhase, RetryEligibility, SnapshotEnvelopeV1,
+    SnapshotError, Timestamp, UsageSample,
 };
 use thiserror::Error;
 use tokio::sync::watch;
@@ -192,6 +193,17 @@ impl SnapshotStore {
             Some(cached) => sample.backfilling_reset_times(cached, generated_at)?,
             None => sample,
         };
+        let sample = match self
+            .snapshots
+            .get(scope)
+            .and_then(ProviderSnapshot::local_history)
+        {
+            Some(history) => match &history.data {
+                Some(data) => sample.with_cost_usage(data.clone()),
+                None => sample.without_cost_usage(),
+            },
+            None => sample,
+        };
         let next = ProviderSnapshot::ready(sample, Freshness::Fresh, RefreshPhase::Idle, None)?;
         self.publish_change(scope, next, generated_at)
     }
@@ -218,6 +230,46 @@ impl SnapshotStore {
             ProviderSnapshot::unavailable(scope.clone(), error)
         };
         self.publish_change(scope, next, generated_at)
+    }
+
+    pub(crate) fn apply_local_history(
+        &mut self,
+        scope: &AccountScope,
+        history: LocalHistorySnapshot,
+        generated_at: Timestamp,
+    ) -> Result<bool, SnapshotStoreError> {
+        let current = self.require_scope(scope)?;
+        let next = if let Some(sample) = current.last_known_good() {
+            let sample = match &history.data {
+                Some(data) => sample.clone().with_cost_usage(data.clone()),
+                None => sample.clone().without_cost_usage(),
+            };
+            ProviderSnapshot::ready(
+                sample,
+                current.freshness().expect("ready freshness"),
+                current.refresh_phase().expect("ready phase"),
+                current.error().cloned(),
+            )?
+        } else {
+            current.clone()
+        };
+        self.publish_change(scope, next.with_local_history(Some(history)), generated_at)
+    }
+
+    pub(crate) fn mark_history_state(
+        &mut self,
+        scope: &AccountScope,
+        state: LocalHistoryState,
+        generated_at: Timestamp,
+    ) -> Result<(), SnapshotStoreError> {
+        if let Some(history) = self.require_scope(scope)?.local_history().cloned() {
+            self.apply_local_history(
+                scope,
+                LocalHistorySnapshot { state, ..history },
+                generated_at,
+            )?;
+        }
+        Ok(())
     }
 
     pub(crate) fn apply_cost_usage(
@@ -278,6 +330,11 @@ impl SnapshotStore {
         generated_at: Timestamp,
     ) -> Result<bool, SnapshotStoreError> {
         let current = self.require_scope(scope)?;
+        let next = if next.local_history().is_none() {
+            next.with_local_history(current.local_history().cloned())
+        } else {
+            next
+        };
         if current == &next {
             return Ok(false);
         }

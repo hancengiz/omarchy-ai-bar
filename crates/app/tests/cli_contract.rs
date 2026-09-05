@@ -445,6 +445,20 @@ fn configure_runtime_backed_typed_provider_settings(fixture: &DaemonFixture) {
         [
             "config",
             "set-option",
+            "codex",
+            "codex-local-session-cost-ledger",
+            "true",
+        ],
+        [
+            "config",
+            "set-option",
+            "claude",
+            "claude-daily-routines-usage-visible",
+            "false",
+        ],
+        [
+            "config",
+            "set-option",
             "zai",
             "zai-api-region",
             "bigmodel-cn",
@@ -563,6 +577,14 @@ fn assert_typed_provider_settings_round_trip_and_clear(fixture: &DaemonFixture) 
         .find(|route| route["id"] == "claude")
         .expect("Claude route");
     assert_eq!(claude["options"]["source"], "auto");
+    assert_eq!(
+        codex["options"]["provider_options"]["local_session_cost_ledger"],
+        true
+    );
+    assert_eq!(
+        claude["options"]["provider_options"]["daily_routines_usage_visible"],
+        false
+    );
     let zai = routes
         .iter()
         .find(|route| route["id"] == "zai")

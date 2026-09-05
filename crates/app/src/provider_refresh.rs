@@ -11,7 +11,8 @@ use oab_auth::browser_safe_storage::{
     BrowserKeyringAccess, BrowserSafeStorageProduct, BrowserSafeStorageReader,
 };
 use oab_domain::{
-    AccountScope, ClassifiedError, CostUsageSnapshot, ErrorKind, ProviderId, Timestamp, UsageSample,
+    AccountScope, ClassifiedError, CostUsageSnapshot, ErrorKind, LocalHistoryScope, ProviderId,
+    Timestamp, UsageSample,
 };
 use oab_providers::browser_cookie::ChromiumCookieDecryptor;
 use oab_providers::browser_profile::{
@@ -652,10 +653,19 @@ impl RefreshSource for ProviderRefreshSource {
         })
     }
 
-    fn fetch_optional(
+    fn local_history_scope(&self) -> Option<LocalHistoryScope> {
+        if self.claude_history_root.is_some() || self.grok_history_root.is_some() {
+            Some(LocalHistoryScope::Machine)
+        } else {
+            None
+        }
+    }
+
+    fn fetch_local_history(
         &self,
-        required: UsageSample,
+        updated_at: Timestamp,
         cancellation: CancellationToken,
+        manual: bool,
     ) -> RefreshFuture<Result<Option<CostUsageSnapshot>, ClassifiedError>> {
         let history = self
             .claude_history_root
@@ -671,13 +681,15 @@ impl RefreshSource for ProviderRefreshSource {
         };
         let cache = Arc::clone(&self.history_cache);
         Box::pin(async move {
-            if let Ok(guard) = cache.lock()
+            if !manual
+                && let Ok(guard) = cache.lock()
                 && let Some((cached_at, snapshot)) = guard.as_ref()
                 && cached_at.elapsed() < Duration::from_mins(15)
+                && snapshot.updated_at().as_offset_date_time().date()
+                    == updated_at.as_offset_date_time().date()
             {
                 return Ok(Some(snapshot.clone()));
             }
-            let updated_at = required.fetched_at();
             let worker_cancellation = cancellation.clone();
             let result = tokio::task::spawn_blocking(move || match provider {
                 ProviderId::Claude => {
@@ -718,6 +730,7 @@ impl Debug for ProviderRefreshSource {
 /// the coordinator as one composite plan instead of assigning a false exact
 /// [`ProviderSource`].
 pub struct CodexRefreshSource {
+    history_scope: LocalHistoryScope,
     scope: AccountScope,
     coordinator: Arc<CodexCoordinator>,
     history_root: Option<PathBuf>,
@@ -737,6 +750,7 @@ impl CodexRefreshSource {
             return Err(ProviderRefreshBuildError::ProviderMismatch);
         }
         Ok(Self {
+            history_scope: LocalHistoryScope::Account,
             scope,
             coordinator: Arc::new(coordinator),
             history_root: None,
@@ -744,7 +758,14 @@ impl CodexRefreshSource {
         })
     }
 
-    /// Enables bounded local Codex rollout history enrichment.
+    /// Labels native session activity independently of quota-account identity.
+    #[must_use]
+    pub fn with_machine_history(mut self) -> Self {
+        self.history_scope = LocalHistoryScope::Machine;
+        self
+    }
+
+    /// Enables bounded local history under the selected source root.
     #[must_use]
     pub fn with_history_root(mut self, history_root: PathBuf) -> Self {
         self.history_root = Some(history_root);
@@ -775,23 +796,30 @@ impl RefreshSource for CodexRefreshSource {
         })
     }
 
-    fn fetch_optional(
+    fn local_history_scope(&self) -> Option<LocalHistoryScope> {
+        self.history_root.as_ref().map(|_| self.history_scope)
+    }
+
+    fn fetch_local_history(
         &self,
-        required: UsageSample,
+        updated_at: Timestamp,
         cancellation: CancellationToken,
+        manual: bool,
     ) -> RefreshFuture<Result<Option<CostUsageSnapshot>, ClassifiedError>> {
         let Some(history_root) = self.history_root.clone() else {
             return Box::pin(async { Ok(None) });
         };
         let cache = Arc::clone(&self.history_cache);
         Box::pin(async move {
-            if let Ok(guard) = cache.lock()
+            if !manual
+                && let Ok(guard) = cache.lock()
                 && let Some((cached_at, snapshot)) = guard.as_ref()
                 && cached_at.elapsed() < Duration::from_mins(15)
+                && snapshot.updated_at().as_offset_date_time().date()
+                    == updated_at.as_offset_date_time().date()
             {
                 return Ok(Some(snapshot.clone()));
             }
-            let updated_at = required.fetched_at();
             let worker_cancellation = cancellation.clone();
             let result = tokio::task::spawn_blocking(move || {
                 scan_codex_cost_history(&history_root, updated_at, &worker_cancellation)
@@ -1641,6 +1669,70 @@ mod tests {
         );
         assert!(!debug.contains("route-secret"));
         assert!(!debug.contains("account-secret"));
+    }
+
+    #[tokio::test]
+    async fn codex_local_history_reads_without_quota_and_manual_refresh_bypasses_cache() {
+        let root = tempfile::tempdir().unwrap();
+        let day = root.path().join("sessions/2026/09/05");
+        std::fs::create_dir_all(&day).unwrap();
+        let write_usage = |tokens| {
+            std::fs::write(day.join("rollout.jsonl"), serde_json::json!({
+                "timestamp": "2026-09-05T08:00:00Z", "type": "event_msg", "payload": {
+                    "type": "token_count", "info": {"total_token_usage": {"input_tokens": tokens, "output_tokens": 0}}
+                }
+            }).to_string()).unwrap();
+        };
+        write_usage(20);
+        let scope = scope(ProviderId::Codex, "default", "managed");
+        let runner = Arc::new(SuccessfulCodexRunner {
+            sample: sample(scope.clone()),
+            calls: AtomicUsize::new(0),
+        });
+        let coordinator = CodexCoordinator::new(
+            scope,
+            CodexCoordinatorSettings::new(
+                CodexSourceMode::Auto,
+                CodexAccountSelection::Ambient,
+                false,
+                None,
+            )
+            .unwrap(),
+            runner.clone(),
+        );
+        let source = CodexRefreshSource::new(coordinator)
+            .unwrap()
+            .with_history_root(root.path().to_owned())
+            .with_machine_history();
+        assert_eq!(
+            source.local_history_scope(),
+            Some(LocalHistoryScope::Machine)
+        );
+        let at = Timestamp::parse("2026-09-05T12:00:00Z").unwrap();
+        let first = source
+            .fetch_local_history(at, CancellationToken::new(), false)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.history().total_tokens(), Some(20));
+        write_usage(40);
+        let cached = source
+            .fetch_local_history(at, CancellationToken::new(), false)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(cached.history().total_tokens(), Some(20));
+        let forced = source
+            .fetch_local_history(at, CancellationToken::new(), true)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(forced.history().total_tokens(), Some(40));
+        assert_eq!(
+            runner.calls.load(Ordering::SeqCst),
+            0,
+            "local history must not call the quota runner"
+        );
     }
 
     #[test]

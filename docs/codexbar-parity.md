@@ -56,8 +56,8 @@ daemon/display snapshots.
 
 | Provider | Runtime-backed in this slice | Still unavailable from the pinned settings surface |
 | --- | --- | --- |
-| Codex | Auto/PAT/OAuth/CLI quota source; explicit opt-in to read-only legacy Codex/OpenCode OAuth fallback; isolated managed-account login, switching, removal, per-account refresh, and read-only banked resets | OpenAI web extras and cookies, battery saver, configurable history/cost/display filters, and promotion of a managed account into the native Codex CLI |
-| Claude | Auto/OAuth/CLI source selection; read-only Claude Code OAuth file/environment; bounded shell-free CLI usage fallback | Admin API, claude.ai web-cookie source, `claude-swap`, macOS Keychain policy, display/widget filters, multi-account UI |
+| Codex | Auto/PAT/OAuth/CLI quota source; explicit opt-in to read-only legacy Codex/OpenCode OAuth fallback; isolated managed-account login, switching, removal, per-account refresh, read-only banked resets, Spark display filtering, and opt-in machine-local cost estimates | OpenAI web extras and cookies, battery saver, personalized history/pace, and promotion of a managed account into the native Codex CLI |
+| Claude | Auto/OAuth/CLI source selection; read-only Claude Code OAuth file/environment; bounded shell-free CLI usage fallback, independent local activity, and Daily Routines display filtering | Admin API, claude.ai web-cookie source, `claude-swap`, macOS Keychain policy, desktop widget filters, multi-account UI |
 | Grok | Auto/CLI/OAuth/Web source and Auto/Manual/Off cookie policy; CLI, read-only OAuth proxy, manual/browser web billing, dashboard, and provider-token-file actions | SuperGrok bearer gRPC enrichment, persistent cookie cache, and multi-account token management |
 | Copilot | App-owned GitHub login with pre-storage identity validation, enterprise host, CLI/chat entitlement rows, manual budget extras/cookie slot, and refresh action | Automatic GitHub browser-cookie import, secondary menu-bar budget selection, multiple GitHub accounts |
 | z.ai | Global/BigModel CN region, API-key slot, and region-aware credential-page action | Team-scope organization/project editor and multi-account UI |
@@ -111,9 +111,8 @@ cookies remains an explicit gap.
 Codex source selection is runtime-backed: Auto follows the pinned source plan,
 while explicit PAT, OAuth, and CLI modes stay within their selected authority.
 External legacy Codex and OpenCode OAuth files are off by default, read only
-after explicit consent, and are never refreshed or written. Managed Codex
-accounts, system-account promotion, and chatgpt.com dashboard extras are not yet
-ported.
+after explicit consent, and are never refreshed or written. System-account promotion and chatgpt.com dashboard extras are not yet ported.
+Managed Codex accounts are implemented as described above.
 
 Claude Auto tries the read-only OAuth usage path and then the provider-owned
 Claude CLI. Explicit OAuth and CLI are terminal single-source choices. The CLI
@@ -143,6 +142,35 @@ reached only after the final source reports missing/expired authentication;
 rate, network, provider, permission, parse, and API failures do not trigger a
 browser scan. Bearer gRPC enrichment, persistent cookie caching, and
 multi-account lifecycle remain unavailable.
+
+## Local activity and settings usability
+
+Local Codex and Claude history is acquired independently of quota success. The
+private display snapshot carries a separate account/machine scope and scanning,
+ready, empty, or failed history state. Failed scans retain same-source totals;
+a rebuilt source clears old activity before scanning its selected root. Manual
+refresh bypasses the 15-minute success cache, and a changed UTC date invalidates
+that cache. Quota backoff does not block local history; automatic quota refreshes
+do not interrupt a running history scan.
+
+Native Codex activity is labelled as machine-local. Managed homes remain isolated
+by default; `codex-local-session-cost-ledger=true` explicitly selects the ambient
+Codex home for their activity while quota identity remains account-specific. A
+managed account without logs explains that signing in does not download history
+and offers the machine-local choice. No credentials or native login are changed.
+
+Inline charts offer Tokens/Cost selection and keyboard/pointer inspection. Dates
+retain their calendar positions; uncovered days and incomplete prices stay
+unknown, while covered empty days can show zero. Partial cost totals are labelled
+as known cost. Settings group usable controls by purpose; pending features have a
+compact availability summary and macOS Keychain controls are omitted from Linux
+forms. Claude Daily Routines filtering respects the optional-extras master switch
+without changing collected quota windows.
+
+The 30-day scanners and bundled pricing tables are still limited. Persistent
+incremental scanning, more source roots, broader pricing coverage, personalized
+history, and the later milestones remain in the
+[product improvement plan](product-improvement-plan-2026-09-05.md).
 
 ## Remaining account, settings, and presentation gaps
 

@@ -49,10 +49,11 @@ pub use rate_window::{NamedRateWindow, RateWindow, RateWindowValidationError, Wi
 pub use snapshot::{
     ChartPoint, CostProvenance, CostSummary, DataConfidence, DetailChart, DetailChartKind,
     DetailChartPoint, DetailRow, DetailSection, DetailSensitivity, ExtensionFact, ExtensionValue,
-    LoadingSnapshot, MAX_REPORTED_AVAILABLE_RESET_CREDITS, PrivateSnapshotEnvelope, Provenance,
-    ProviderExtension, ProviderExtensionKind, ProviderSnapshot, ReadySnapshot, ResetCredit,
-    ResetCreditStatus, ResetCreditStatusValidationError, ResetCreditsSnapshot, SnapshotEnvelopeV1,
-    SnapshotError, UnavailableSnapshot, UnknownResetCreditStatus, UsageSample,
+    LoadingSnapshot, LocalHistoryScope, LocalHistorySnapshot, LocalHistoryState,
+    MAX_REPORTED_AVAILABLE_RESET_CREDITS, PrivateSnapshotEnvelope, Provenance, ProviderExtension,
+    ProviderExtensionKind, ProviderSnapshot, ReadySnapshot, ResetCredit, ResetCreditStatus,
+    ResetCreditStatusValidationError, ResetCreditsSnapshot, SnapshotEnvelopeV1, SnapshotError,
+    UnavailableSnapshot, UnknownResetCreditStatus, UsageSample,
 };
 pub use status::{
     ProviderHealth, ProviderIncident, ProviderStatus, ProviderStatusValidationError,

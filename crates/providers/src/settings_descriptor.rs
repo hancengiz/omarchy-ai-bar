@@ -608,16 +608,16 @@ const CODEX_CONTROLS: &[ProviderSettingsControlDescriptor] = &[
     ProviderSettingsControlDescriptor::Toggle(ProviderSettingsToggleDescriptor {
         item: item(
             ProviderSettingId::CodexLocalSessionCostLedger,
-            "Local session cost estimates",
+            "Use this machine's Codex history",
             concat!(
-                "Uses this machine's Codex sessions instead of the selected managed account's ",
-                "session history. Works with organization API keys and uses locally cached or ",
-                "bundled model prices without making a network request."
+                "Shows native Codex activity beside every account's quota. ",
+                "When off, managed accounts keep their own local history. ",
+                "Costs use bundled estimates; models without prices still show tokens."
             ),
             ProviderSettingsSection::Options,
             ALWAYS,
             ALWAYS,
-            unavailable(ProviderSettingsGap::ConfigurableCostLedger),
+            IMPLEMENTED,
             None,
         ),
         actions: NO_ACTIONS,
@@ -876,7 +876,7 @@ const CLAUDE_CONTROLS: &[ProviderSettingsControlDescriptor] = &[
             ProviderSettingsSection::Options,
             ALWAYS,
             OPTIONAL_EXTRAS_ON,
-            unavailable(ProviderSettingsGap::DisplayFiltering),
+            IMPLEMENTED,
             None,
         ),
         actions: NO_ACTIONS,

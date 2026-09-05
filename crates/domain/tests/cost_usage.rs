@@ -421,3 +421,59 @@ fn bounds_dates_amounts_and_coverage_fail_closed() {
     assert!(make(0, Vec::new()).is_err());
     assert!(make(MAX_COST_HISTORY_DAYS + 1, Vec::new()).is_err());
 }
+
+#[test]
+fn independent_history_round_trips_and_redacts_in_every_quota_state() {
+    use oab_domain::{
+        ClassifiedError, ErrorKind, LocalHistoryScope, LocalHistorySnapshot, LocalHistoryState,
+    };
+    let original = envelope_with_cost(full_snapshot(CostUnit::currency(
+        CurrencyCode::new("USD").unwrap(),
+    )));
+    let scope = original.snapshots()[0].scope().clone();
+    for quota in [
+        ProviderSnapshot::loading(scope.clone()),
+        original.snapshots()[0].clone(),
+        ProviderSnapshot::unavailable(
+            scope.clone(),
+            ClassifiedError::new(ErrorKind::MissingCredential),
+        ),
+    ] {
+        let history = LocalHistorySnapshot {
+            scope: LocalHistoryScope::Machine,
+            state: LocalHistoryState::Ready,
+            data: Some(full_snapshot(CostUnit::currency(
+                CurrencyCode::new("USD").unwrap(),
+            ))),
+        };
+        let envelope = SnapshotEnvelopeV1::new(
+            original.generated_at(),
+            vec![quota.with_local_history(Some(history))],
+        )
+        .unwrap();
+        let wire = serde_json::to_value(envelope.private_view()).unwrap();
+        let decoded: SnapshotEnvelopeV1 = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(decoded, envelope);
+        assert!(wire.to_string().contains("/home/ada/a-private-project"));
+        let projected = envelope.project(
+            PrivacyPolicy::HidePersonalInfo,
+            PrivacySurface::Ui,
+            &PrivacyKey::from_bytes([0x77; 32]),
+        );
+        let public = serde_json::to_value(projected).unwrap();
+        let encoded = public.to_string();
+        for canary in [
+            "/home/ada",
+            "credential-fingerprint-private",
+            "a-private-model",
+            "a-private-session",
+        ] {
+            assert!(!encoded.contains(canary));
+        }
+        assert_eq!(public["snapshots"][0]["local_history"]["scope"], "machine");
+        assert_eq!(
+            public["snapshots"][0]["local_history"]["data"]["history"]["total_tokens"],
+            159
+        );
+    }
+}

@@ -9,6 +9,8 @@ Item {
     property var panelRoot: null
     property alias scrollArea: detailScroll
     property bool errorExpanded: false
+    property bool showPendingFeatures: false
+    readonly property string pendingFeatures: pendingFeatureText()
 
     readonly property var provider: panelRoot ? panelRoot.selectedRow : null
     readonly property var service: panelRoot ? panelRoot.service : null
@@ -105,40 +107,68 @@ Item {
         };
     }
 
+    function pendingFeatureText() {
+        if (!typedSettingsDescriptor || !service)
+            return "";
+        var names = {
+            "configurable-history-tracking": "Personalized history and pace",
+            "openai-web-extras": "OpenAI web extras and cookies",
+            "claude-web-usage": "Claude web usage and cookies",
+            "claude-admin-api": "Organization spend through the Admin API",
+            "claude-swap": "Claude account switching through cswap",
+            "multi-account-lifecycle": "Multiple accounts",
+            "desktop-widgets": "Model-specific desktop widgets"
+        };
+        var gaps = [];
+        (typedSettingsDescriptor.controls || []).forEach(function (control) {
+            var item = service.typedControlItem(control);
+            var gap = item && item.availability ? item.availability.gap : "";
+            if (gap && gap !== "mac-os-keychain-policy" && gap !== "macos-keychain-policy" && gaps.indexOf(gap) === -1)
+                gaps.push(gap);
+        });
+        if (typedSettingsDescriptor.accounts && !service.availabilityImplemented(typedSettingsDescriptor.accounts.availability))
+            gaps.push("multi-account-lifecycle");
+        return gaps.map(function (gap) {
+            return names[gap] || gap.replace(/-/g, " ");
+        }).join(" · ");
+    }
+
     function typedSections() {
         if (!service || !provider || !typedSettingsDescriptor)
             return [];
-        var sections = [
+        var groups = [
             {
                 id: "connection",
-                title: "CONNECTION"
+                title: "USAGE SOURCE",
+                controls: []
             },
             {
-                id: "credentials",
-                title: "CREDENTIALS"
+                id: "history",
+                title: "HISTORY & COSTS",
+                controls: []
             },
             {
-                id: "options",
-                title: "OPTIONS"
+                id: "display",
+                title: "DISPLAY",
+                controls: []
             },
             {
-                id: "menu_bar",
-                title: "MENU BAR"
+                id: "advanced",
+                title: "ADVANCED",
+                controls: []
             }
         ];
-        var result = [];
-        var features = descriptorFeatures();
-        for (var index = 0; index < sections.length; index++) {
-            var controls = service.typedControlsForSection(provider.provider, sections[index].id, features);
-            if (controls.length > 0) {
-                result.push({
-                    id: sections[index].id,
-                    title: sections[index].title,
-                    controls: controls
-                });
-            }
-        }
-        return result;
+        (typedSettingsDescriptor.controls || []).forEach(function (control) {
+            var item = service.typedControlItem(control);
+            if (!item || !service.typedControlImplemented(control) || !service.evaluateProviderSettingCondition(provider.provider, item.visible_when, descriptorFeatures(), 0))
+                return;
+            var id = String(item.id);
+            var group = id.indexOf("cost-ledger") !== -1 || id.indexOf("historical-tracking") !== -1 ? 1 : (id.indexOf("usage-visible") !== -1 ? 2 : (String(item.section) === "options" ? 3 : 0));
+            groups[group].controls.push(control);
+        });
+        return groups.filter(function (group) {
+            return group.controls.length > 0;
+        });
     }
 
     function controlGap(control) {
@@ -412,7 +442,7 @@ Item {
                     spacing: Style.space(11)
 
                     Repeater {
-                        model: view.provider ? view.provider.windows : []
+                        model: view.service ? view.service.windowsForDisplay(view.provider, view.setting("showOptionalCreditsAndExtraUsage", true) === true) : []
 
                         delegate: QuotaMetric {
                             required property var modelData
@@ -531,6 +561,191 @@ Item {
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+
+            Text {
+                width: parent.width
+                visible: view.provider && view.provider.provider === "claude"
+                text: "Claude Code credentials are read from Linux credential files or an explicit environment token. App-owned secrets use desktop Secret Service."
+                color: view.muted
+                font.family: view.fontFamily()
+                font.pixelSize: Style.font.caption
+                wrapMode: Text.WordWrap
+            }
+
+            Text {
+                width: parent.width
+                visible: view.typedSettingsDescriptor && view.typedSettingsDescriptor.accounts && view.service && view.service.availabilityImplemented(view.typedSettingsDescriptor.accounts.availability)
+                text: "ACCOUNTS"
+                color: view.muted
+                font.family: view.fontFamily()
+                font.pixelSize: Style.font.caption
+                font.bold: true
+                font.letterSpacing: 1
+            }
+
+            BorderSurface {
+                width: parent.width
+                implicitHeight: typedAccountsColumn.implicitHeight + Style.space(24)
+                visible: view.typedSettingsDescriptor && view.typedSettingsDescriptor.accounts && view.service && view.service.availabilityImplemented(view.typedSettingsDescriptor.accounts.availability)
+                color: Style.normalFillFor(view.foreground, Color.accent)
+                borderSpec: Border.none()
+                radius: Style.cornerRadius
+                opacity: view.service && view.typedSettingsDescriptor && (view.service.availabilityImplemented(view.typedSettingsDescriptor.accounts.availability) || view.typedAccountActions.some(function (action) {
+                        return view.service.availabilityImplemented(action.availability);
+                    })) ? 1 : 0.64
+
+                Column {
+                    id: typedAccountsColumn
+                    anchors.centerIn: parent
+                    width: parent.width - Style.space(24)
+                    spacing: Style.space(12)
+
+                    Text {
+                        width: parent.width
+                        text: view.typedSettingsDescriptor && view.typedSettingsDescriptor.accounts ? String(view.typedSettingsDescriptor.accounts.title || "Provider accounts") : "Provider accounts"
+                        color: view.foreground
+                        font.family: view.fontFamily()
+                        font.pixelSize: Style.font.body
+                        font.bold: true
+                    }
+
+                    Text {
+                        width: parent.width
+                        text: view.provider && view.provider.provider === "codex" ? "Manage accounts here. Choose tabs or lists in Display settings. Showing an account does not switch your Codex CLI login." : (view.typedSettingsDescriptor && view.typedSettingsDescriptor.accounts ? String(view.typedSettingsDescriptor.accounts.subtitle || "") : "")
+                        color: view.muted
+                        font.family: view.fontFamily()
+                        font.pixelSize: Style.font.caption
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Row {
+                        width: parent.width
+                        visible: view.provider && view.provider.provider === "codex"
+                        spacing: Style.space(8)
+
+                        Column {
+                            width: parent.width - nativeCodexButton.width - parent.spacing
+                            spacing: Style.space(4)
+                            Text {
+                                width: parent.width
+                                text: {
+                                    var account = view.service ? view.service.ambientCodexAccount() : null;
+                                    return account && account.email !== "" ? account.email : "Native Codex account";
+                                }
+                                color: view.foreground
+                                font.family: view.fontFamily()
+                                font.pixelSize: Style.font.caption
+                                elide: Text.ElideMiddle
+                            }
+                            Text {
+                                width: parent.width
+                                text: {
+                                    var account = view.service ? view.service.ambientCodexAccount() : null;
+                                    return "Native CLI · " + (account ? account.resetLabel : "Banked resets unavailable");
+                                }
+                                color: view.muted
+                                font.family: view.fontFamily()
+                                font.pixelSize: Style.font.caption
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+
+                        Button {
+                            id: nativeCodexButton
+                            text: view.service && view.service.activeProviderAccounts.codex === "ambient" ? "Shown" : "Show in bar"
+                            foreground: view.foreground
+                            focusable: true
+                            enabled: view.service && view.service.activeProviderAccounts.codex !== "ambient" && !view.service.providerConfigBusy
+                            onClicked: if (view.service)
+                                view.service.activateCodexAccount("ambient")
+                        }
+                    }
+
+                    Repeater {
+                        model: view.provider && view.provider.provider === "codex" && view.service ? view.service.managedCodexAccounts() : []
+
+                        delegate: Column {
+                            required property var modelData
+                            width: typedAccountsColumn.width
+                            spacing: Style.space(4)
+
+                            PanelSeparator {
+                                width: parent.width
+                                foreground: view.foreground
+                            }
+
+                            Text {
+                                width: parent.width
+                                text: modelData.email !== "" ? modelData.email : modelData.id
+                                color: view.foreground
+                                font.family: view.fontFamily()
+                                font.pixelSize: Style.font.caption
+                                font.bold: modelData.active
+                                elide: Text.ElideMiddle
+                            }
+
+                            Text {
+                                width: parent.width
+                                text: [modelData.plan, modelData.state, modelData.resetLabel, modelData.active ? "selected for display" : ""].filter(function (value) {
+                                    return value !== "";
+                                }).join(" · ")
+                                color: view.muted
+                                font.family: view.fontFamily()
+                                font.pixelSize: Style.font.caption
+                                elide: Text.ElideRight
+                            }
+
+                            Row {
+                                spacing: Style.space(7)
+
+                                Button {
+                                    text: modelData.active ? "Shown" : "Show in bar"
+                                    foreground: view.foreground
+                                    focusable: true
+                                    enabled: view.service && modelData.enabled && !modelData.active && !view.service.providerConfigBusy
+                                    onClicked: if (view.service)
+                                        view.service.activateCodexAccount(modelData.id)
+                                }
+
+                                Button {
+                                    text: "Remove"
+                                    foreground: view.foreground
+                                    focusable: true
+                                    enabled: view.service && !view.service.providerConfigBusy
+                                    onClicked: if (view.service)
+                                        view.service.removeCodexAccount(modelData.id)
+                                }
+                            }
+                        }
+                    }
+
+                    Text {
+                        width: parent.width
+                        visible: !(view.service && view.typedSettingsDescriptor && view.service.availabilityImplemented(view.typedSettingsDescriptor.accounts.availability))
+                        text: "Multiple managed accounts are not available in this build"
+                        color: Color.urgent
+                        font.family: view.fontFamily()
+                        font.pixelSize: Style.font.caption
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Repeater {
+                        model: view.typedAccountActions
+
+                        delegate: Button {
+                            required property var modelData
+
+                            text: String(modelData.title || "Provider action") + (view.service && view.service.availabilityImplemented(modelData.availability) ? "" : " · unavailable")
+                            foreground: view.foreground
+                            focusable: true
+                            enabled: view.service && view.service.availabilityImplemented(modelData.availability) && !(view.service && view.service.providerConfigBusy)
+                            opacity: enabled ? 1 : 0.58
+                            onClicked: if (view.service && view.provider)
+                                view.service.runTypedAction(view.provider.provider, modelData.id)
                         }
                     }
                 }
@@ -700,7 +915,7 @@ Item {
 
                                     Text {
                                         width: parent.width
-                                        visible: typedControl.controlKind === "picker" && typedControl.implemented && typedControl.unavailablePickerChoices.length > 0
+                                        visible: false
                                         text: "Unavailable choices in this build: " + typedControl.unavailablePickerChoices.join(", ")
                                         color: view.muted
                                         font.family: view.fontFamily()
@@ -948,181 +1163,6 @@ Item {
 
             Text {
                 width: parent.width
-                visible: view.typedSettingsDescriptor && view.typedSettingsDescriptor.accounts
-                text: "ACCOUNTS"
-                color: view.muted
-                font.family: view.fontFamily()
-                font.pixelSize: Style.font.caption
-                font.bold: true
-                font.letterSpacing: 1
-            }
-
-            BorderSurface {
-                width: parent.width
-                implicitHeight: typedAccountsColumn.implicitHeight + Style.space(24)
-                visible: view.typedSettingsDescriptor && view.typedSettingsDescriptor.accounts
-                color: Style.normalFillFor(view.foreground, Color.accent)
-                borderSpec: Border.none()
-                radius: Style.cornerRadius
-                opacity: view.service && view.typedSettingsDescriptor && (view.service.availabilityImplemented(view.typedSettingsDescriptor.accounts.availability) || view.typedAccountActions.some(function (action) {
-                        return view.service.availabilityImplemented(action.availability);
-                    })) ? 1 : 0.64
-
-                Column {
-                    id: typedAccountsColumn
-                    anchors.centerIn: parent
-                    width: parent.width - Style.space(24)
-                    spacing: Style.space(12)
-
-                    Text {
-                        width: parent.width
-                        text: view.typedSettingsDescriptor && view.typedSettingsDescriptor.accounts ? String(view.typedSettingsDescriptor.accounts.title || "Provider accounts") : "Provider accounts"
-                        color: view.foreground
-                        font.family: view.fontFamily()
-                        font.pixelSize: Style.font.body
-                        font.bold: true
-                    }
-
-                    Text {
-                        width: parent.width
-                        text: view.provider && view.provider.provider === "codex" ? "Manage accounts here. Choose tabs or lists in Display settings. Showing an account does not switch your Codex CLI login." : (view.typedSettingsDescriptor && view.typedSettingsDescriptor.accounts ? String(view.typedSettingsDescriptor.accounts.subtitle || "") : "")
-                        color: view.muted
-                        font.family: view.fontFamily()
-                        font.pixelSize: Style.font.caption
-                        wrapMode: Text.WordWrap
-                    }
-
-                    Row {
-                        width: parent.width
-                        visible: view.provider && view.provider.provider === "codex"
-                        spacing: Style.space(8)
-
-                        Column {
-                            width: parent.width - nativeCodexButton.width - parent.spacing
-                            spacing: Style.space(4)
-                            Text {
-                                width: parent.width
-                                text: {
-                                    var account = view.service ? view.service.ambientCodexAccount() : null;
-                                    return account && account.email !== "" ? account.email : "Native Codex account";
-                                }
-                                color: view.foreground
-                                font.family: view.fontFamily()
-                                font.pixelSize: Style.font.caption
-                                elide: Text.ElideMiddle
-                            }
-                            Text {
-                                width: parent.width
-                                text: {
-                                    var account = view.service ? view.service.ambientCodexAccount() : null;
-                                    return "Native CLI · " + (account ? account.resetLabel : "Banked resets unavailable");
-                                }
-                                color: view.muted
-                                font.family: view.fontFamily()
-                                font.pixelSize: Style.font.caption
-                                wrapMode: Text.WordWrap
-                            }
-                        }
-
-                        Button {
-                            id: nativeCodexButton
-                            text: view.service && view.service.activeProviderAccounts.codex === "ambient" ? "Selected" : "Show"
-                            foreground: view.foreground
-                            focusable: true
-                            enabled: view.service && view.service.activeProviderAccounts.codex !== "ambient" && !view.service.providerConfigBusy
-                            onClicked: if (view.service)
-                                view.service.activateCodexAccount("ambient")
-                        }
-                    }
-
-                    Repeater {
-                        model: view.provider && view.provider.provider === "codex" && view.service ? view.service.managedCodexAccounts() : []
-
-                        delegate: Column {
-                            required property var modelData
-                            width: typedAccountsColumn.width
-                            spacing: Style.space(4)
-
-                            PanelSeparator {
-                                width: parent.width
-                                foreground: view.foreground
-                            }
-
-                            Text {
-                                width: parent.width
-                                text: modelData.email !== "" ? modelData.email : modelData.id
-                                color: view.foreground
-                                font.family: view.fontFamily()
-                                font.pixelSize: Style.font.caption
-                                font.bold: modelData.active
-                                elide: Text.ElideMiddle
-                            }
-
-                            Text {
-                                width: parent.width
-                                text: [modelData.plan, modelData.state, modelData.resetLabel, modelData.active ? "selected for display" : ""].filter(function (value) {
-                                    return value !== "";
-                                }).join(" · ")
-                                color: view.muted
-                                font.family: view.fontFamily()
-                                font.pixelSize: Style.font.caption
-                                elide: Text.ElideRight
-                            }
-
-                            Row {
-                                spacing: Style.space(7)
-
-                                Button {
-                                    text: modelData.active ? "Selected" : "Show"
-                                    foreground: view.foreground
-                                    focusable: true
-                                    enabled: view.service && modelData.enabled && !modelData.active && !view.service.providerConfigBusy
-                                    onClicked: if (view.service)
-                                        view.service.activateCodexAccount(modelData.id)
-                                }
-
-                                Button {
-                                    text: "Remove"
-                                    foreground: view.foreground
-                                    focusable: true
-                                    enabled: view.service && !view.service.providerConfigBusy
-                                    onClicked: if (view.service)
-                                        view.service.removeCodexAccount(modelData.id)
-                                }
-                            }
-                        }
-                    }
-
-                    Text {
-                        width: parent.width
-                        visible: !(view.service && view.typedSettingsDescriptor && view.service.availabilityImplemented(view.typedSettingsDescriptor.accounts.availability))
-                        text: "Multiple managed accounts are not available in this build"
-                        color: Color.urgent
-                        font.family: view.fontFamily()
-                        font.pixelSize: Style.font.caption
-                        wrapMode: Text.WordWrap
-                    }
-
-                    Repeater {
-                        model: view.typedAccountActions
-
-                        delegate: Button {
-                            required property var modelData
-
-                            text: String(modelData.title || "Provider action") + (view.service && view.service.availabilityImplemented(modelData.availability) ? "" : " · unavailable")
-                            foreground: view.foreground
-                            focusable: true
-                            enabled: view.service && view.service.availabilityImplemented(modelData.availability) && !(view.service && view.service.providerConfigBusy)
-                            opacity: enabled ? 1 : 0.58
-                            onClicked: if (view.service && view.provider)
-                                view.service.runTypedAction(view.provider.provider, modelData.id)
-                        }
-                    }
-                }
-            }
-
-            Text {
-                width: parent.width
                 visible: view.showFallbackConnection
                 text: view.hasTypedSettings ? "LOGIN & FALLBACK" : "CONNECTION"
                 color: view.muted
@@ -1250,7 +1290,7 @@ Item {
 
                         Button {
                             visible: view.provider && view.provider.canLaunchLogin && !(view.service && view.service.hasImplementedTypedActionTarget(view.provider.provider, "login"))
-                            text: view.provider && view.provider.provider === "copilot" ? "Sign in with GitHub" : "Open login"
+                            text: view.provider && view.provider.provider === "copilot" ? "Sign in with GitHub" : (view.provider && view.provider.provider === "codex" ? "Sign in to native Codex" : "Open login")
                             foreground: view.foreground
                             focusable: true
                             onClicked: if (view.panelRoot && view.panelRoot.service && view.provider)
@@ -1268,6 +1308,24 @@ Item {
                         }
                     }
                 }
+            }
+
+            Button {
+                visible: view.pendingFeatures !== ""
+                text: view.showPendingFeatures ? "Hide feature availability" : "Feature availability"
+                foreground: view.foreground
+                focusable: true
+                onClicked: view.showPendingFeatures = !view.showPendingFeatures
+            }
+
+            Text {
+                width: parent.width
+                visible: view.showPendingFeatures && view.pendingFeatures !== ""
+                text: "Still being built: " + view.pendingFeatures + "."
+                color: view.muted
+                font.family: view.fontFamily()
+                font.pixelSize: Style.font.caption
+                wrapMode: Text.WordWrap
             }
 
             Text {

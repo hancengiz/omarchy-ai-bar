@@ -536,6 +536,20 @@ pub(crate) enum ProviderBootstrapError {
     Grok,
 }
 
+fn codex_history_source(
+    coordinator: CodexCoordinator,
+    account_root: std::path::PathBuf,
+    machine_root: Option<&Path>,
+) -> Result<Arc<CodexRefreshSource>, ProviderBootstrapError> {
+    let root = machine_root.map_or(account_root, Path::to_path_buf);
+    let source = CodexRefreshSource::new(coordinator)?.with_history_root(root);
+    Ok(Arc::new(if machine_root.is_some() {
+        source.with_machine_history()
+    } else {
+        source
+    }))
+}
+
 fn discover_codex(
     config: Option<&AppConfig>,
     app_data_dir: &Path,
@@ -593,8 +607,18 @@ fn discover_codex(
         child_environment,
     )
     .map_err(|_| ProviderBootstrapError::Coordinator)?;
-    let source =
-        Arc::new(CodexRefreshSource::new(coordinator)?.with_history_root(codex_history_root));
+    let machine_history = crate::provider_config::provider_toggle(
+        config,
+        ProviderId::Codex,
+        "local_session_cost_ledger",
+    )
+    .unwrap_or(false);
+    let machine_root = machine_history.then_some(codex_history_root.as_path());
+    let source = codex_history_source(
+        coordinator,
+        codex_history_root.clone(),
+        Some(codex_history_root.as_path()),
+    )?;
     let mut registrations = vec![RefreshRegistration::new(ambient_scope.clone(), source)];
     let mut scopes = vec![ambient_scope];
 
@@ -629,8 +653,7 @@ fn discover_codex(
             child_environment,
         )
         .map_err(|_| ProviderBootstrapError::Coordinator)?;
-        let source =
-            Arc::new(CodexRefreshSource::new(coordinator)?.with_history_root(managed_home));
+        let source = codex_history_source(coordinator, managed_home, machine_root)?;
         registrations.push(RefreshRegistration::new(managed_scope.clone(), source));
         scopes.push(managed_scope);
     }

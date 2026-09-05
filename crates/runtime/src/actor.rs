@@ -8,8 +8,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use oab_domain::{
-    AccountScope, ClassifiedError, CostUsageSnapshot, ErrorKind, Freshness, ProviderId,
-    ProviderSnapshot, RetryEligibility, Timestamp, UsageSample,
+    AccountScope, ClassifiedError, CostUsageSnapshot, ErrorKind, Freshness, LocalHistoryScope,
+    LocalHistorySnapshot, LocalHistoryState, ProviderId, ProviderSnapshot, RetryEligibility,
+    Timestamp, UsageSample,
 };
 use thiserror::Error;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -124,6 +125,21 @@ pub type RefreshFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
 /// Required usage plus optional cost/history acquisition for one provider.
 pub trait RefreshSource: Send + Sync + 'static {
+    /// Independent local activity can load even when quota credentials fail.
+    fn local_history_scope(&self) -> Option<LocalHistoryScope> {
+        None
+    }
+
+    /// Reads local activity independently; a manual trigger bypasses source caches.
+    fn fetch_local_history(
+        &self,
+        _at: Timestamp,
+        _cancellation: CancellationToken,
+        _manual: bool,
+    ) -> RefreshFuture<Result<Option<CostUsageSnapshot>, ClassifiedError>> {
+        Box::pin(async { Ok(None) })
+    }
+
     /// Fetches the display-critical usage sample for an exact routing scope.
     fn fetch_required(
         &self,
@@ -516,8 +532,8 @@ pub struct RuntimeActor {
 }
 
 impl RuntimeActor {
-    /// Builds an unspawned actor and a handle with an initial sequence-one
-    /// loading publication.
+    /// Builds an unspawned actor and a handle with an initial loading
+    /// publication, including independent local-history state when supported.
     ///
     /// # Errors
     ///
@@ -568,7 +584,23 @@ impl RuntimeActor {
         let wall_now = clock.wall_now();
         let (automatic_cooldowns, automatic_failures) =
             retained_automatic_backoff(&retained, wall_now, clock.monotonic_now());
-        let store = SnapshotStore::new_with_retained(sources.keys().cloned(), retained, wall_now)?;
+        let mut store =
+            SnapshotStore::new_with_retained(sources.keys().cloned(), retained, wall_now)?;
+        for (scope, source) in &sources {
+            if let Some(history_scope) = source.local_history_scope() {
+                // A rebuilt source may point at a different history root. Never retain
+                // activity across a configuration/credential boundary without proof.
+                store.apply_local_history(
+                    scope,
+                    LocalHistorySnapshot {
+                        scope: history_scope,
+                        state: LocalHistoryState::Scanning,
+                        data: None,
+                    },
+                    wall_now,
+                )?;
+            }
+        }
         let snapshots = store.subscribe();
         let (command_sender, commands) = mpsc::channel(config.limits.command_capacity());
         let (events, _event_receiver) = broadcast::channel(config.limits.event_capacity());
@@ -756,6 +788,7 @@ impl RuntimeActor {
                 .get(&scope)
                 .is_some_and(|until| *until > self.clock.monotonic_now())
         {
+            self.start_history_only(&scope, trigger)?;
             return Ok(RefreshAdmission::Coalesced);
         }
         if matches!(trigger, RefreshTrigger::Periodic)
@@ -767,6 +800,7 @@ impl RuntimeActor {
                         > self.clock.monotonic_now()
                 })
         {
+            self.start_history_only(&scope, trigger)?;
             return Ok(RefreshAdmission::Coalesced);
         }
         if self.active_required.len() < self.config.limits.max_in_flight() {
@@ -783,6 +817,30 @@ impl RuntimeActor {
         Ok(RefreshAdmission::Queued)
     }
 
+    fn start_history_only(
+        &mut self,
+        scope: &AccountScope,
+        trigger: RefreshTrigger,
+    ) -> Result<(), RuntimeFault> {
+        if self.sources[scope].local_history_scope().is_none()
+            || self.active_optional.contains_key(scope)
+        {
+            return Ok(());
+        }
+        let generation = self.next_generation(scope)?;
+        let at = self.clock.wall_now();
+        self.store
+            .mark_history_state(scope, LocalHistoryState::Scanning, at)?;
+        self.spawn_optional(
+            scope.clone(),
+            generation,
+            None,
+            at,
+            matches!(trigger, RefreshTrigger::Manual),
+        );
+        Ok(())
+    }
+
     fn start_required(
         &mut self,
         scope: AccountScope,
@@ -790,7 +848,11 @@ impl RuntimeActor {
     ) -> Result<(), RuntimeFault> {
         self.automatic_last_attempts
             .insert(scope.clone(), self.clock.monotonic_now());
-        self.cancel_optional(&scope);
+        if self.sources[&scope].local_history_scope().is_none()
+            || matches!(trigger, RefreshTrigger::Manual)
+        {
+            self.cancel_optional(&scope);
+        }
         let generation = self.next_generation(&scope)?;
         let source = Arc::clone(
             self.sources
@@ -821,6 +883,19 @@ impl RuntimeActor {
                 generation,
             },
         );
+        if self.sources[&scope].local_history_scope().is_some()
+            && !self.active_optional.contains_key(&scope)
+        {
+            self.store
+                .mark_history_state(&scope, LocalHistoryState::Scanning, generated_at)?;
+            self.spawn_optional(
+                scope.clone(),
+                generation,
+                None,
+                generated_at,
+                matches!(trigger, RefreshTrigger::Manual),
+            );
+        }
         self.emit(RuntimeEvent::RefreshStarted {
             scope,
             generation,
@@ -829,7 +904,14 @@ impl RuntimeActor {
         Ok(())
     }
 
-    fn spawn_optional(&mut self, scope: AccountScope, generation: u64, sample: UsageSample) {
+    fn spawn_optional(
+        &mut self,
+        scope: AccountScope,
+        generation: u64,
+        sample: Option<UsageSample>,
+        base_fetched_at: Timestamp,
+        manual: bool,
+    ) {
         self.cancel_optional(&scope);
         let source = Arc::clone(
             self.sources
@@ -838,10 +920,16 @@ impl RuntimeActor {
         );
         let cancellation = self.shutdown.child_token();
         let worker_cancellation = cancellation.clone();
-        let base_fetched_at = sample.fetched_at();
         let worker_scope = scope.clone();
         let abort = self.workers.spawn(async move {
-            let result = source.fetch_optional(sample, worker_cancellation).await;
+            let result = match sample {
+                Some(sample) => source.fetch_optional(sample, worker_cancellation).await,
+                None => {
+                    source
+                        .fetch_local_history(base_fetched_at, worker_cancellation, manual)
+                        .await
+                }
+            };
             WorkerExit::Optional {
                 scope: worker_scope,
                 generation,
@@ -917,7 +1005,10 @@ impl RuntimeActor {
                     generation,
                 });
                 self.finish_required(&scope, generation)?;
-                self.spawn_optional(scope, generation, optional_sample);
+                if self.sources[&scope].local_history_scope().is_none() {
+                    let at = optional_sample.fetched_at();
+                    self.spawn_optional(scope, generation, Some(optional_sample), at, false);
+                }
             }
             Ok(_) => {
                 let error = ClassifiedError::new(ErrorKind::Parse);
@@ -990,6 +1081,41 @@ impl RuntimeActor {
             return Ok(());
         }
         self.active_optional.remove(&scope);
+        if let Some(history_scope) = self.sources[&scope].local_history_scope() {
+            let generated_at = self.clock.wall_now();
+            match result {
+                Ok(data) => {
+                    let state = if data.is_some() {
+                        LocalHistoryState::Ready
+                    } else {
+                        LocalHistoryState::Empty
+                    };
+                    self.store.apply_local_history(
+                        &scope,
+                        LocalHistorySnapshot {
+                            scope: history_scope,
+                            state,
+                            data,
+                        },
+                        generated_at,
+                    )?;
+                    self.emit(RuntimeEvent::OptionalEnrichmentPublished { scope, generation });
+                }
+                Err(error) => {
+                    self.store.mark_history_state(
+                        &scope,
+                        LocalHistoryState::Failed,
+                        generated_at,
+                    )?;
+                    self.emit(RuntimeEvent::OptionalEnrichmentFailed {
+                        scope,
+                        generation,
+                        error,
+                    });
+                }
+            }
+            return Ok(());
+        }
         match result {
             Ok(Some(cost_usage)) => {
                 let generated_at = self.clock.wall_now();
@@ -1033,6 +1159,11 @@ impl RuntimeActor {
                 if self.optional_is_current(&scope, generation) =>
             {
                 self.active_optional.remove(&scope);
+                self.store.mark_history_state(
+                    &scope,
+                    LocalHistoryState::Failed,
+                    self.clock.wall_now(),
+                )?;
                 if !error.is_cancelled() {
                     self.emit(RuntimeEvent::OptionalEnrichmentFailed {
                         scope,

@@ -400,14 +400,20 @@ function validUsageSample(value) {
     return (value.subscription_renews_at === null || typeof value.subscription_renews_at === "string") && (value.subscription_expires_at === null || typeof value.subscription_expires_at === "string");
 }
 
+function validLocalHistory(value) {
+    return isObject(value) && hasExactKeys(value, ["scope", "state", "data"]) && ["account", "machine"].indexOf(value.scope) !== -1 && ["scanning", "ready", "empty", "failed"].indexOf(value.state) !== -1 && (value.data === null || isObject(value.data));
+}
+
 function validProviderSnapshot(value) {
     if (!isObject(value) || typeof value.state !== "string")
         return false;
+    if (value.local_history !== undefined && !validLocalHistory(value.local_history))
+        return false;
     if (value.state === "loading")
-        return hasExactKeys(value, ["state", "scope"]) && validScope(value.scope);
+        return hasExactKeys(value, ["state", "scope"], ["local_history"]) && validScope(value.scope);
     if (value.state === "unavailable")
-        return hasExactKeys(value, ["state", "scope", "error"]) && validScope(value.scope) && validClassifiedError(value.error);
-    if (value.state !== "ready" || !hasExactKeys(value, ["state", "last_known_good", "freshness", "refresh", "error"]) || !validUsageSample(value.last_known_good) || !validFreshness(value.freshness) || !validRefresh(value.refresh) || (value.error !== null && !validClassifiedError(value.error)))
+        return hasExactKeys(value, ["state", "scope", "error"], ["local_history"]) && validScope(value.scope) && validClassifiedError(value.error);
+    if (value.state !== "ready" || !hasExactKeys(value, ["state", "last_known_good", "freshness", "refresh", "error"], ["local_history"]) || !validUsageSample(value.last_known_good) || !validFreshness(value.freshness) || !validRefresh(value.refresh) || (value.error !== null && !validClassifiedError(value.error)))
         return false;
     return value.error === null || value.freshness.state === "stale";
 }

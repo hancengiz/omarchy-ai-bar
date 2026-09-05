@@ -365,6 +365,8 @@ Item {
             if (!snapshot && provider !== "codex" && candidates.length > 0)
                 snapshot = candidates[0];
             var sample = sampleFrom(snapshot);
+            var history = snapshot && snapshot.local_history ? snapshot.local_history : null;
+            var costUsage = history ? history.data : (sample ? sample.cost_usage : null);
             var primary = sample && sample.primary ? sample.primary : null;
             var errorKind = snapshot && snapshot.error && snapshot.error.kind ? String(snapshot.error.kind) : "";
             var errorMessage = snapshot && snapshot.error && snapshot.error.message ? String(snapshot.error.message) : "";
@@ -372,11 +374,11 @@ Item {
             // A provider the user explicitly enabled is configured even before its first
             // successful fetch. Keep its setup/error card visible just like CodexBar does;
             // explicitly disabled and merely catalogued providers remain out of the popup.
-            var configured = explicitEnabled === true || sample !== null || ["authentication_expired", "permission_denied", "rate_limited"].indexOf(errorKind) !== -1;
+            var configured = explicitEnabled === true || sample !== null || !!costUsage || ["authentication_expired", "permission_denied", "rate_limited"].indexOf(errorKind) !== -1;
             var detected = snapshot !== null && explicitEnabled === undefined;
             var userConfigured = explicitEnabled !== undefined;
             var loading = snapshot !== null && snapshot.state === "loading";
-            var localHistoryOnly = provider === "copilot" && sample !== null && sample.cost_usage && errorKind === "missing_credential";
+            var localHistoryOnly = (!sample && !!costUsage) || (provider === "copilot" && sample !== null && sample.cost_usage && errorKind === "missing_credential");
             var credentialOwner = provider === "copilot" ? copilotCredentialOwner(sample) : "";
             var status = loading ? "Loading…" : (localHistoryOnly ? "Local history only" : (provider === "copilot" && errorKind === "permission_denied" ? "Copilot access unavailable" : (sample ? (errorKind === "" ? "Connected" : errorKind.replace(/_/g, " ")) : (errorKind === "authentication_expired" ? "Sign in again" : (errorKind === "missing_credential" || errorKind === "" ? "Not configured" : errorKind.replace(/_/g, " "))))));
             return {
@@ -395,7 +397,7 @@ Item {
                 status: status,
                 reset: primary ? (primary.resets_at ? formatResetAt(primary.resets_at) : (primary.reset_description ? String(primary.reset_description) : "")) : "",
                 plan: provider === "copilot" && errorKind !== "" ? "" : identityPlanFrom(sample),
-                account: sample && sample.identity ? String(sample.identity.email || sample.identity.account_label || "") : "",
+                account: sample && sample.identity ? String(sample.identity.email || sample.identity.account_label || "") : (provider === "codex" ? (activeAccount === "ambient" ? "Native account" : activeAccount) : ""),
                 loginMethod: authenticationFrom(sample, provider),
                 updated: sample && sample.fetched_at ? String(sample.fetched_at) : "",
                 source: localHistoryOnly ? "local history" : sourceFrom(sample, provider),
@@ -407,9 +409,12 @@ Item {
                 tabPercent: shortestQuotaPercent(sample),
                 summary: sample ? summaryFrom(sample) : "",
                 optionalSections: sample ? optionalSectionsFrom(sample) : [],
-                costStats: sample ? costStatsFrom(sample.cost_usage) : [],
-                costChart: sample ? costChartFrom(sample.cost_usage) : null,
-                costCaption: sample ? costCaptionFrom(sample.cost_usage, provider) : "",
+                localHistory: history,
+                costUsage: costUsage || null,
+                historySupported: history !== null || provider === "codex" || provider === "claude",
+                costStats: costStatsFrom(costUsage),
+                costChart: costChartFrom(costUsage),
+                costCaption: costCaptionFrom(costUsage, provider),
                 detailSections: sample && Array.isArray(sample.detail_sections) ? sample.detail_sections : [],
                 configurationHint: provider === "copilot" && errorKind === "permission_denied" ? "GitHub recognizes the account but reports no active Copilot feature access. Check the subscription, assigned seat, or organization policy; repeated login will not restore entitlement." : (provider === "copilot" && credentialOwner === "environment" ? "Using an explicit COPILOT_API_TOKEN environment override. Omarchy AI Bar cannot remove that value; update the user-service environment to sign out." : configurationHintFor(provider)),
                 environmentKey: environmentKeyFor(provider),
@@ -772,6 +777,10 @@ Item {
             return options.source;
         case "grok-cookie-source":
             return options.cookie_source;
+        case "codex-local-session-cost-ledger":
+            return extensions.local_session_cost_ledger;
+        case "claude-daily-routines-usage-visible":
+            return extensions.daily_routines_usage_visible;
         case "codex-spark-usage-visible":
             return extensions.spark_usage_visible;
         case "codex-external-oauth-sources":
@@ -797,7 +806,7 @@ Item {
     function defaultProviderSettingValue(provider, control) {
         var item = typedControlItem(control);
         var settingId = item ? String(item.id || "") : "";
-        if (settingId === "codex-spark-usage-visible")
+        if (settingId === "codex-spark-usage-visible" || settingId === "claude-daily-routines-usage-visible")
             return true;
         if (settingId === "zai-api-region")
             return "global";
@@ -1215,11 +1224,21 @@ Item {
             var extra = extras[index];
             if (provider === "codex" && extra && String(extra.id || "").indexOf("codex-spark") === 0 && explicitProviderSettingValue("codex", "codex-spark-usage-visible") === false)
                 continue;
+            if (provider === "claude" && extra && String(extra.id || "") === "claude-routines" && explicitProviderSettingValue("claude", "claude-daily-routines-usage-visible") === false)
+                continue;
             var row = extra ? windowRow(String(extra.title || "Quota"), extra.window) : null;
-            if (row)
+            if (row) {
+                row.id = String(extra.id || "");
                 values.push(row);
+            }
         }
         return values;
+    }
+
+    function windowsForDisplay(row, showOptional) {
+        return (row && row.windows ? row.windows : []).filter(function (window) {
+            return showOptional || window.id !== "claude-routines";
+        });
     }
 
     function summaryFrom(sample) {
@@ -1490,12 +1509,12 @@ Item {
         var historyAmount = costUsage.history.amount;
         if (todayAmount !== null && todayAmount !== undefined)
             values.push({
-                label: "Today",
+                label: costUsage.session.coverage && Number(costUsage.session.coverage.unpriced || 0) > 0 ? "Today known cost" : "Today estimated cost",
                 value: formatAmount(costUsage, todayAmount)
             });
         if (historyAmount !== null && historyAmount !== undefined)
             values.push({
-                label: "Last " + String(costUsage.history_days || 30) + " days cost",
+                label: "Last " + String(costUsage.history_days || 30) + " days " + (costUsage.history.coverage && Number(costUsage.history.coverage.unpriced || 0) > 0 ? "known cost" : "cost"),
                 value: formatAmount(costUsage, historyAmount)
             });
         if (costUsage.session.total_tokens !== null && costUsage.session.total_tokens !== undefined)
@@ -1511,24 +1530,60 @@ Item {
         return values;
     }
 
-    function costChartFrom(costUsage) {
+    function costChartFrom(costUsage, metric) {
         if (!costUsage || !Array.isArray(costUsage.daily) || costUsage.daily.length === 0)
             return null;
-        var useCost = costUsage.daily.some(function (bucket) {
+        var useCost = metric ? metric === "cost" : costUsage.daily.some(function (bucket) {
             return bucket && bucket.metrics && bucket.metrics.amount !== null && bucket.metrics.amount !== undefined;
         });
+        var buckets = {};
+        costUsage.daily.forEach(function (bucket) {
+            buckets[String(bucket.day)] = bucket.metrics;
+        });
+        var end = new Date(costUsage.updated_at || costUsage.daily[costUsage.daily.length - 1].day);
+        var count = Math.max(1, Math.min(365, Number(costUsage.history_days || 30)));
+        var days = [];
+        if (!isNaN(end.getTime())) {
+            end = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
+            for (var day = count - 1; day >= 0; day--)
+                days.push(new Date(end - day * 86400000).toISOString().slice(0, 10));
+        } else {
+            days = Object.keys(buckets).sort();
+        }
         return {
             kind: "bar",
             title: useCost ? "Daily estimated cost" : "Daily tokens",
-            unit: useCost ? (currencyPrefix(costUsage) || String(costUsage.unit.unit || "")) : "tokens",
-            points: costUsage.daily.map(function (bucket) {
-                var raw = useCost ? bucket.metrics.amount : bucket.metrics.total_tokens;
+            unit: useCost ? (currencyPrefix(costUsage) || String(costUsage.unit && costUsage.unit.unit || "")) : "tokens",
+            points: days.map(function (day) {
+                var metrics = buckets[day];
+                var raw = metrics ? (useCost ? metrics.amount : metrics.total_tokens) : (costUsage.history_coverage_established === true ? 0 : null);
+                var incomplete = useCost && metrics && metrics.coverage && Number(metrics.coverage.unpriced || 0) > 0;
+                var known = raw !== undefined && raw !== null && !incomplete && isFinite(Number(raw));
                 return {
-                    label: String(bucket.day || "").slice(5),
-                    value: Number(raw || 0)
+                    label: day.slice(5),
+                    date: day,
+                    value: known ? Number(raw) : null,
+                    exact: known ? String(raw) : "Unknown",
+                    note: incomplete ? "Pricing incomplete" : (known ? "" : "No coverage")
                 };
             })
         };
+    }
+
+    function localHistoryMessage(row) {
+        var history = row && row.localHistory;
+        if (!history)
+            return row && row.costUsage ? "" : "Local history has not been checked yet.";
+        if (history.state === "scanning")
+            return history.data ? "Updating local activity · previous totals remain visible" : "Reading local session history…";
+        if (history.state === "failed")
+            return history.data ? "History refresh failed · showing previous totals" : "Local history could not be read. Refresh to try again.";
+        if (history.state === "empty")
+            return history.scope === "machine" ? "No local sessions found in the last 30 days." : "No local sessions for this account. Signing in does not download activity history.";
+        if (history.data && history.data.history_coverage_established === false)
+            return "History coverage is incomplete. Unread days remain unavailable.";
+        var coverage = history.data && history.data.history ? history.data.history.coverage : null;
+        return coverage && Number(coverage.unpriced || 0) > 0 ? "Some requests have no known price. Token totals remain available." : "";
     }
 
     function costCaptionFrom(costUsage, provider) {

@@ -1403,13 +1403,21 @@ plugin_tree_matches_frozen_manifest() {
     cd -- "$root" || exit 1
     find . -xdev -mindepth 1 -maxdepth 1 -type f -printf '%P\0' | LC_ALL=C sort -z
   )
-  [[ ${#names[@]} == 13 && ${names[0]} == AppSettings.qml &&
-    ${names[1]} == BarWidget.qml && ${names[2]} == InlineChart.qml &&
-    ${names[3]} == Panel.qml && ${names[4]} == Protocol.js &&
-    ${names[5]} == ProviderCatalog.qml && ${names[6]} == ProviderDetail.qml &&
-    ${names[7]} == QuotaMetric.qml && ${names[8]} == Service.qml &&
-    ${names[9]} == SettingsHome.qml && ${names[10]} == UsageExtraSection.qml &&
-    ${names[11]} == UsageView.qml && ${names[12]} == manifest.json ]] || return 1
+  [[ ${#names[@]} == 14 &&
+    ${names[0]} == AppSettings.qml &&
+    ${names[1]} == BarWidget.qml &&
+    ${names[2]} == InlineChart.qml &&
+    ${names[3]} == LocalActivity.qml &&
+    ${names[4]} == Panel.qml &&
+    ${names[5]} == Protocol.js &&
+    ${names[6]} == ProviderCatalog.qml &&
+    ${names[7]} == ProviderDetail.qml &&
+    ${names[8]} == QuotaMetric.qml &&
+    ${names[9]} == Service.qml &&
+    ${names[10]} == SettingsHome.qml &&
+    ${names[11]} == UsageExtraSection.qml &&
+    ${names[12]} == UsageView.qml &&
+    ${names[13]} == manifest.json ]] || return 1
   tree_manifest "$root" "$destination" || return 1
   manifest_sha256=$(sha256_file "$destination") || return 1
   [[ $manifest_sha256 == "$expected_plugin_manifest_sha256" ]]
