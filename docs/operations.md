@@ -148,6 +148,16 @@ manage the same accounts from a terminal. `ambient` selects the native Codex
 CLI account. Managed accounts refresh in independent daemon scopes, and none
 of these operations overwrite `~/.codex/auth.json`.
 
+Each account's banked resets appear in the account switcher and settings list.
+OAuth quota refreshes fetch inventory with the same credential snapshot and
+account header; CLI results are enriched only after matching their identity to
+the scoped OAuth credential. PAT-only accounts show inventory as unavailable.
+An inventory error does not discard quota usage or reuse inventory from an
+older successful sample. A zero balance is shown explicitly, retained balances
+are marked last known, and known expirations are updated while the UI is open.
+This feature never redeems a reset. Normalized reset IDs use an installation-local
+private `privacy-key` in the application data directory.
+
 Typed providers may expose more than one purpose-specific credential. Supply
 the exact descriptor slot with `--slot`; unsupported provider/slot pairs are
 rejected before Secret Service is opened:

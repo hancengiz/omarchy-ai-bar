@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use oab_domain::{
-    AccountKey, AccountScope, ClassifiedError, ProviderId, ProviderInstanceId, Timestamp,
+    AccountKey, AccountScope, ClassifiedError, PrivacyKey, ProviderId, ProviderInstanceId,
+    Timestamp,
 };
 use oab_providers::browser_cookie::ChromiumCookieDecryptor;
 use oab_providers::browser_profile::BrowserProfileDiscovery;
@@ -538,6 +539,7 @@ pub(crate) enum ProviderBootstrapError {
 fn discover_codex(
     config: Option<&AppConfig>,
     app_data_dir: &Path,
+    privacy_key: &PrivacyKey,
     home: &Path,
     child_environment: &BTreeMap<String, String>,
 ) -> Result<(Vec<RefreshRegistration>, Vec<AccountScope>, bool), ProviderBootstrapError> {
@@ -581,7 +583,8 @@ fn discover_codex(
         allow_external_oauth,
         None,
     )
-    .map_err(|_| ProviderBootstrapError::Coordinator)?;
+    .map_err(|_| ProviderBootstrapError::Coordinator)?
+    .with_reset_credit_key(privacy_key.clone());
     let coordinator = CodexCoordinator::production(
         ambient_scope.clone(),
         settings,
@@ -616,7 +619,8 @@ fn discover_codex(
             false,
             None,
         )
-        .map_err(|_| ProviderBootstrapError::Coordinator)?;
+        .map_err(|_| ProviderBootstrapError::Coordinator)?
+        .with_reset_credit_key(privacy_key.clone());
         let coordinator = CodexCoordinator::production(
             managed_scope.clone(),
             settings,
@@ -639,6 +643,7 @@ fn discover_codex(
 pub(crate) fn discover(
     config: Option<&AppConfig>,
     app_data_dir: &std::path::Path,
+    privacy_key: &PrivacyKey,
 ) -> Result<ProductionProviders, ProviderBootstrapError> {
     let home = env::var_os("HOME")
         .filter(|value| !value.is_empty())
@@ -648,7 +653,7 @@ pub(crate) fn discover(
     crate::credentials::hydrate_environment(&mut child_environment);
     crate::provider_config::apply_provider_route_environment(config, &mut child_environment);
     let (mut registrations, mut scopes, codex_detected) =
-        discover_codex(config, app_data_dir, &home, &child_environment)?;
+        discover_codex(config, app_data_dir, privacy_key, &home, &child_environment)?;
 
     let mut detected_providers = BTreeSet::new();
     if codex_detected {

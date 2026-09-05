@@ -23,6 +23,7 @@ pub mod codex_files;
 pub mod codex_http;
 pub mod codex_normalize;
 pub mod codex_provider;
+pub mod codex_resets;
 pub mod codex_runner;
 pub mod commandcode;
 pub mod copilot;

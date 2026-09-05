@@ -1484,6 +1484,21 @@ impl UsageSample {
         self.subscription_expires_at
     }
 
+    /// Attaches inventory only when it belongs to this exact account scope.
+    ///
+    /// # Errors
+    /// Returns an error if the inventory belongs to another account.
+    pub fn with_reset_credits(
+        mut self,
+        inventory: ResetCreditsSnapshot,
+    ) -> Result<Self, SnapshotError> {
+        if inventory.scope() != &self.scope {
+            return Err(SnapshotError::ScopeMismatch);
+        }
+        self.reset_credits = Some(inventory);
+        Ok(self)
+    }
+
     #[must_use]
     pub const fn reset_credits(&self) -> Option<&ResetCreditsSnapshot> {
         self.reset_credits.as_ref()

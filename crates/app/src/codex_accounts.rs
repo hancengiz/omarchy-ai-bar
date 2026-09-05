@@ -15,7 +15,9 @@ use getrandom::getrandom;
 use oab_domain::{AccountKey, ProviderId, ProviderInstanceId};
 use oab_providers::executable::resolve_executable;
 use oab_providers::providers::codex_files::{CodexCredentialPaths, load_bearer_for_usage};
-use oab_storage::atomic_file::{atomic_write, read_private_file};
+use oab_storage::atomic_file::{
+    atomic_write, atomic_write_without_predecessor, read_private_file, stage_write,
+};
 use oab_storage::config::{
     AccountConfig, AppConfig, CURRENT_SCHEMA_VERSION, MAX_CONFIG_BYTES, ProviderConfig,
     ProviderOptionValue, ProviderOptions, validate_config,
@@ -24,6 +26,7 @@ use oab_storage::paths::AppPaths;
 use serde::Serialize;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
+use zeroize::Zeroizing;
 
 pub(crate) const AMBIENT_ACCOUNT_ID: &str = "ambient";
 pub(crate) const ACTIVE_ACCOUNT_OPTION: &str = "active_account";
@@ -150,6 +153,22 @@ pub(crate) fn login(
     let home = account_home(paths, &account)?;
     ensure_private_directory(&home)?;
 
+    let result = login_in_home(paths, &account);
+    if result.is_err()
+        || result
+            .as_ref()
+            .is_ok_and(|saved| saved.id != account.as_str())
+    {
+        remove_failed_home(&home);
+    }
+    result
+}
+
+fn login_in_home(
+    paths: &AppPaths,
+    pending_account: &AccountKey,
+) -> Result<ManagedCodexAccountSummary, ManagedCodexAccountError> {
+    let home = account_home(paths, pending_account)?;
     let executable = resolve_executable(
         "codex",
         env::var("OMARCHY_AI_BAR_CODEX_EXECUTABLE").ok().as_deref(),
@@ -174,7 +193,7 @@ pub(crate) fn login(
         return Err(ManagedCodexAccountError::LoginFailed);
     }
 
-    let identity = match managed_identity(paths, &account) {
+    let identity = match managed_identity(paths, pending_account) {
         Ok(identity) if identity.email.is_some() || identity.provider_account_id.is_some() => {
             identity
         }
@@ -183,17 +202,35 @@ pub(crate) fn login(
             return Err(ManagedCodexAccountError::MissingIdentity);
         }
     };
+    finish_login(paths, pending_account, identity)
+}
+
+fn finish_login(
+    paths: &AppPaths,
+    pending_account: &AccountKey,
+    identity: ManagedIdentity,
+) -> Result<ManagedCodexAccountSummary, ManagedCodexAccountError> {
     let mut config = load_config(paths)?;
-    let duplicate_accounts = duplicate_accounts(paths, &config, &identity);
+    let duplicates = duplicate_accounts(paths, &config, &identity);
+    // Keep the routing key and home (including session history) across reauthentication.
+    let account = duplicates.first().unwrap_or(pending_account).clone();
     let route = codex_route_mut(&mut config);
     route.enabled = true;
     route
         .accounts
-        .retain(|candidate| !duplicate_accounts.contains(&candidate.id));
-    route.accounts.push(AccountConfig {
-        id: account.clone(),
-        enabled: true,
-    });
+        .retain(|candidate| candidate.id == account || !duplicates.contains(&candidate.id));
+    if let Some(existing) = route
+        .accounts
+        .iter_mut()
+        .find(|candidate| candidate.id == account)
+    {
+        existing.enabled = true;
+    } else {
+        route.accounts.push(AccountConfig {
+            id: account.clone(),
+            enabled: true,
+        });
+    }
     route.options.extensions.insert(
         ACTIVE_ACCOUNT_OPTION.to_owned(),
         ProviderOptionValue::Text(account.as_str().to_owned()),
@@ -201,14 +238,34 @@ pub(crate) fn login(
     if !config.provider_order.contains(&ProviderId::Codex) {
         config.provider_order.push(ProviderId::Codex);
     }
-    if let Err(error) = write_config(paths, &config) {
-        remove_failed_home(&home);
-        return Err(error);
+    validate_config(&config).map_err(|_| ManagedCodexAccountError::Storage)?;
+    let mut bytes =
+        serde_json::to_vec_pretty(&config).map_err(|_| ManagedCodexAccountError::Storage)?;
+    bytes.push(b'\n');
+    // Prepare configuration before touching an existing login, so a failed save leaves it intact.
+    let config_write = stage_write(paths.config_file(), &bytes)
+        .and_then(oab_storage::atomic_file::StagedWrite::prepare)
+        .map_err(|_| ManagedCodexAccountError::Storage)?;
+    let replacement = if account == *pending_account {
+        None
+    } else {
+        let auth_path = account_home(paths, &account)?.join("auth.json");
+        let old_auth = read_auth(&auth_path)?;
+        let new_auth = read_auth(&account_home(paths, pending_account)?.join("auth.json"))?;
+        atomic_write_without_predecessor(&auth_path, &new_auth)
+            .map_err(|_| ManagedCodexAccountError::Storage)?;
+        Some((auth_path, old_auth))
+    };
+    if config_write.commit().is_err() {
+        if let Some((auth_path, old_auth)) = replacement {
+            atomic_write_without_predecessor(auth_path, &old_auth)
+                .map_err(|_| ManagedCodexAccountError::Storage)?;
+        }
+        return Err(ManagedCodexAccountError::Storage);
     }
-    for duplicate in duplicate_accounts {
-        archive_managed_home(paths, &duplicate)?;
+    for duplicate in duplicates.iter().filter(|id| **id != account) {
+        archive_managed_home(paths, duplicate)?;
     }
-
     Ok(ManagedCodexAccountSummary {
         id: account.as_str().to_owned(),
         email: identity.email,
@@ -219,12 +276,19 @@ pub(crate) fn login(
     })
 }
 
+fn read_auth(path: &Path) -> Result<Zeroizing<Vec<u8>>, ManagedCodexAccountError> {
+    read_private_file(path, 1024 * 1024)
+        .map_err(|_| ManagedCodexAccountError::Storage)?
+        .map(Zeroizing::new)
+        .ok_or(ManagedCodexAccountError::Storage)
+}
+
 pub(crate) fn activate(paths: &AppPaths, requested: &str) -> Result<(), ManagedCodexAccountError> {
     let mut config = load_config(paths)?;
     if requested != AMBIENT_ACCOUNT_ID
         && !configured_managed_accounts(Some(&config))
             .iter()
-            .any(|account| account.id.as_str() == requested)
+            .any(|account| account.enabled && account.id.as_str() == requested)
     {
         return Err(ManagedCodexAccountError::UnknownAccount);
     }
@@ -340,17 +404,13 @@ fn duplicate_accounts(
 }
 
 fn same_identity(left: &ManagedIdentity, right: &ManagedIdentity) -> bool {
-    match (
-        left.provider_account_id.as_deref(),
-        right.provider_account_id.as_deref(),
-    ) {
-        (Some(left), Some(right)) => left == right,
-        (None, None) => match (left.email.as_deref(), right.email.as_deref()) {
-            (Some(left), Some(right)) => left.eq_ignore_ascii_case(right),
-            _ => false,
-        },
+    let same_email = match (left.email.as_deref(), right.email.as_deref()) {
+        (Some(left), Some(right)) => left.trim().eq_ignore_ascii_case(right.trim()),
         _ => false,
-    }
+    };
+    // Workspace IDs can be shared by multiple users. Neither a workspace ID alone
+    // nor a matching email across two different workspaces establishes the same login.
+    same_email && left.provider_account_id == right.provider_account_id
 }
 
 fn codex_route(config: Option<&AppConfig>) -> Option<&ProviderConfig> {
@@ -563,7 +623,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_detection_prefers_provider_account_id_and_uses_email_only_as_fallback() {
+    fn duplicate_detection_requires_both_email_and_workspace() {
         let provider_match = ManagedIdentity {
             email: Some("new@example.com".into()),
             provider_account_id: Some("account-1".into()),
@@ -572,7 +632,12 @@ mod tests {
             email: Some("old@example.com".into()),
             provider_account_id: Some("account-1".into()),
         };
-        assert!(same_identity(&provider_match, &same_provider));
+        assert!(!same_identity(&provider_match, &same_provider));
+        let same_login = ManagedIdentity {
+            email: Some("NEW@example.com".into()),
+            provider_account_id: Some("account-1".into()),
+        };
+        assert!(same_identity(&provider_match, &same_login));
 
         let different_provider = ManagedIdentity {
             email: Some("new@example.com".into()),

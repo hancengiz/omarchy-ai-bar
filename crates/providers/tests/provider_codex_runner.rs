@@ -676,3 +676,217 @@ async fn direct_runner_rejects_foreign_scope_before_credentials_or_network() {
     );
     assert!(server.requests().is_empty());
 }
+
+#[tokio::test]
+async fn managed_auto_keeps_oauth_and_banked_resets_scoped_despite_ambient_pat() {
+    let fixture = CredentialFixture::new();
+    fixture.write(
+        ".codex/auth.json",
+        format!(r#"{{"personal_access_token":"{PAT_SECRET}"}}"#),
+    );
+    for (account, count) in [("alpha", 2), ("beta", 5)] {
+        let mut auth: Value = serde_json::from_slice(&native_oauth_auth(
+            FETCHED_AT + 3600,
+            &format!("{account}@example.test"),
+        ))
+        .unwrap();
+        auth["tokens"]["account_id"] = json!(account);
+        auth["tokens"]["access_token"] =
+            json!(jwt(&json!({"exp": FETCHED_AT + 3600, "account": account})));
+        fixture.write(
+            format!("managed/{account}/auth.json"),
+            serde_json::to_vec(&auth).unwrap(),
+        );
+        let home = fixture.path(format!("managed/{account}"));
+        let server = FakeHttpServer::start([
+            FakeHttpResponse::new(200, usage_body(23)),
+            FakeHttpResponse::new(
+                200,
+                serde_json::to_vec(&json!({"available_count": count, "credits": []})).unwrap(),
+            ),
+        ])
+        .await;
+        let selected_scope = scope(account);
+        let coordinator = CodexCoordinator::new(
+            selected_scope.clone(),
+            settings(
+                CodexSourceMode::Auto,
+                CodexAccountSelection::Profile,
+                false,
+                None,
+            )
+            .with_reset_credit_key(oab_domain::PrivacyKey::from_bytes([7; 32])),
+            Arc::new(runner(fixture.paths(Some(home.as_os_str())), None, &server)),
+        );
+        let sample = coordinator
+            .fetch_at(timestamp(), &CancellationToken::new())
+            .await
+            .unwrap();
+        assert_sample_source(&sample, &selected_scope, "oauth");
+        assert_eq!(
+            sample.identity().email().unwrap().as_str(),
+            format!("{account}@example.test")
+        );
+        let inventory = sample.reset_credits().unwrap();
+        assert_eq!(inventory.scope(), &selected_scope);
+        assert_eq!(inventory.reported_available_count(), count);
+        let requests = server.requests();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[1].target(), "/wham/rate-limit-reset-credits");
+        assert_eq!(requests[1].method(), "GET");
+        for request in &requests {
+            assert_eq!(request.header("chatgpt-account-id"), Some(account));
+            assert_eq!(
+                request.header("authorization"),
+                Some(
+                    format!(
+                        "Bearer {}",
+                        auth["tokens"]["access_token"].as_str().unwrap()
+                    )
+                    .as_str()
+                )
+            );
+        }
+        assert_eq!(requests[1].header("openai-beta"), Some("codex-1"));
+        assert_eq!(requests[1].header("originator"), Some("Codex Desktop"));
+    }
+}
+
+#[tokio::test]
+async fn optional_banked_reset_failure_preserves_quota_and_does_not_fallback_to_cli() {
+    for (status, body) in [
+        (401, "{}"),
+        (429, "{}"),
+        (500, "{}"),
+        (200, "invalid"),
+        (200, "{\"credits\":[],\"available_count\":-1}"),
+    ] {
+        let fixture = CredentialFixture::new();
+        fixture.write(
+            ".codex/auth.json",
+            native_oauth_auth(FETCHED_AT + 3600, "alpha@example.test"),
+        );
+        let cli = FakeCli::new();
+        let server = FakeHttpServer::start([
+            FakeHttpResponse::new(200, usage_body(23)),
+            FakeHttpResponse::new(status, body.as_bytes().to_vec()),
+        ])
+        .await;
+        let coordinator = CodexCoordinator::new(
+            scope("alpha"),
+            settings(
+                CodexSourceMode::Auto,
+                CodexAccountSelection::Profile,
+                false,
+                None,
+            )
+            .with_reset_credit_key(oab_domain::PrivacyKey::from_bytes([7; 32])),
+            Arc::new(runner(
+                fixture.paths(None),
+                Some(cli.executable.clone()),
+                &server,
+            )),
+        );
+        let sample = coordinator
+            .fetch_at(timestamp(), &CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(sample.primary().is_some());
+        assert!(sample.reset_credits().is_none());
+        assert!(!cli.marker.exists());
+    }
+}
+
+#[tokio::test]
+async fn banked_resets_after_cli_require_the_same_scoped_identity() {
+    for (email, expected_requests) in [("cli-owner@example.test", 1), ("different@example.test", 0)]
+    {
+        let fixture = CredentialFixture::new();
+        fixture.write(
+            "profiles/work/auth.json",
+            native_oauth_auth(FETCHED_AT + 3600, email),
+        );
+        let home = fixture.path("profiles/work");
+        let cli = FakeCli::new();
+        let server = FakeHttpServer::start([FakeHttpResponse::new(
+            200,
+            br#"{"available_count":3,"credits":[]}"#.to_vec(),
+        )])
+        .await;
+        let coordinator = CodexCoordinator::new(
+            scope("work"),
+            settings(
+                CodexSourceMode::Cli,
+                CodexAccountSelection::Profile,
+                false,
+                None,
+            )
+            .with_reset_credit_key(oab_domain::PrivacyKey::from_bytes([7; 32])),
+            Arc::new(runner(
+                fixture.paths(Some(home.as_os_str())),
+                Some(cli.executable.clone()),
+                &server,
+            )),
+        );
+        let sample = coordinator
+            .fetch_at(timestamp(), &CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(server.requests().len(), expected_requests);
+        assert_eq!(
+            sample
+                .reset_credits()
+                .map(oab_domain::ResetCreditsSnapshot::reported_available_count),
+            if expected_requests == 1 {
+                Some(3)
+            } else {
+                None
+            }
+        );
+        assert!(
+            fs::read_to_string(&cli.environment)
+                .unwrap()
+                .contains(home.to_str().unwrap())
+        );
+    }
+}
+
+#[tokio::test]
+async fn cancellation_during_optional_inventory_is_terminal() {
+    let fixture = CredentialFixture::new();
+    fixture.write(
+        ".codex/auth.json",
+        native_oauth_auth(FETCHED_AT + 3600, "alpha@example.test"),
+    );
+    let server = FakeHttpServer::start([
+        FakeHttpResponse::new(200, usage_body(23)),
+        FakeHttpResponse::stall(),
+    ])
+    .await;
+    let coordinator = Arc::new(CodexCoordinator::new(
+        scope("alpha"),
+        settings(
+            CodexSourceMode::OAuth,
+            CodexAccountSelection::Ambient,
+            false,
+            None,
+        )
+        .with_reset_credit_key(oab_domain::PrivacyKey::from_bytes([7; 32])),
+        Arc::new(runner(fixture.paths(None), None, &server)),
+    ));
+    let cancellation = CancellationToken::new();
+    let task_cancel = cancellation.clone();
+    let task = tokio::spawn(async move { coordinator.fetch_at(timestamp(), &task_cancel).await });
+    for _ in 0..100 {
+        if server.requests().len() == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(server.requests().len(), 2);
+    cancellation.cancel();
+    assert_eq!(
+        task.await.unwrap().unwrap_err(),
+        CodexCoordinatorError::Cancelled
+    );
+}

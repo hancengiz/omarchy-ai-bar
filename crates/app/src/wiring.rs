@@ -2074,15 +2074,21 @@ fn run_daemon_or_forward() -> AppExitCode {
                     return AppExitCode::Internal;
                 }
             };
-            let providers =
-                match crate::provider_bootstrap::discover(active_config.as_ref(), paths.data_dir())
-                {
-                    Ok(providers) => providers,
-                    Err(_error) => {
-                        eprintln!("{INTERNAL_MESSAGE}");
-                        return AppExitCode::Internal;
-                    }
-                };
+            let Ok(privacy_key) = oab_storage::privacy::load_or_create(paths.data_dir()) else {
+                eprintln!("{INTERNAL_MESSAGE}");
+                return AppExitCode::Internal;
+            };
+            let providers = match crate::provider_bootstrap::discover(
+                active_config.as_ref(),
+                paths.data_dir(),
+                &privacy_key,
+            ) {
+                Ok(providers) => providers,
+                Err(_error) => {
+                    eprintln!("{INTERNAL_MESSAGE}");
+                    return AppExitCode::Internal;
+                }
+            };
             let snapshot_cache = paths.cache_dir().join("last-known-good.json");
             match daemon::run(socket, &display_socket, &snapshot_cache, providers) {
                 Ok(()) => AppExitCode::Success,

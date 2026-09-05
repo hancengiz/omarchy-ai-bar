@@ -39,7 +39,9 @@
         "crates/providers/tests/provider_codex_normalize.rs",
         "crates/providers/tests/provider_codex_provider.rs",
         "crates/providers/tests/provider_codex_runner.rs",
-        "crates/providers/tests/provider_settings_descriptor.rs"
+        "crates/providers/tests/provider_settings_descriptor.rs",
+        "crates/app/tests/codex_accounts.rs",
+        "crates/providers/tests/provider_codex_resets.rs"
       ]
     },
     {

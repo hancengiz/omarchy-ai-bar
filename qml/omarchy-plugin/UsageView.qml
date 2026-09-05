@@ -170,337 +170,379 @@ Item {
             Repeater {
                 model: view.providers
 
-                delegate: BorderSurface {
-                    id: providerSurface
+                delegate: Column {
+                    id: providerGroup
                     required property var modelData
-                    readonly property color providerAccent: view.accentForProvider(modelData.provider)
                     width: usageColumn.width
-                    implicitHeight: cardColumn.implicitHeight + Style.space(22)
-                    color: Style.normalFillFor(view.foreground, Color.accent)
-                    borderSpec: Border.controlSpec("normal", view.foreground, Color.accent)
-                    radius: Style.cornerRadius
+                    spacing: Style.space(8)
 
-                    Column {
-                        id: cardColumn
-                        anchors.centerIn: parent
-                        width: parent.width - Style.space(24)
+                    Row {
+                        width: parent.width
                         spacing: Style.space(8)
-
-                        Row {
-                            width: parent.width
-
-                            Text {
-                                width: parent.width - accountLabel.width
-                                text: providerSurface.modelData.label
-                                color: view.foreground
-                                font.family: view.fontFamily()
-                                font.pixelSize: Style.font.body
-                                font.bold: true
-                                elide: Text.ElideRight
-                            }
-
-                            Text {
-                                id: accountLabel
-                                text: view.panelRoot ? view.panelRoot.accountText(providerSurface.modelData.account) : providerSurface.modelData.account
-                                visible: text !== ""
-                                color: view.muted
-                                font.family: view.fontFamily()
-                                font.pixelSize: Style.font.caption
-                                elide: Text.ElideMiddle
-                            }
-                        }
-
-                        Row {
-                            width: parent.width
-
-                            Text {
-                                width: parent.width - planLabel.width
-                                text: [providerSurface.modelData.refreshing ? "Refreshing…" : providerSurface.modelData.status, view.privateText(providerSurface.modelData.source)].filter(function (value) {
-                                    return value !== "";
-                                }).join(" · ")
-                                color: providerSurface.modelData.errorKind !== "" || (!providerSurface.modelData.ready && !providerSurface.modelData.loading) ? Color.urgent : view.muted
-                                font.family: view.fontFamily()
-                                font.pixelSize: Style.font.caption
-                                elide: Text.ElideRight
-                            }
-
-                            Text {
-                                id: planLabel
-                                text: providerSurface.modelData.plan
-                                visible: text !== ""
-                                color: view.muted
-                                font.family: view.fontFamily()
-                                font.pixelSize: Style.font.caption
-                            }
-                        }
-
+                        visible: providerGroup.modelData.provider === "codex" && view.panelRoot && view.panelRoot.service && view.panelRoot.service.codexAccountChoices().length > 1
                         Text {
-                            width: parent.width
-                            visible: view.relativeUpdated(providerSurface.modelData.updated) !== "" || providerSurface.modelData.stale
-                            text: providerSurface.modelData.stale ? [view.relativeUpdated(providerSurface.modelData.updated) !== "" ? "Last updated " + view.relativeUpdated(providerSurface.modelData.updated) : "Last update unavailable", view.relativeUpdated(providerSurface.modelData.staleSince) !== "" ? "stale since " + view.relativeUpdated(providerSurface.modelData.staleSince) : "stale"].join(" · ") : "Updated " + view.relativeUpdated(providerSurface.modelData.updated)
-                            color: view.muted
+                            width: parent.width - layoutTabs.width - layoutList.width - parent.spacing * 2
+                            text: "Codex subscriptions"
+                            color: view.foreground
                             font.family: view.fontFamily()
-                            font.pixelSize: Style.font.caption
-                            elide: Text.ElideRight
+                            font.pixelSize: Style.font.body
+                            font.bold: true
                         }
-
-                        Flow {
-                            width: parent.width
-                            spacing: Style.space(6)
-                            visible: providerSurface.modelData.provider === "codex" && view.panelRoot && view.panelRoot.service && view.panelRoot.service.codexAccountChoices().length > 1
-
-                            Repeater {
-                                model: view.panelRoot && view.panelRoot.service ? view.panelRoot.service.codexAccountChoices() : []
-
-                                delegate: Button {
-                                    required property var modelData
-                                    text: {
-                                        var label = String(modelData.email || "");
-                                        if (label === "")
-                                            label = modelData.ambient ? "Native" : String(modelData.id || "Account");
-                                        return (modelData.active ? "● " : "") + label;
-                                    }
-                                    foreground: view.foreground
-                                    focusable: true
-                                    enabled: view.panelRoot && view.panelRoot.service && !modelData.active && !view.panelRoot.service.providerConfigBusy
-                                    onClicked: if (view.panelRoot && view.panelRoot.service)
-                                        view.panelRoot.service.activateCodexAccount(modelData.id)
-                                }
-                            }
-                        }
-
-                        PanelSeparator {
-                            width: parent.width
+                        Button {
+                            id: layoutTabs
+                            text: "Tabs"
                             foreground: view.foreground
+                            focusable: true
+                            enabled: view.setting("codexAccountLayout", "Tabs") !== "Tabs"
+                            onClicked: view.panelRoot.persistSetting("codexAccountLayout", "Tabs")
                         }
-
-                        Column {
-                            width: parent.width
-                            visible: providerSurface.modelData.errorKind !== "" || providerSurface.modelData.stale
-                            spacing: Style.space(4)
-
-                            Text {
-                                width: parent.width
-                                text: view.privateText(view.noticeText(providerSurface.modelData))
-                                color: providerSurface.modelData.errorKind !== "" ? Color.urgent : view.muted
-                                font.family: view.fontFamily()
-                                font.pixelSize: Style.font.caption
-                                wrapMode: Text.WordWrap
-                                maximumLineCount: view.isErrorExpanded(providerSurface.modelData.provider) ? 100 : 3
-                                elide: Text.ElideRight
-                            }
-
-                            Row {
-                                spacing: Style.space(7)
-
-                                Button {
-                                    text: view.isErrorExpanded(providerSurface.modelData.provider) ? "Hide details" : "Show details"
-                                    visible: view.noticeText(providerSurface.modelData).length > 160
-                                    foreground: view.foreground
-                                    focusable: true
-                                    onClicked: view.toggleError(providerSurface.modelData.provider)
-                                }
-
-                                Button {
-                                    text: "Copy error"
-                                    visible: providerSurface.modelData.errorKind !== "" && view.noticeText(providerSurface.modelData) !== ""
-                                    foreground: view.foreground
-                                    focusable: true
-                                    onClicked: view.copyText(view.noticeText(providerSurface.modelData))
-                                }
-                            }
+                        Button {
+                            id: layoutList
+                            text: "List"
+                            foreground: view.foreground
+                            focusable: true
+                            enabled: view.setting("codexAccountLayout", "Tabs") !== "List"
+                            onClicked: view.panelRoot.persistSetting("codexAccountLayout", "List")
                         }
+                    }
 
-                        Repeater {
-                            model: providerSurface.modelData.ready ? (providerSurface.modelData.windows || []) : []
+                    Repeater {
+                        model: view.panelRoot && view.panelRoot.service ? view.panelRoot.service.subscriptionRows(providerGroup.modelData, view.setting("codexAccountLayout", "Tabs")) : [providerGroup.modelData]
+                        delegate: BorderSurface {
+                            id: providerSurface
+                            required property var modelData
+                            readonly property color providerAccent: view.accentForProvider(modelData.provider)
+                            width: usageColumn.width
+                            implicitHeight: cardColumn.implicitHeight + Style.space(22)
+                            color: Style.normalFillFor(view.foreground, Color.accent)
+                            borderSpec: Border.controlSpec("normal", view.foreground, Color.accent)
+                            radius: Style.cornerRadius
 
-                            delegate: QuotaMetric {
-                                required property var modelData
-                                width: cardColumn.width
-                                metric: modelData
-                                panelRoot: view.panelRoot
-                                foreground: view.foreground
-                                muted: view.muted
-                                accent: providerSurface.providerAccent
-                                fontFamily: view.fontFamily()
-                                warningThreshold: Number(view.setting("warningThreshold", 90))
-                                showResetTimes: view.setting("showResetTimes", true) === true
-                                showPace: view.setting("paceVisible", true) === true
-                                showWarningMarkers: view.setting("quotaWarningMarkersVisible", true) === true
-                                showWorkdayTicks: view.setting("workdayTicksVisible", true) === true
-                            }
-                        }
+                            Column {
+                                id: cardColumn
+                                anchors.centerIn: parent
+                                width: parent.width - Style.space(24)
+                                spacing: Style.space(8)
 
-                        Text {
-                            width: parent.width
-                            visible: providerSurface.modelData.summary !== "" && (providerSurface.modelData.optionalSections || []).length === 0
-                            text: providerSurface.modelData.summary
-                            color: view.muted
-                            font.family: view.fontFamily()
-                            font.pixelSize: Style.font.bodySmall
-                            wrapMode: Text.WordWrap
-                        }
+                                Row {
+                                    width: parent.width
 
-                        Repeater {
-                            model: view.setting("showOptionalCreditsAndExtraUsage", true) === true ? (providerSurface.modelData.optionalSections || []) : []
+                                    Text {
+                                        width: parent.width - accountLabel.width
+                                        text: providerSurface.modelData.label
+                                        color: view.foreground
+                                        font.family: view.fontFamily()
+                                        font.pixelSize: Style.font.body
+                                        font.bold: true
+                                        elide: Text.ElideRight
+                                    }
 
-                            delegate: UsageExtraSection {
-                                required property var modelData
-                                width: cardColumn.width
-                                section: modelData
-                                panelRoot: view.panelRoot
-                                foreground: view.foreground
-                                muted: view.muted
-                                accent: providerSurface.providerAccent
-                                fontFamily: view.fontFamily()
-                                warningThreshold: Number(view.setting("warningThreshold", 90))
-                                showResetTimes: view.setting("showResetTimes", true) === true
-                                showWarningMarkers: view.setting("quotaWarningMarkersVisible", true) === true
-                            }
-                        }
-
-                        Column {
-                            width: parent.width
-                            spacing: Style.space(7)
-                            visible: (providerSurface.modelData.costStats || []).length > 0
-
-                            PanelSeparator {
-                                width: parent.width
-                                foreground: view.foreground
-                            }
-
-                            Grid {
-                                id: costGrid
-                                width: parent.width
-                                columns: 2
-                                columnSpacing: Style.space(12)
-                                rowSpacing: Style.space(7)
-
-                                Repeater {
-                                    model: providerSurface.modelData.costStats || []
-
-                                    delegate: Column {
-                                        required property var modelData
-                                        width: (costGrid.width - costGrid.columnSpacing) / 2
-                                        spacing: Style.space(1)
-
-                                        Text {
-                                            width: parent.width
-                                            text: modelData.label
-                                            color: view.muted
-                                            font.family: view.fontFamily()
-                                            font.pixelSize: Style.font.caption
-                                            elide: Text.ElideRight
-                                        }
-
-                                        Text {
-                                            width: parent.width
-                                            text: modelData.value
-                                            color: view.foreground
-                                            font.family: view.fontFamily()
-                                            font.pixelSize: Style.font.bodySmall
-                                            font.bold: true
-                                            elide: Text.ElideRight
-                                        }
+                                    Text {
+                                        id: accountLabel
+                                        width: Math.min(implicitWidth, parent.width * 0.65)
+                                        text: view.panelRoot ? view.panelRoot.accountText(providerSurface.modelData.account) : providerSurface.modelData.account
+                                        visible: text !== ""
+                                        color: view.muted
+                                        font.family: view.fontFamily()
+                                        font.pixelSize: Style.font.caption
+                                        elide: Text.ElideMiddle
                                     }
                                 }
-                            }
 
-                            InlineChart {
-                                width: parent.width
-                                chart: providerSurface.modelData.costChart || null
-                                foreground: view.foreground
-                                muted: view.muted
-                                accent: providerSurface.providerAccent
-                            }
+                                Row {
+                                    width: parent.width
 
-                            Text {
-                                width: parent.width
-                                text: providerSurface.modelData.costCaption || ""
-                                visible: text !== ""
-                                color: view.muted
-                                font.family: view.fontFamily()
-                                font.pixelSize: Style.font.caption
-                                wrapMode: Text.WordWrap
-                            }
-                        }
+                                    Text {
+                                        width: parent.width - planLabel.width
+                                        text: [providerSurface.modelData.refreshing ? "Refreshing…" : providerSurface.modelData.status, view.privateText(providerSurface.modelData.source)].filter(function (value) {
+                                            return value !== "";
+                                        }).join(" · ")
+                                        color: providerSurface.modelData.errorKind !== "" || (!providerSurface.modelData.ready && !providerSurface.modelData.loading) ? Color.urgent : view.muted
+                                        font.family: view.fontFamily()
+                                        font.pixelSize: Style.font.caption
+                                        elide: Text.ElideRight
+                                    }
 
-                        Repeater {
-                            model: providerSurface.modelData.detailSections || []
-
-                            delegate: Column {
-                                id: compactSection
-                                required property var modelData
-                                width: cardColumn.width
-                                spacing: Style.space(4)
+                                    Text {
+                                        id: planLabel
+                                        text: providerSurface.modelData.plan
+                                        visible: text !== ""
+                                        color: view.muted
+                                        font.family: view.fontFamily()
+                                        font.pixelSize: Style.font.caption
+                                    }
+                                }
 
                                 Text {
                                     width: parent.width
-                                    text: String(compactSection.modelData.title || "Details")
+                                    visible: view.relativeUpdated(providerSurface.modelData.updated) !== "" || providerSurface.modelData.stale
+                                    text: providerSurface.modelData.stale ? [view.relativeUpdated(providerSurface.modelData.updated) !== "" ? "Last updated " + view.relativeUpdated(providerSurface.modelData.updated) : "Last update unavailable", view.relativeUpdated(providerSurface.modelData.staleSince) !== "" ? "stale since " + view.relativeUpdated(providerSurface.modelData.staleSince) : "stale"].join(" · ") : "Updated " + view.relativeUpdated(providerSurface.modelData.updated)
                                     color: view.muted
                                     font.family: view.fontFamily()
                                     font.pixelSize: Style.font.caption
-                                    font.bold: true
+                                    elide: Text.ElideRight
                                 }
 
-                                InlineChart {
+                                Flow {
                                     width: parent.width
-                                    chart: compactSection.modelData.chart || null
-                                    foreground: view.foreground
-                                    muted: view.muted
-                                    accent: providerSurface.providerAccent
-                                }
+                                    spacing: Style.space(6)
+                                    visible: view.setting("codexAccountLayout", "Tabs") === "Tabs" && providerSurface.modelData.provider === "codex" && view.panelRoot && view.panelRoot.service && view.panelRoot.service.codexAccountChoices().length > 1
 
-                                Repeater {
-                                    model: Array.isArray(compactSection.modelData.rows) ? compactSection.modelData.rows : []
+                                    Repeater {
+                                        model: view.panelRoot && view.panelRoot.service ? view.panelRoot.service.codexAccountChoices() : []
 
-                                    delegate: Row {
-                                        required property var modelData
-                                        width: compactSection.width
-
-                                        Text {
-                                            width: parent.width * 0.62
-                                            text: String(modelData.label || "")
-                                            color: view.muted
-                                            font.family: view.fontFamily()
-                                            font.pixelSize: Style.font.caption
-                                            elide: Text.ElideRight
-                                        }
-                                        Text {
-                                            width: parent.width * 0.38
-                                            text: view.panelRoot ? view.panelRoot.detailValue(modelData) : String(modelData.value || "")
-                                            horizontalAlignment: Text.AlignRight
-                                            color: view.foreground
-                                            font.family: view.fontFamily()
-                                            font.pixelSize: Style.font.caption
-                                            elide: Text.ElideLeft
+                                        delegate: Button {
+                                            required property var modelData
+                                            text: {
+                                                var label = String(modelData.email || "");
+                                                if (label === "")
+                                                    label = modelData.ambient ? "Native" : String(modelData.id || "Account");
+                                                return (modelData.active ? "● " : "") + label + " · " + modelData.resetLabel;
+                                            }
+                                            foreground: view.foreground
+                                            focusable: true
+                                            enabled: view.panelRoot && view.panelRoot.service && !modelData.active && !view.panelRoot.service.providerConfigBusy
+                                            onClicked: if (view.panelRoot && view.panelRoot.service)
+                                                view.panelRoot.service.activateCodexAccount(modelData.id)
                                         }
                                     }
                                 }
-                            }
-                        }
 
-                        Row {
-                            width: parent.width
-                            spacing: Style.space(8)
-                            visible: view.setting("showProviderDetails", false) === true || (view.setting("showDashboardActions", false) === true && view.panelRoot && view.panelRoot.service && view.panelRoot.service.hasDashboard(providerSurface.modelData.provider))
+                                PanelSeparator {
+                                    width: parent.width
+                                    foreground: view.foreground
+                                }
 
-                            Button {
-                                visible: view.setting("showProviderDetails", false) === true
-                                text: "Details"
-                                foreground: view.foreground
-                                focusable: true
-                                onClicked: if (view.panelRoot)
-                                    view.panelRoot.openProviderSettings(providerSurface.modelData.provider)
-                            }
+                                Column {
+                                    width: parent.width
+                                    visible: providerSurface.modelData.errorKind !== "" || providerSurface.modelData.stale
+                                    spacing: Style.space(4)
 
-                            Button {
-                                text: "Dashboard"
-                                visible: view.setting("showDashboardActions", false) === true && view.panelRoot && view.panelRoot.service && view.panelRoot.service.hasDashboard(providerSurface.modelData.provider)
-                                foreground: view.foreground
-                                focusable: true
-                                onClicked: if (view.panelRoot && view.panelRoot.service)
-                                    view.panelRoot.service.openDashboard(providerSurface.modelData.provider)
+                                    Text {
+                                        width: parent.width
+                                        text: view.privateText(view.noticeText(providerSurface.modelData))
+                                        color: providerSurface.modelData.errorKind !== "" ? Color.urgent : view.muted
+                                        font.family: view.fontFamily()
+                                        font.pixelSize: Style.font.caption
+                                        wrapMode: Text.WordWrap
+                                        maximumLineCount: view.isErrorExpanded(providerSurface.modelData.provider) ? 100 : 3
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Row {
+                                        spacing: Style.space(7)
+
+                                        Button {
+                                            text: view.isErrorExpanded(providerSurface.modelData.provider) ? "Hide details" : "Show details"
+                                            visible: view.noticeText(providerSurface.modelData).length > 160
+                                            foreground: view.foreground
+                                            focusable: true
+                                            onClicked: view.toggleError(providerSurface.modelData.provider)
+                                        }
+
+                                        Button {
+                                            text: "Copy error"
+                                            visible: providerSurface.modelData.errorKind !== "" && view.noticeText(providerSurface.modelData) !== ""
+                                            foreground: view.foreground
+                                            focusable: true
+                                            onClicked: view.copyText(view.noticeText(providerSurface.modelData))
+                                        }
+                                    }
+                                }
+
+                                Repeater {
+                                    model: providerSurface.modelData.ready ? (providerSurface.modelData.windows || []) : []
+
+                                    delegate: QuotaMetric {
+                                        required property var modelData
+                                        width: cardColumn.width
+                                        metric: modelData
+                                        panelRoot: view.panelRoot
+                                        foreground: view.foreground
+                                        muted: view.muted
+                                        accent: providerSurface.providerAccent
+                                        fontFamily: view.fontFamily()
+                                        warningThreshold: Number(view.setting("warningThreshold", 90))
+                                        showResetTimes: view.setting("showResetTimes", true) === true
+                                        showPace: view.setting("paceVisible", true) === true
+                                        showWarningMarkers: view.setting("quotaWarningMarkersVisible", true) === true
+                                        showWorkdayTicks: view.setting("workdayTicksVisible", true) === true
+                                    }
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    visible: providerSurface.modelData.summary !== "" && (providerSurface.modelData.optionalSections || []).length === 0
+                                    text: providerSurface.modelData.summary
+                                    color: view.muted
+                                    font.family: view.fontFamily()
+                                    font.pixelSize: Style.font.bodySmall
+                                    wrapMode: Text.WordWrap
+                                }
+
+                                Repeater {
+                                    model: view.setting("showOptionalCreditsAndExtraUsage", true) === true ? (providerSurface.modelData.optionalSections || []) : []
+
+                                    delegate: UsageExtraSection {
+                                        required property var modelData
+                                        width: cardColumn.width
+                                        section: modelData
+                                        panelRoot: view.panelRoot
+                                        foreground: view.foreground
+                                        muted: view.muted
+                                        accent: providerSurface.providerAccent
+                                        fontFamily: view.fontFamily()
+                                        warningThreshold: Number(view.setting("warningThreshold", 90))
+                                        showResetTimes: view.setting("showResetTimes", true) === true
+                                        showWarningMarkers: view.setting("quotaWarningMarkersVisible", true) === true
+                                    }
+                                }
+
+                                Column {
+                                    width: parent.width
+                                    spacing: Style.space(7)
+                                    visible: (providerSurface.modelData.costStats || []).length > 0
+
+                                    PanelSeparator {
+                                        width: parent.width
+                                        foreground: view.foreground
+                                    }
+
+                                    Grid {
+                                        id: costGrid
+                                        width: parent.width
+                                        columns: 2
+                                        columnSpacing: Style.space(12)
+                                        rowSpacing: Style.space(7)
+
+                                        Repeater {
+                                            model: providerSurface.modelData.costStats || []
+
+                                            delegate: Column {
+                                                required property var modelData
+                                                width: (costGrid.width - costGrid.columnSpacing) / 2
+                                                spacing: Style.space(1)
+
+                                                Text {
+                                                    width: parent.width
+                                                    text: modelData.label
+                                                    color: view.muted
+                                                    font.family: view.fontFamily()
+                                                    font.pixelSize: Style.font.caption
+                                                    elide: Text.ElideRight
+                                                }
+
+                                                Text {
+                                                    width: parent.width
+                                                    text: modelData.value
+                                                    color: view.foreground
+                                                    font.family: view.fontFamily()
+                                                    font.pixelSize: Style.font.bodySmall
+                                                    font.bold: true
+                                                    elide: Text.ElideRight
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    InlineChart {
+                                        width: parent.width
+                                        chart: providerSurface.modelData.costChart || null
+                                        foreground: view.foreground
+                                        muted: view.muted
+                                        accent: providerSurface.providerAccent
+                                    }
+
+                                    Text {
+                                        width: parent.width
+                                        text: providerSurface.modelData.costCaption || ""
+                                        visible: text !== ""
+                                        color: view.muted
+                                        font.family: view.fontFamily()
+                                        font.pixelSize: Style.font.caption
+                                        wrapMode: Text.WordWrap
+                                    }
+                                }
+
+                                Repeater {
+                                    model: providerSurface.modelData.detailSections || []
+
+                                    delegate: Column {
+                                        id: compactSection
+                                        required property var modelData
+                                        width: cardColumn.width
+                                        spacing: Style.space(4)
+
+                                        Text {
+                                            width: parent.width
+                                            text: String(compactSection.modelData.title || "Details")
+                                            color: view.muted
+                                            font.family: view.fontFamily()
+                                            font.pixelSize: Style.font.caption
+                                            font.bold: true
+                                        }
+
+                                        InlineChart {
+                                            width: parent.width
+                                            chart: compactSection.modelData.chart || null
+                                            sectionTitle: String(compactSection.modelData.title || "")
+                                            foreground: view.foreground
+                                            muted: view.muted
+                                            accent: providerSurface.providerAccent
+                                        }
+
+                                        Repeater {
+                                            model: Array.isArray(compactSection.modelData.rows) ? compactSection.modelData.rows : []
+
+                                            delegate: Row {
+                                                required property var modelData
+                                                width: compactSection.width
+
+                                                Text {
+                                                    width: parent.width * 0.62
+                                                    text: String(modelData.label || "")
+                                                    color: view.muted
+                                                    font.family: view.fontFamily()
+                                                    font.pixelSize: Style.font.caption
+                                                    elide: Text.ElideRight
+                                                }
+                                                Text {
+                                                    width: parent.width * 0.38
+                                                    text: view.panelRoot ? view.panelRoot.detailValue(modelData) : String(modelData.value || "")
+                                                    horizontalAlignment: Text.AlignRight
+                                                    color: view.foreground
+                                                    font.family: view.fontFamily()
+                                                    font.pixelSize: Style.font.caption
+                                                    elide: Text.ElideLeft
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Row {
+                                    width: parent.width
+                                    spacing: Style.space(8)
+                                    visible: view.setting("showProviderDetails", false) === true || (view.setting("showDashboardActions", false) === true && view.panelRoot && view.panelRoot.service && view.panelRoot.service.hasDashboard(providerSurface.modelData.provider))
+
+                                    Button {
+                                        visible: view.setting("showProviderDetails", false) === true
+                                        text: "Details"
+                                        foreground: view.foreground
+                                        focusable: true
+                                        onClicked: if (view.panelRoot)
+                                            view.panelRoot.openProviderSettings(providerSurface.modelData.provider)
+                                    }
+
+                                    Button {
+                                        text: "Dashboard"
+                                        visible: view.setting("showDashboardActions", false) === true && view.panelRoot && view.panelRoot.service && view.panelRoot.service.hasDashboard(providerSurface.modelData.provider)
+                                        foreground: view.foreground
+                                        focusable: true
+                                        onClicked: if (view.panelRoot && view.panelRoot.service)
+                                            view.panelRoot.service.openDashboard(providerSurface.modelData.provider)
+                                    }
+                                }
                             }
                         }
                     }

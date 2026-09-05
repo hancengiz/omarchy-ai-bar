@@ -237,20 +237,57 @@ impl CodexProductionRunner {
         if cancellation.is_cancelled() {
             return cancelled();
         }
-        match normalize_codex_oauth_usage(
+        let sample = match normalize_codex_oauth_usage(
             &response,
             credentials,
             settings.account().managed_account_id(),
             scope.clone(),
             fetched_at,
         ) {
-            Ok(sample) => CodexAttemptOutcome::Success(sample),
-            Err(error) => http_failure(error),
+            Ok(sample) => sample,
+            Err(error) => return http_failure(error),
+        };
+        self.attach_reset_credits(settings, &client, credentials, sample, cancellation)
+            .await
+    }
+
+    async fn attach_reset_credits(
+        &self,
+        settings: &CodexCoordinatorSettings,
+        client: &CodexHttpClient,
+        credentials: &super::codex::CodexBearerCredentials,
+        sample: oab_domain::UsageSample,
+        cancellation: &CancellationToken,
+    ) -> CodexAttemptOutcome {
+        let Some(key) = settings.reset_credit_key() else {
+            return CodexAttemptOutcome::Success(sample);
+        };
+        let result = client
+            .fetch_reset_credits(
+                credentials,
+                settings.account().managed_account_id(),
+                key,
+                sample.scope().clone(),
+                sample.fetched_at(),
+                cancellation,
+            )
+            .await;
+        if cancellation.is_cancelled() || matches!(result, Err(CodexHttpError::Cancelled)) {
+            return cancelled();
+        }
+        // Optional inventory failure must not erase valid quota usage or revive old inventory.
+        match result {
+            Ok(inventory) => match sample.with_reset_credits(inventory) {
+                Ok(sample) => CodexAttemptOutcome::Success(sample),
+                Err(_) => http_failure(CodexHttpError::InvalidResponse),
+            },
+            Err(_) => CodexAttemptOutcome::Success(sample),
         }
     }
 
     async fn run_cli(
         &self,
+        settings: &CodexCoordinatorSettings,
         scope: &AccountScope,
         fetched_at: Timestamp,
         cancellation: &CancellationToken,
@@ -261,13 +298,53 @@ impl CodexProductionRunner {
         if cancellation.is_cancelled() {
             return cancelled();
         }
-        match cli.fetch(scope.clone(), fetched_at, cancellation).await {
+        let sample = match cli.fetch(scope.clone(), fetched_at, cancellation).await {
             Ok(snapshot) => match snapshot.into_usage_sample() {
-                Ok(sample) => CodexAttemptOutcome::Success(sample),
-                Err(error) => cli_failure(error),
+                Ok(sample) => sample,
+                Err(error) => return cli_failure(error),
             },
-            Err(error) => cli_failure(error),
+            Err(error) => return cli_failure(error),
+        };
+        if settings.reset_credit_key().is_none() || settings.account().managed_selected() {
+            return CodexAttemptOutcome::Success(sample);
         }
+        // The CLI can rotate native tokens. Re-read only its scoped home, and require
+        // the returned CLI identity to match before attaching optional HTTP inventory.
+        let selection =
+            match load_bearer_selection_for_usage(&self.credential_paths, false, cancellation) {
+                Ok(selection) => selection,
+                Err(CodexCredentialLoadError::Cancelled) => return cancelled(),
+                Err(_) => return CodexAttemptOutcome::Success(sample),
+            };
+        let hints = selection.credentials().identity_hints();
+        let same_email = hints
+            .email()
+            .zip(sample.identity().email())
+            .is_some_and(|(token, cli)| token.eq_ignore_ascii_case(cli.as_str()));
+        let same_account = selection
+            .credentials()
+            .account_id()
+            .zip(sample.identity().provider_account_id())
+            .is_none_or(|(token, cli)| token == cli.as_str());
+        if !same_email || !same_account || selection.credentials().needs_refresh_at(fetched_at) {
+            return CodexAttemptOutcome::Success(sample);
+        }
+        let bundle = match selection.bind_config(cancellation) {
+            Ok(bundle) => bundle,
+            Err(CodexCredentialLoadError::Cancelled) => return cancelled(),
+            Err(_) => return CodexAttemptOutcome::Success(sample),
+        };
+        let Ok(client) = self.http.client(bundle.config_toml()) else {
+            return CodexAttemptOutcome::Success(sample);
+        };
+        self.attach_reset_credits(
+            settings,
+            &client,
+            bundle.credentials(),
+            sample,
+            cancellation,
+        )
+        .await
     }
 
     async fn run_cli_owner_recovery(
@@ -304,7 +381,8 @@ impl CodexProductionRunner {
         if cancellation.is_cancelled() {
             return cancelled();
         }
-        self.run_cli(scope, fetched_at, cancellation).await
+        self.run_cli(settings, scope, fetched_at, cancellation)
+            .await
     }
 }
 
@@ -333,7 +411,10 @@ impl CodexAttemptRunner for CodexProductionRunner {
                     self.run_oauth(settings, scope, fetched_at, cancellation)
                         .await
                 }
-                CodexSourceAttempt::Cli => self.run_cli(scope, fetched_at, cancellation).await,
+                CodexSourceAttempt::Cli => {
+                    self.run_cli(settings, scope, fetched_at, cancellation)
+                        .await
+                }
                 CodexSourceAttempt::CliOwnerRecovery => {
                     self.run_cli_owner_recovery(settings, scope, fetched_at, cancellation)
                         .await

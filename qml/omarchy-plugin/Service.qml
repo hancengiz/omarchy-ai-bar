@@ -35,6 +35,8 @@ Item {
     property var credentialStatusQueue: []
     property string activeCredentialStatusKey: ""
     property bool providerConfigLoaded: false
+    property bool providerConfigReloadPending: false
+    property double resetInventoryNow: Date.now()
     property bool providerConfigBusy: false
     property string providerConfigResult: ""
     property string pendingCredential: ""
@@ -258,15 +260,35 @@ Item {
         for (var i = 0; i < envelope.snapshots.length; i++) {
             var candidate = envelope.snapshots[i];
             var provider = providerIdFromSnapshot(candidate);
+            if (provider === "codex" && accountIdFromSnapshot(candidate) !== (activeProviderAccounts.codex || "ambient"))
+                continue;
             if (candidate && candidate.state === "ready" && candidate.last_known_good && isProviderEnabled(provider, true))
                 return candidate;
         }
         for (var fallbackIndex = 0; fallbackIndex < envelope.snapshots.length; fallbackIndex++) {
             var fallback = envelope.snapshots[fallbackIndex];
+            if (providerIdFromSnapshot(fallback) === "codex" && accountIdFromSnapshot(fallback) !== (activeProviderAccounts.codex || "ambient"))
+                continue;
             if (isProviderEnabled(providerIdFromSnapshot(fallback), true))
                 return fallback;
         }
         return null;
+    }
+
+    function subscriptionRows(providerRow, layout) {
+        if (!providerRow || providerRow.provider !== "codex" || layout !== "List")
+            return providerRow ? [providerRow] : [];
+        return codexAccountChoices().map(function (account) {
+            var rows = rowsFrom(effectiveSnapshot, {
+                codex: account.id
+            });
+            var row = rows.filter(function (candidate) {
+                return candidate.provider === "codex";
+            })[0];
+            row.account = row.account || account.email || (account.ambient ? "Native account" : account.id);
+            row.subscriptionId = account.id;
+            return row;
+        });
     }
 
     function providerIdFromSnapshot(snapshot) {
@@ -289,7 +311,7 @@ Item {
         return providerSnapshot && providerSnapshot.state === "ready" ? providerSnapshot.last_known_good : null;
     }
 
-    function rowsFrom(envelope) {
+    function rowsFrom(envelope, accountOverrides) {
         var snapshots = envelope && Array.isArray(envelope.snapshots) ? envelope.snapshots : [];
         var indexed = {};
         for (var snapshotIndex = 0; snapshotIndex < snapshots.length; snapshotIndex++) {
@@ -302,7 +324,7 @@ Item {
         }
         return providerIds().map(function (provider) {
             var candidates = indexed[provider] || [];
-            var activeAccount = activeProviderAccounts[provider] || "ambient";
+            var activeAccount = (accountOverrides || activeProviderAccounts)[provider] || "ambient";
             var snapshot = null;
             for (var candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
                 if (accountIdFromSnapshot(candidates[candidateIndex]) === activeAccount) {
@@ -310,7 +332,7 @@ Item {
                     break;
                 }
             }
-            if (!snapshot) {
+            if (!snapshot && provider !== "codex") {
                 for (var readyIndex = 0; readyIndex < candidates.length; readyIndex++) {
                     if (sampleFrom(candidates[readyIndex])) {
                         snapshot = candidates[readyIndex];
@@ -318,7 +340,7 @@ Item {
                     }
                 }
             }
-            if (!snapshot && candidates.length > 0)
+            if (!snapshot && provider !== "codex" && candidates.length > 0)
                 snapshot = candidates[0];
             var sample = sampleFrom(snapshot);
             var primary = sample && sample.primary ? sample.primary : null;
@@ -565,6 +587,7 @@ Item {
                 plan: sample && sample.identity ? String(sample.identity.plan || "") : "",
                 active: active === id,
                 enabled: route.enabled === true,
+                resetLabel: bankedResetsLabel(sample, snapshot),
                 state: snapshot ? String(snapshot.state || "") : "missing"
             };
         });
@@ -579,12 +602,14 @@ Item {
             var sample = sampleFrom(candidate);
             return {
                 email: sample && sample.identity ? String(sample.identity.email || sample.identity.account_label || "") : "",
-                plan: sample && sample.identity ? String(sample.identity.plan || "") : ""
+                plan: sample && sample.identity ? String(sample.identity.plan || "") : "",
+                resetLabel: bankedResetsLabel(sample, candidate)
             };
         }
         return {
             email: "",
-            plan: ""
+            plan: "",
+            resetLabel: "Banked resets unavailable"
         };
     }
 
@@ -596,15 +621,19 @@ Item {
                 id: "ambient",
                 email: ambient.email,
                 plan: ambient.plan,
+                resetLabel: ambient.resetLabel,
                 active: active === "ambient",
                 ambient: true
             }
         ];
-        return choices.concat(managedCodexAccounts().map(function (account) {
+        return choices.concat(managedCodexAccounts().filter(function (account) {
+            return account.enabled;
+        }).map(function (account) {
             return {
                 id: account.id,
                 email: account.email,
                 plan: account.plan,
+                resetLabel: account.resetLabel,
                 active: account.active,
                 ambient: false
             };
@@ -616,7 +645,7 @@ Item {
         if (id === "" || providerConfigBusy || codexAccountWriter.running)
             return false;
         providerConfigBusy = true;
-        providerConfigResult = "Activating Codex account…";
+        providerConfigResult = "Selecting Codex account for display…";
         codexAccountWriter.command = [bridgeExecutable, "codex", "activate", id];
         codexAccountWriter.running = true;
         return true;
@@ -1241,43 +1270,67 @@ Item {
         };
     }
 
-    function resetCreditsSectionFrom(resetCredits) {
-        if (!resetCredits)
+    function bankedResetsFrom(inventory) {
+        if (!inventory || typeof inventory.reported_available_count !== "number")
             return null;
-        var credits = Array.isArray(resetCredits.credits) ? resetCredits.credits : [];
-        var available = Number(resetCredits.reported_available_count || 0);
-        if (!isFinite(available))
-            available = 0;
-        var active = null;
+        var count = inventory.reported_available_count;
+        if (!isFinite(count) || count < 0 || Math.floor(count) !== count)
+            return null;
+        var updatedAt = Date.parse(inventory.updated_at || "");
+        var credits = Array.isArray(inventory.credits) ? inventory.credits : [];
+        var nextExpiry = null;
         for (var index = 0; index < credits.length; index++) {
-            if (String(credits[index].status || "") === "available") {
-                active = credits[index];
-                break;
-            }
+            var credit = credits[index];
+            if (String(credit.status || "") !== "available" || !credit.expires_at)
+                continue;
+            var expiry = Date.parse(credit.expires_at);
+            // The reported count already excludes credits expired when fetched.
+            if (expiry <= resetInventoryNow && expiry > updatedAt)
+                count = Math.max(0, count - 1);
+            if (expiry > resetInventoryNow && (!nextExpiry || expiry < Date.parse(nextExpiry)))
+                nextExpiry = credit.expires_at;
         }
-        if (available <= 0 && !active)
+        return {
+            available: count,
+            expiresAt: nextExpiry
+        };
+    }
+
+    function bankedResetsLabel(sample, snapshot) {
+        var inventory = bankedResetsFrom(sample ? sample.reset_credits : null);
+        if (!inventory)
+            return "Banked resets unavailable";
+        var label = inventory.available + (inventory.available === 1 ? " banked reset" : " banked resets");
+        if (snapshot && (snapshot.error || (snapshot.freshness && snapshot.freshness.state === "stale")))
+            label += " (last known)";
+        return label;
+    }
+
+    function resetCreditsSectionFrom(resetCredits, showUnavailable) {
+        var inventory = bankedResetsFrom(resetCredits);
+        if (!inventory && !showUnavailable)
             return null;
         var rows = [
             {
                 label: "Available",
-                value: available + (available === 1 ? " reset" : " resets"),
+                value: inventory ? inventory.available + (inventory.available === 1 ? " reset" : " resets") : "Unavailable",
                 sensitivity: "public"
             }
         ];
-        if (active) {
+        if (inventory && inventory.available > 0 && inventory.expiresAt) {
             rows.push({
-                label: String(active.title || "Next credit"),
-                value: active.expires_at ? "Expires " + formatResetAt(active.expires_at) : String(active.status || "Available"),
-                sensitivity: active.title || active.description ? "personal" : "public"
+                label: "Next expiry",
+                value: formatResetAt(inventory.expiresAt),
+                sensitivity: "public"
             });
         }
         return {
             id: "reset-credits",
-            title: "Limit Reset Credits",
+            title: "Banked resets",
             metric: null,
             rows: rows,
-            caption: active && active.description ? String(active.description) : "",
-            captionSensitivity: active && active.description ? "personal" : "public"
+            caption: "",
+            captionSensitivity: "public"
         };
     }
 
@@ -1344,7 +1397,7 @@ Item {
     }
 
     function optionalSectionsFrom(sample) {
-        var sections = [creditSectionFrom(sample.credits), resetCreditsSectionFrom(sample.reset_credits), budgetSectionFrom(sample)];
+        var sections = [creditSectionFrom(sample.credits), resetCreditsSectionFrom(sample.reset_credits, sample.scope && sample.scope.provider === "codex"), budgetSectionFrom(sample)];
         return sections.filter(function (section) {
             return section !== null;
         });
@@ -1647,6 +1700,7 @@ Item {
                     panelActionError = "";
                     panelRetryTimer.stop();
                 }
+                loadProviderConfig();
                 loadCopilotSessionStatus();
                 syncPanelState();
             }
@@ -1827,8 +1881,13 @@ Item {
     }
 
     function loadProviderConfig() {
-        if (providerConfigReader.running || bridgeExecutable === "")
+        if (providerConfigReader.running) {
+            providerConfigReloadPending = true;
             return false;
+        }
+        if (bridgeExecutable === "")
+            return false;
+        providerConfigReloadPending = false;
         providerConfigReader.command = [bridgeExecutable, "config", "show", "--format", "json"];
         providerConfigReader.running = true;
         return true;
@@ -2116,6 +2175,8 @@ Item {
             waitForEnd: true
         }
         onExited: function (exitCode) {
+            if (root.providerConfigReloadPending)
+                Qt.callLater(root.loadProviderConfig);
             if (exitCode !== 0) {
                 root.providerConfigLoaded = true;
                 root.providerConfigResult = "Could not read provider settings";
@@ -2526,6 +2587,13 @@ Item {
         interval: Math.min(4000, 250 * Math.pow(2, Math.max(0, root.panelRetryCount - 1)))
         repeat: false
         onTriggered: root.runPanelRetry()
+    }
+
+    Timer {
+        interval: 60000
+        running: true
+        repeat: true
+        onTriggered: root.resetInventoryNow = Date.now()
     }
 
     Component.onCompleted: {

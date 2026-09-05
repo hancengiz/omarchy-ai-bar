@@ -5,7 +5,9 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use nix::sys::utsname::uname;
-use oab_domain::{ClassifiedError, ErrorKind};
+use oab_domain::{
+    AccountScope, ClassifiedError, ErrorKind, PrivacyKey, ResetCreditsSnapshot, Timestamp,
+};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde_json::{Map, Value};
@@ -643,6 +645,7 @@ pub struct CodexHttpRoutes {
     whoami_class: EndpointClass,
     usage: Url,
     usage_class: EndpointClass,
+    reset_credits: Url,
 }
 
 impl CodexHttpRoutes {
@@ -665,11 +668,13 @@ impl CodexHttpRoutes {
             classify_https_endpoint(&usage).map_err(|_| CodexHttpError::Configuration)?;
         validate_exact_origin(&whoami, whoami_class)?;
         validate_exact_origin(&usage, usage_class)?;
+        let reset_credits = reset_credits_url(&usage)?;
         Ok(Self {
             whoami,
             whoami_class,
             usage,
             usage_class,
+            reset_credits,
         })
     }
 
@@ -681,11 +686,13 @@ impl CodexHttpRoutes {
     pub fn loopback(whoami: Url, usage: Url) -> Result<Self, CodexHttpError> {
         validate_exact_origin(&whoami, EndpointClass::LoopbackDevelopment)?;
         validate_exact_origin(&usage, EndpointClass::LoopbackDevelopment)?;
+        let reset_credits = reset_credits_url(&usage)?;
         Ok(Self {
             whoami,
             whoami_class: EndpointClass::LoopbackDevelopment,
             usage,
             usage_class: EndpointClass::LoopbackDevelopment,
+            reset_credits,
         })
     }
 
@@ -699,6 +706,12 @@ impl CodexHttpRoutes {
     #[must_use]
     pub const fn usage_url(&self) -> &Url {
         &self.usage
+    }
+
+    /// Reset inventory endpoint on the same configured origin as usage.
+    #[must_use]
+    pub const fn reset_credits_url(&self) -> &Url {
+        &self.reset_credits
     }
 
     pub(crate) const fn is_loopback_only(&self) -> bool {
@@ -836,6 +849,39 @@ impl CodexHttpClient {
             .await
             .map_err(CodexHttpError::from)?;
         parse_codex_usage_response(response.body())
+    }
+    /// Fetches banked resets using the exact OAuth authority of the usage request.
+    ///
+    /// # Errors
+    /// Returns redacted HTTP or inventory validation failures. No redemption is performed.
+    pub async fn fetch_reset_credits(
+        &self,
+        credentials: &CodexBearerCredentials,
+        managed_account_override: Option<&str>,
+        key: &PrivacyKey,
+        scope: AccountScope,
+        fetched_at: Timestamp,
+        cancellation: &CancellationToken,
+    ) -> Result<ResetCreditsSnapshot, CodexHttpError> {
+        let account_id =
+            clean_account_override(managed_account_override)?.or_else(|| credentials.account_id());
+        let request = oauth_request(
+            self.routes.reset_credits.clone(),
+            credentials.access_token(),
+            account_id,
+        )?
+        .public_header("openai-beta", "codex-1")
+        .map_err(CodexHttpError::from)?
+        .public_header("originator", "Codex Desktop")
+        .map_err(CodexHttpError::from)?;
+        let response = tokio::time::timeout(
+            Duration::from_secs(4),
+            self.usage_transport.send(&request, cancellation),
+        )
+        .await
+        .map_err(|_| CodexHttpError::Network)?
+        .map_err(CodexHttpError::from)?;
+        super::codex_resets::parse_codex_reset_credits(response.body(), key, scope, fetched_at)
     }
 }
 
@@ -1250,6 +1296,18 @@ fn kernel_version_triplet(release: &str) -> Option<String> {
     let minor = components.next().transpose().ok()?.unwrap_or(0);
     let patch = components.next().transpose().ok()?.unwrap_or(0);
     Some(format!("{major}.{minor}.{patch}"))
+}
+
+fn reset_credits_url(usage: &Url) -> Result<Url, CodexHttpError> {
+    let base = usage
+        .path()
+        .strip_suffix(CHATGPT_USAGE_PATH)
+        .or_else(|| usage.path().strip_suffix(CODEX_USAGE_PATH))
+        .or_else(|| usage.path().strip_suffix("/usage"))
+        .ok_or(CodexHttpError::Configuration)?;
+    let mut url = usage.clone();
+    url.set_path(&format!("{base}/wham/rate-limit-reset-credits"));
+    Ok(url)
 }
 
 fn resolve_usage_url(config_text: Option<&str>) -> Result<Url, CodexHttpError> {

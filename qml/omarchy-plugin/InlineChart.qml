@@ -5,6 +5,7 @@ Item {
     id: root
 
     property var chart: null
+    property string sectionTitle: ""
     property color foreground: Color.foreground
     property color muted: Qt.darker(foreground, 1.55)
     property color accent: Color.accent
@@ -30,7 +31,7 @@ Item {
             Text {
                 id: titleText
                 width: parent.width - unitText.width
-                text: root.chart ? String(root.chart.title || "") : ""
+                text: root.chart && String(root.chart.title || "").trim().toLowerCase() !== root.sectionTitle.trim().toLowerCase() ? String(root.chart.title || "") : ""
                 color: root.foreground
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption

@@ -491,6 +491,7 @@ Item {
                             InlineChart {
                                 width: parent.width
                                 chart: detailSection.modelData.chart || null
+                                sectionTitle: String(detailSection.modelData.title || "")
                                 foreground: view.foreground
                                 muted: view.muted
                                 accent: Color.accent
@@ -995,7 +996,7 @@ Item {
                             width: parent.width - nativeCodexButton.width - parent.spacing
                             text: {
                                 var account = view.service ? view.service.ambientCodexAccount() : null;
-                                return account && account.email !== "" ? account.email + " · native" : "Native Codex account (~/.codex)";
+                                return (account && account.email !== "" ? account.email + " · native" : "Native Codex account (~/.codex)") + " · " + (account ? account.resetLabel : "Banked resets unavailable");
                             }
                             color: view.foreground
                             font.family: view.fontFamily()
@@ -1005,7 +1006,7 @@ Item {
 
                         Button {
                             id: nativeCodexButton
-                            text: view.service && view.service.activeProviderAccounts.codex === "ambient" ? "Active" : "Activate"
+                            text: view.service && view.service.activeProviderAccounts.codex === "ambient" ? "Selected" : "Show"
                             foreground: view.foreground
                             focusable: true
                             enabled: view.service && view.service.activeProviderAccounts.codex !== "ambient" && !view.service.providerConfigBusy
@@ -1039,7 +1040,7 @@ Item {
 
                             Text {
                                 width: parent.width
-                                text: [modelData.plan, modelData.state, modelData.active ? "active" : ""].filter(function (value) {
+                                text: [modelData.plan, modelData.state, modelData.resetLabel, modelData.active ? "active" : ""].filter(function (value) {
                                     return value !== "";
                                 }).join(" · ")
                                 color: view.muted
@@ -1052,10 +1053,10 @@ Item {
                                 spacing: Style.space(7)
 
                                 Button {
-                                    text: modelData.active ? "Active" : "Activate"
+                                    text: modelData.active ? "Selected" : "Show"
                                     foreground: view.foreground
                                     focusable: true
-                                    enabled: view.service && !modelData.active && !view.service.providerConfigBusy
+                                    enabled: view.service && modelData.enabled && !modelData.active && !view.service.providerConfigBusy
                                     onClicked: if (view.service)
                                         view.service.activateCodexAccount(modelData.id)
                                 }

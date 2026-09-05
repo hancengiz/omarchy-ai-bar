@@ -371,8 +371,7 @@ pub fn load_native_auth_file(
 
 /// Loads the PAT authority for one routed Codex-home scope.
 ///
-/// Managed, fail-closed, and ambient scopes always use `$HOME/.codex`. A profile PAT wins only
-/// when it parses successfully; any non-cancellation profile auth failure falls back to ambient.
+/// Managed, fail-closed, and ambient scopes always use `$HOME/.codex`. A profile scope uses only its own home, including when its PAT is absent or invalid.
 /// Once a PAT authority is selected, its unsafe config fails closed.
 ///
 /// # Errors
@@ -389,9 +388,8 @@ pub fn load_pat_for_scope(
 
 /// Loads a PAT and the optional `config.toml` from its exact selected authority.
 ///
-/// A successfully parsed profile PAT pins the profile root for its config. Profile auth failures
-/// still fall back to ambient, but an unsafe or non-UTF-8 config on a selected authority fails
-/// closed instead of changing identity. Managed, fail-closed, and ambient scopes use the ambient
+/// A profile scope pins both credentials and config to its own root. Missing or invalid profile
+/// credentials never select a different account. Managed, fail-closed, and ambient scopes use the ambient
 /// root for both files.
 ///
 /// # Errors
@@ -403,15 +401,8 @@ pub fn load_pat_bundle_for_scope(
     cancellation: &CancellationToken,
 ) -> Result<CodexPatCredentialBundle, CodexCredentialLoadError> {
     if scope == CodexPatHomeScope::Profile {
-        match open_and_parse_pat(&paths.native, cancellation) {
-            Ok((root, credentials)) => {
-                return bind_pat_config(&root, credentials, CodexPatRoot::Profile, cancellation);
-            }
-            Err(CodexCredentialLoadError::Cancelled) => {
-                return Err(CodexCredentialLoadError::Cancelled);
-            }
-            Err(CodexCredentialLoadError::Credential(_)) => {}
-        }
+        let (root, credentials) = open_and_parse_pat(&paths.native, cancellation)?;
+        return bind_pat_config(&root, credentials, CodexPatRoot::Profile, cancellation);
     }
     let (root, credentials) = open_and_parse_pat(&paths.ambient, cancellation)?;
     bind_pat_config(&root, credentials, CodexPatRoot::Ambient, cancellation)

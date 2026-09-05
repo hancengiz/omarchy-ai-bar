@@ -56,11 +56,21 @@ daemon/display snapshots.
 
 | Provider | Runtime-backed in this slice | Still unavailable from the pinned settings surface |
 | --- | --- | --- |
-| Codex | Auto/PAT/OAuth/CLI quota source; explicit opt-in to read-only legacy Codex/OpenCode OAuth fallback; isolated managed-account login, switching, removal, and per-account refresh | OpenAI web extras and cookies, battery saver, configurable history/cost/display filters, and promotion of a managed account into the native Codex CLI |
+| Codex | Auto/PAT/OAuth/CLI quota source; explicit opt-in to read-only legacy Codex/OpenCode OAuth fallback; isolated managed-account login, switching, removal, per-account refresh, and read-only banked resets | OpenAI web extras and cookies, battery saver, configurable history/cost/display filters, and promotion of a managed account into the native Codex CLI |
 | Claude | Auto/OAuth/CLI source selection; read-only Claude Code OAuth file/environment; bounded shell-free CLI usage fallback | Admin API, claude.ai web-cookie source, `claude-swap`, macOS Keychain policy, display/widget filters, multi-account UI |
 | Grok | Auto/CLI/OAuth/Web source and Auto/Manual/Off cookie policy; CLI, read-only OAuth proxy, manual/browser web billing, dashboard, and provider-token-file actions | SuperGrok bearer gRPC enrichment, persistent cookie cache, and multi-account token management |
 | Copilot | App-owned GitHub login with pre-storage identity validation, enterprise host, CLI/chat entitlement rows, manual budget extras/cookie slot, and refresh action | Automatic GitHub browser-cookie import, secondary menu-bar budget selection, multiple GitHub accounts |
 | z.ai | Global/BigModel CN region, API-key slot, and region-aware credential-page action | Team-scope organization/project editor and multi-account UI |
+
+Codex reauthentication preserves the local routing ID, home, and history, and
+matches both email and workspace ID. Account lists reload after daemon
+reconnection, including changes made by the terminal login flow. Managed homes
+use the profile authority with a stricter PAT rule than the pinned baseline:
+a missing or invalid profile PAT never falls back to the native account.
+Banked reset inventory uses the quota request's exact OAuth authority, has a
+four-second deadline, and fails independently of quota usage. The UI shows
+per-account balances, zero versus unavailable states, and next known expiry.
+Workspace selection and promotion into the native CLI remain unimplemented.
 
 The generic provider page remains for the other 64 providers. The storage
 schema already has bounded non-secret fields for source, cookie policy, extras,

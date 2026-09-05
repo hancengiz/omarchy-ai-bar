@@ -450,3 +450,32 @@ fn bounded_collections_accept_the_documented_maximum_and_reject_the_next_item() 
         });
     assert!(serde_json::from_value::<UsageSample>(at_limit).is_err());
 }
+
+#[test]
+fn reset_inventory_attachment_rejects_another_account() {
+    let sample = sample();
+    let other_scope = AccountScope::new(
+        ProviderId::Codex,
+        ProviderInstanceId::new("default").unwrap(),
+        AccountKey::new("another-account").unwrap(),
+    );
+    let other =
+        oab_domain::ResetCreditsSnapshot::new(other_scope, vec![], 2, sample.fetched_at()).unwrap();
+    assert!(sample.clone().with_reset_credits(other).is_err());
+    let own = oab_domain::ResetCreditsSnapshot::new(
+        sample.scope().clone(),
+        vec![],
+        0,
+        sample.fetched_at(),
+    )
+    .unwrap();
+    assert_eq!(
+        sample
+            .with_reset_credits(own)
+            .unwrap()
+            .reset_credits()
+            .unwrap()
+            .reported_available_count(),
+        0
+    );
+}

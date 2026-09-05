@@ -302,7 +302,7 @@ fn xdg_data_home_is_exact_and_invalid_values_use_the_default_opencode_root() {
 }
 
 #[test]
-fn pat_scope_uses_profile_only_when_usable_and_managed_scopes_stay_ambient() {
+fn pat_scope_never_substitutes_ambient_for_a_profile() {
     let fixture = Fixture::new();
     fixture.write_auth(".codex", &native_auth("ambient-pat", "ambient-oauth"));
     fixture.write_auth(
@@ -336,12 +336,11 @@ fn pat_scope_uses_profile_only_when_usable_and_managed_scopes_stay_ambient() {
         "profiles/work",
         r#"{"tokens":{"access_token":"oauth","refresh_token":"refresh"}}"#,
     );
-    assert_eq!(
-        load_pat_for_scope(&paths, CodexPatHomeScope::Profile, &cancellation)
-            .expect("profile without PAT falls back")
-            .token(),
-        "ambient-pat"
-    );
+    assert!(load_pat_for_scope(&paths, CodexPatHomeScope::Profile, &cancellation).is_err());
+    fixture.write_auth("profiles/work", "{invalid");
+    assert!(load_pat_for_scope(&paths, CodexPatHomeScope::Profile, &cancellation).is_err());
+    fs::remove_file(fixture.path("profiles/work/auth.json")).expect("remove profile auth");
+    assert!(load_pat_for_scope(&paths, CodexPatHomeScope::Profile, &cancellation).is_err());
 }
 
 #[test]
@@ -380,14 +379,7 @@ fn pat_bundle_binds_config_to_the_winning_pat_authority() {
         "profiles/work",
         r#"{"tokens":{"access_token":"oauth","refresh_token":"refresh"}}"#,
     );
-    let fallback = load_pat_bundle_for_scope(&paths, CodexPatHomeScope::Profile, &cancellation)
-        .expect("ambient fallback bundle");
-    assert_eq!(fallback.credentials().token(), "ambient-pat");
-    assert_eq!(fallback.root(), CodexPatRoot::Ambient);
-    assert_eq!(
-        fallback.config_toml(),
-        Some("authority = \"ambient-config-canary\"\n")
-    );
+    assert!(load_pat_bundle_for_scope(&paths, CodexPatHomeScope::Profile, &cancellation).is_err());
 }
 
 #[test]

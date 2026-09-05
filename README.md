@@ -216,7 +216,13 @@ in its own private `CODEX_HOME`, so adding, switching, or removing an account
 does not overwrite the account used by the native Codex CLI in `~/.codex`.
 The active account can be changed directly from the Codex usage card or its
 settings page. Every enabled account refreshes independently and keeps its own
-last-known-good usage state.
+last-known-good usage state. The account switcher and settings list show each
+account's available **banked resets**; the selected usage card also shows the
+next known expiry. `0` means a successful empty balance, while `Unavailable`
+means no usable inventory was returned. Choose **Tabs** or **List** in the
+Codex section: tabs show the selected subscription, while list view stacks
+every account’s full usage card, including banked resets. The layout is saved.
+Reset inventory is read-only.
 
 The same lifecycle is available from the terminal:
 
@@ -229,9 +235,11 @@ omarchy-ai-bar codex remove acct-0123456789abcdef01234567
 ```
 
 `ambient` means the native Codex CLI account. Signing in again with an account
-already managed by Omarchy AI Bar replaces its previous isolated login instead
-of creating a duplicate entry. Removed managed homes are moved to the private
-application data recovery directory rather than deleted.
+already managed by Omarchy AI Bar updates its credentials while preserving its
+account ID, isolated home, and local history. Logins are matched by email and
+workspace ID, so separate users sharing a workspace remain separate. Removed
+managed homes are moved to the private application data recovery directory
+rather than deleted.
 
 Configuration validation, Secret Service credentials, cache management,
 hooks, local JavaScript providers, and the loopback JSON API are documented in

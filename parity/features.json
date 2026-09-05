@@ -205,7 +205,9 @@
       "tests": [
         "crates/app/tests/cli_contract.rs",
         "crates/providers/tests/provider_codex_runner.rs",
-        "crates/runtime/tests/actor.rs"
+        "crates/runtime/tests/actor.rs",
+        "crates/app/tests/codex_accounts.rs",
+        "crates/providers/tests/provider_codex_resets.rs"
       ],
       "cells": {
         "implementation": "in-progress",

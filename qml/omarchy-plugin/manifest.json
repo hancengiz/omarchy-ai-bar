@@ -35,7 +35,8 @@
       "showProviderDetails": false,
       "showActionSection": false,
       "panelHeight": 680,
-      "warningThreshold": 90
+      "warningThreshold": 90,
+      "codexAccountLayout": "Tabs"
     },
     "schema": [
       {
@@ -215,6 +216,16 @@
         "max": 100,
         "step": 5,
         "defaultValue": 90
+      },
+      {
+        "key": "codexAccountLayout",
+        "type": "enum",
+        "label": "Codex account layout",
+        "options": [
+          "Tabs",
+          "List"
+        ],
+        "defaultValue": "Tabs"
       }
     ]
   }

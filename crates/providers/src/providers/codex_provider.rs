@@ -10,7 +10,9 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use oab_domain::{AccountScope, ClassifiedError, ErrorKind, ProviderId, Timestamp, UsageSample};
+use oab_domain::{
+    AccountScope, ClassifiedError, ErrorKind, PrivacyKey, ProviderId, Timestamp, UsageSample,
+};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 
@@ -128,6 +130,7 @@ pub struct CodexCoordinatorSettings {
     account: CodexAccountSelection,
     allow_external_oauth: bool,
     resolved_cli_version: Option<String>,
+    reset_credit_key: Option<PrivacyKey>,
 }
 
 impl CodexCoordinatorSettings {
@@ -159,7 +162,19 @@ impl CodexCoordinatorSettings {
             account,
             allow_external_oauth,
             resolved_cli_version,
+            reset_credit_key: None,
         })
+    }
+
+    /// Enables optional banked-reset inventory with installation-local private IDs.
+    #[must_use]
+    pub fn with_reset_credit_key(mut self, key: PrivacyKey) -> Self {
+        self.reset_credit_key = Some(key);
+        self
+    }
+
+    pub(crate) fn reset_credit_key(&self) -> Option<&PrivacyKey> {
+        self.reset_credit_key.as_ref()
     }
 
     /// User-selected source mode.
@@ -195,6 +210,7 @@ impl Debug for CodexCoordinatorSettings {
             .field("account", &self.account)
             .field("allow_external_oauth", &self.allow_external_oauth)
             .field("has_cli_version", &self.resolved_cli_version.is_some())
+            .field("reset_credit_key", &self.reset_credit_key)
             .finish()
     }
 }

@@ -30,7 +30,140 @@ ShellRoot {
         });
     }
 
+    function runCodexAccountTests() {
+        var initialReloads = accountService.configReloads;
+        accountService.accountConfigFixture = {
+            config: {
+                providers: [
+                    {
+                        id: "codex",
+                        instance_id: "default",
+                        enabled: true,
+                        accounts: [
+                            {
+                                id: "alpha",
+                                enabled: true
+                            },
+                            {
+                                id: "beta",
+                                enabled: true
+                            }
+                        ],
+                        options: {
+                            provider_options: {
+                                active_account: "beta"
+                            }
+                        }
+                    }
+                ]
+            }
+        };
+        accountService.handleProtocolLine(helloLine("00000000000000000000000000000081"));
+        equal(accountService.configReloads, initialReloads + 1, "daemon connection did not reload accounts");
+        equal(accountService.codexAccountChoices().length, 3, "new login did not appear after reconnection");
+        equal(accountService.activeProviderAccounts.codex, "beta", "new login activation did not reach UI");
+        accountService.resetInventoryNow = Date.parse("2026-09-05T12:00:00Z");
+        function snapshot(id, count) {
+            return {
+                state: "ready",
+                last_known_good: {
+                    scope: {
+                        provider: "codex",
+                        instance: "default",
+                        account: id
+                    },
+                    identity: {
+                        email: id + "@example.test"
+                    },
+                    reset_credits: count === null ? null : {
+                        reported_available_count: count,
+                        credits: [],
+                        updated_at: "2026-09-05T11:00:00Z"
+                    }
+                }
+            };
+        }
+        var envelope = {
+            snapshots: [snapshot("ambient", 0), snapshot("alpha", 2), snapshot("beta", 5)]
+        };
+        var state = accountService.protocolState;
+        state.snapshot = envelope;
+        accountService.protocolState = Object.assign({}, state);
+        var choices = accountService.codexAccountChoices();
+        equal(choices[0].resetLabel, "0 banked resets", "zero balance was treated as unavailable");
+        equal(choices[1].resetLabel, "2 banked resets", "alpha inventory crossed accounts");
+        equal(choices[2].resetLabel, "5 banked resets", "beta inventory crossed accounts");
+        equal(accountService.accountIdFromSnapshot(accountService.selectProviderSnapshot(envelope)), "beta", "selected snapshot ignored active account");
+        equal(accountService.rowsFrom(envelope).filter(function (row) {
+            return row.provider === "codex";
+        })[0].account, "beta@example.test", "selected account card used another identity");
+        var selectedRow = accountService.rowsFrom(envelope).filter(function (row) {
+            return row.provider === "codex";
+        })[0];
+        equal(accountService.subscriptionRows(selectedRow, "Tabs").length, 1, "tabs rendered multiple cards");
+        var listed = accountService.subscriptionRows(selectedRow, "List");
+        equal(listed.length, 3, "list omitted a subscription");
+        equal(listed[1].account, "alpha@example.test", "list mixed account identities");
+        equal(listed[2].account, "beta@example.test", "list repeated selected account");
+        equal(accountService.activeProviderAccounts.codex, "beta", "list changed active selection");
+        equal(accountService.subscriptionRows({
+            provider: "claude"
+        }, "List").length, 1, "list duplicated another provider");
+        var missing = {
+            snapshots: [snapshot("ambient", 0), snapshot("alpha", 2)]
+        };
+        equal(accountService.selectProviderSnapshot(missing), null, "missing selected account fell back to native");
+        require(!accountService.rowsFrom(missing).filter(function (row) {
+            return row.provider === "codex";
+        })[0].ready, "missing selected account displayed another account's usage");
+        equal(accountService.bankedResetsLabel(null, null), "Banked resets unavailable", "unknown balance became zero");
+        equal(accountService.bankedResetsLabel(snapshot("alpha", 2).last_known_good, {
+            error: {
+                kind: "network"
+            }
+        }), "2 banked resets (last known)", "retained inventory omitted stale indication");
+        var inventory = {
+            reported_available_count: 3,
+            updated_at: "2026-09-05T11:00:00Z",
+            credits: [
+                {
+                    status: "available",
+                    expires_at: "2026-09-05T10:00:00Z"
+                },
+                {
+                    status: "available",
+                    expires_at: "2026-09-05T11:30:00Z"
+                },
+                {
+                    status: "available",
+                    expires_at: "2026-09-07T00:00:00Z"
+                },
+                {
+                    status: "available",
+                    expires_at: "2026-09-06T00:00:00Z"
+                },
+                {
+                    status: "redeemed",
+                    expires_at: "2026-09-05T13:00:00Z"
+                }
+            ]
+        };
+        equal(accountService.bankedResetsFrom(inventory).available, 2, "expiry since last refresh was not subtracted exactly once");
+        equal(accountService.bankedResetsFrom(inventory).expiresAt, "2026-09-06T00:00:00Z", "next available expiry was not earliest");
+        equal(accountService.resetCreditsSectionFrom({
+            reported_available_count: 0,
+            credits: []
+        }, true).rows[0].value, "0 resets", "zero reset inventory was hidden");
+        equal(accountService.resetCreditsSectionFrom(null, true).rows[0].value, "Unavailable", "failed inventory was rendered as zero");
+        accountService.protocolState = Protocol.reconnectingState(accountService.protocolState);
+        accountService.accountConfigFixture.config.providers[0].options.provider_options.active_account = "alpha";
+        accountService.handleProtocolLine(helloLine("00000000000000000000000000000082"));
+        equal(accountService.configReloads, initialReloads + 2, "reconnection did not reload accounts");
+        equal(accountService.activeProviderAccounts.codex, "alpha", "CLI account change did not reach UI");
+    }
+
     function runTests() {
+        runCodexAccountTests();
         require(!service.connectionWanted, "disabled service started a connection");
         require(!service.transportConnected, "disabled service exposed a live transport");
         equal(service.effectiveSnapshot.snapshots.length, 0, "disconnected service fabricated a preview snapshot");
@@ -305,7 +438,8 @@ ShellRoot {
                     state: "ready",
                     last_known_good: {
                         scope: {
-                            provider: "codex"
+                            provider: "codex",
+                            account: "ambient"
                         },
                         identity: {
                             email: "user@example.test",
@@ -532,6 +666,22 @@ ShellRoot {
         else
             console.error("OAB_SERVICE_STATE_TEST_FAIL: " + message);
         Qt.quit();
+    }
+
+    Plugin.Service {
+        id: accountService
+        bridgeEnabled: false
+        property int configReloads: 0
+        property var accountConfigFixture: ({
+                config: {
+                    providers: []
+                }
+            })
+        function loadProviderConfig() {
+            configReloads += 1;
+            applyProviderConfigDocument(accountConfigFixture);
+            return true;
+        }
     }
 
     Plugin.Service {

@@ -6,4 +6,5 @@ pub mod history;
 pub mod lock;
 pub mod migrations;
 pub mod paths;
+pub mod privacy;
 pub mod watcher;
