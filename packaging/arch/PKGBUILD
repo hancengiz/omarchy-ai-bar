@@ -13,7 +13,6 @@ depends=(
   'gcc-libs'
   'glibc'
   'libnotify'
-  'omarchy'
   'qt6-declarative'
   'quickshell'
   'sqlite'
@@ -177,8 +176,10 @@ build() {
 
 check() {
   cd "$pkgname-$pkgver"
+  # The omarchy CLI is not packaged anywhere (Omarchy is installed as a
+  # system, not a package), so plugin validation stays in CI; check() must
+  # pass in a clean chroot that has no omarchy binary.
   _oab_run_cargo_with_remaps test --workspace --release --locked --frozen
-  omarchy plugin validate qml/omarchy-plugin
 }
 
 package() {

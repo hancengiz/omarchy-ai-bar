@@ -11,7 +11,6 @@ pkgbase = omarchy-ai-bar
 	depends = gcc-libs
 	depends = glibc
 	depends = libnotify
-	depends = omarchy
 	depends = qt6-declarative
 	depends = quickshell
 	depends = sqlite

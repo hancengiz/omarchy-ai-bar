@@ -18,9 +18,17 @@
    tag archive, regenerate `.SRCINFO`, test with `makepkg --cleanbuild`, and
    commit the finalized recipe. The release workflow independently derives and
    verifies the tag checksum before its package build.
-5. If AUR publishing access is available, copy only `PKGBUILD`, `.SRCINFO`,
+5. Publish to the AUR by copying only `PKGBUILD`, `.SRCINFO`,
    `omarchy-ai-bar.install`, and the repository `LICENSE` to the AUR Git
-   repository and push a reviewable commit.
+   repository and pushing a reviewable commit. The recipe must stay
+   installable on plain Arch: nothing may depend on the `omarchy` package
+   or call its CLI from `check()`, because Omarchy is installed as a
+   system and is not packaged anywhere. AUR account registration has been
+   closed since the mid-2026 malicious-package incidents (aurweb v6.5.0
+   re-enabled push and adoption for existing accounts only). Without an
+   account, request an upload by an existing maintainer on the
+   `aur-general` list or in `#archlinux-aur` on Libera Chat, then adopt or
+   co-maintain the package once registration reopens.
 
 To rebuild an existing release tag, run the `Release` workflow manually with
 the exact tag name. The same jobs rebuild and replace all four release assets;
