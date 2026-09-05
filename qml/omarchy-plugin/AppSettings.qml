@@ -74,6 +74,61 @@ Item {
                         width: parent.width - Style.space(24)
                         spacing: Style.space(12)
 
+                        Repeater {
+                            model: [
+                                {
+                                    key: "providerLayout",
+                                    label: "Providers",
+                                    description: "Separate provider tabs or stacked provider sections",
+                                    fallback: "List"
+                                },
+                                {
+                                    key: "accountLayout",
+                                    label: "Accounts within a provider",
+                                    description: "Account tabs or stacked full account cards",
+                                    fallback: view.setting("codexAccountLayout", "Tabs")
+                                }
+                            ]
+                            delegate: Column {
+                                id: layoutSetting
+                                required property var modelData
+                                width: displayColumn.width
+                                spacing: Style.space(5)
+                                Text {
+                                    text: layoutSetting.modelData.label
+                                    color: view.foreground
+                                    font.family: view.fontFamily()
+                                    font.pixelSize: Style.font.body
+                                }
+                                Text {
+                                    width: parent.width
+                                    text: layoutSetting.modelData.description
+                                    wrapMode: Text.WordWrap
+                                    color: view.muted
+                                    font.family: view.fontFamily()
+                                    font.pixelSize: Style.font.caption
+                                }
+                                Row {
+                                    spacing: Style.space(8)
+                                    Repeater {
+                                        model: ["Tabs", "List"]
+                                        delegate: Button {
+                                            required property string modelData
+                                            text: modelData
+                                            foreground: view.foreground
+                                            focusable: true
+                                            enabled: view.setting(layoutSetting.modelData.key, layoutSetting.modelData.fallback) !== modelData
+                                            onClicked: view.panelRoot.persistSetting(layoutSetting.modelData.key, modelData)
+                                        }
+                                    }
+                                }
+                                PanelSeparator {
+                                    width: parent.width
+                                    foreground: view.foreground
+                                }
+                            }
+                        }
+
                         Row {
                             width: parent.width
 

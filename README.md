@@ -219,9 +219,10 @@ settings page. Every enabled account refreshes independently and keeps its own
 last-known-good usage state. The account switcher and settings list show each
 account's available **banked resets**; the selected usage card also shows the
 next known expiry. `0` means a successful empty balance, while `Unavailable`
-means no usable inventory was returned. Choose **Tabs** or **List** in the
-Codex section: tabs show the selected subscription, while list view stacks
-every account’s full usage card, including banked resets. The layout is saved.
+means no usable inventory was returned. Choose **Tabs** or **List** under **Settings → Display** independently for
+providers and accounts within a provider. Account lists stack every account’s
+full usage card, including banked resets. Layouts and the selected provider tab
+are saved when the popup closes.
 Reset inventory is read-only.
 
 The same lifecycle is available from the terminal:

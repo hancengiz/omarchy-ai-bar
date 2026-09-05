@@ -36,7 +36,8 @@
       "showActionSection": false,
       "panelHeight": 680,
       "warningThreshold": 90,
-      "codexAccountLayout": "Tabs"
+      "codexAccountLayout": "Tabs",
+      "providerLayout": "List"
     },
     "schema": [
       {
@@ -218,9 +219,19 @@
         "defaultValue": 90
       },
       {
-        "key": "codexAccountLayout",
+        "key": "providerLayout",
         "type": "enum",
-        "label": "Codex account layout",
+        "label": "Provider layout",
+        "options": [
+          "Tabs",
+          "List"
+        ],
+        "defaultValue": "List"
+      },
+      {
+        "key": "accountLayout",
+        "type": "enum",
+        "label": "Accounts within a provider",
         "options": [
           "Tabs",
           "List"

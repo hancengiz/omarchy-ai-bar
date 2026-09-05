@@ -980,39 +980,11 @@ Item {
 
                     Text {
                         width: parent.width
-                        text: view.provider && view.provider.provider === "codex" ? "Choose how accounts appear in the usage view. Showing an account does not switch your Codex CLI login." : (view.typedSettingsDescriptor && view.typedSettingsDescriptor.accounts ? String(view.typedSettingsDescriptor.accounts.subtitle || "") : "")
+                        text: view.provider && view.provider.provider === "codex" ? "Manage accounts here. Choose tabs or lists in Display settings. Showing an account does not switch your Codex CLI login." : (view.typedSettingsDescriptor && view.typedSettingsDescriptor.accounts ? String(view.typedSettingsDescriptor.accounts.subtitle || "") : "")
                         color: view.muted
                         font.family: view.fontFamily()
                         font.pixelSize: Style.font.caption
                         wrapMode: Text.WordWrap
-                    }
-
-                    Row {
-                        width: parent.width
-                        visible: view.provider && view.provider.provider === "codex"
-                        spacing: Style.space(8)
-                        Text {
-                            width: parent.width - accountTabs.width - accountList.width - parent.spacing * 2
-                            text: "Usage layout"
-                            color: view.foreground
-                            font.family: view.fontFamily()
-                            font.pixelSize: Style.font.body
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                        Button {
-                            id: accountTabs
-                            text: "Tabs"
-                            foreground: view.foreground
-                            enabled: view.setting("codexAccountLayout", "Tabs") !== "Tabs"
-                            onClicked: view.panelRoot.persistSetting("codexAccountLayout", "Tabs")
-                        }
-                        Button {
-                            id: accountList
-                            text: "List"
-                            foreground: view.foreground
-                            enabled: view.setting("codexAccountLayout", "Tabs") !== "List"
-                            onClicked: view.panelRoot.persistSetting("codexAccountLayout", "Tabs")
-                        }
                     }
 
                     Row {

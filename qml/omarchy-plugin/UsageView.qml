@@ -15,6 +15,18 @@ Item {
     readonly property color muted: panelRoot ? panelRoot.muted : Qt.darker(foreground, 1.55)
     readonly property var providers: panelRoot ? panelRoot.configuredRows : []
 
+    readonly property string selectedProvider: {
+        var saved = String(setting("selectedProviderTab", ""));
+        for (var i = 0; i < providers.length; i++) {
+            if (providers[i].provider === saved)
+                return saved;
+        }
+        return providers.length ? providers[0].provider : "";
+    }
+    readonly property var visibleProviders: setting("providerLayout", "List") === "Tabs" ? providers.filter(function (row) {
+        return row.provider === view.selectedProvider;
+    }) : providers
+
     function fontFamily() {
         return panelRoot && panelRoot.bar ? panelRoot.bar.fontFamily : Style.font.family;
     }
@@ -167,8 +179,25 @@ Item {
                 }
             }
 
+            Flow {
+                width: parent.width
+                spacing: Style.space(6)
+                visible: view.setting("providerLayout", "List") === "Tabs" && view.providers.length > 1
+                Repeater {
+                    model: view.providers
+                    delegate: Button {
+                        required property var modelData
+                        text: modelData.label
+                        foreground: view.foreground
+                        focusable: true
+                        enabled: view.selectedProvider !== modelData.provider
+                        onClicked: view.panelRoot.persistSetting("selectedProviderTab", modelData.provider)
+                    }
+                }
+            }
+
             Repeater {
-                model: view.providers
+                model: view.visibleProviders
 
                 delegate: Column {
                     id: providerGroup
@@ -176,38 +205,8 @@ Item {
                     width: usageColumn.width
                     spacing: Style.space(8)
 
-                    Row {
-                        width: parent.width
-                        spacing: Style.space(8)
-                        visible: providerGroup.modelData.provider === "codex" && view.panelRoot && view.panelRoot.service && view.panelRoot.service.codexAccountChoices().length > 1
-                        Text {
-                            width: parent.width - layoutTabs.width - layoutList.width - parent.spacing * 2
-                            text: "Codex subscriptions"
-                            color: view.foreground
-                            font.family: view.fontFamily()
-                            font.pixelSize: Style.font.body
-                            font.bold: true
-                        }
-                        Button {
-                            id: layoutTabs
-                            text: "Tabs"
-                            foreground: view.foreground
-                            focusable: true
-                            enabled: view.setting("codexAccountLayout", "Tabs") !== "Tabs"
-                            onClicked: view.panelRoot.persistSetting("codexAccountLayout", "Tabs")
-                        }
-                        Button {
-                            id: layoutList
-                            text: "List"
-                            foreground: view.foreground
-                            focusable: true
-                            enabled: view.setting("codexAccountLayout", "Tabs") !== "List"
-                            onClicked: view.panelRoot.persistSetting("codexAccountLayout", "List")
-                        }
-                    }
-
                     Repeater {
-                        model: view.panelRoot && view.panelRoot.service ? view.panelRoot.service.subscriptionRows(providerGroup.modelData, view.setting("codexAccountLayout", "Tabs")) : [providerGroup.modelData]
+                        model: view.panelRoot && view.panelRoot.service ? view.panelRoot.service.subscriptionRows(providerGroup.modelData, view.setting("accountLayout", view.setting("codexAccountLayout", "Tabs"))) : [providerGroup.modelData]
                         delegate: BorderSurface {
                             id: providerSurface
                             required property var modelData
@@ -286,7 +285,7 @@ Item {
                                 Flow {
                                     width: parent.width
                                     spacing: Style.space(6)
-                                    visible: view.setting("codexAccountLayout", "Tabs") === "Tabs" && providerSurface.modelData.provider === "codex" && view.panelRoot && view.panelRoot.service && view.panelRoot.service.codexAccountChoices().length > 1
+                                    visible: view.setting("accountLayout", view.setting("codexAccountLayout", "Tabs")) === "Tabs" && providerSurface.modelData.provider === "codex" && view.panelRoot && view.panelRoot.service && view.panelRoot.service.codexAccountChoices().length > 1
 
                                     Repeater {
                                         model: view.panelRoot && view.panelRoot.service ? view.panelRoot.service.codexAccountChoices() : []
