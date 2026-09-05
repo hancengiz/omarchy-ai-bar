@@ -641,12 +641,12 @@ const CODEX_CONTROLS: &[ProviderSettingsControlDescriptor] = &[
             "Show Codex Spark usage",
             concat!(
                 "Shows Codex Spark quota rows in the menu and provider preview. ",
-                "Requires optional credits and extra usage in Display settings."
+                "Does not change quota collection or your Codex CLI account."
             ),
             ProviderSettingsSection::Options,
             ALWAYS,
-            OPTIONAL_EXTRAS_ON,
-            unavailable(ProviderSettingsGap::DisplayFiltering),
+            ALWAYS,
+            IMPLEMENTED,
             None,
         ),
         actions: NO_ACTIONS,

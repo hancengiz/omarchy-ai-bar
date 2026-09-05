@@ -713,7 +713,7 @@ Item {
 
     function typedPickerOptions(control, implementedOnly) {
         var item = typedControlItem(control);
-        var options = item && Array.isArray(item.options) ? item.options : [];
+        var options = item && item.options ? Array.from(item.options) : [];
         return options.filter(function (option) {
             return option && (!implementedOnly || availabilityImplemented(option.availability));
         }).map(function (option) {
@@ -726,7 +726,7 @@ Item {
 
     function unavailableTypedPickerOptionLabels(control) {
         var item = typedControlItem(control);
-        var options = item && Array.isArray(item.options) ? item.options : [];
+        var options = item && item.options ? Array.from(item.options) : [];
         return options.filter(function (option) {
             return option && !availabilityImplemented(option.availability);
         }).map(function (option) {
@@ -749,6 +749,8 @@ Item {
             return options.source;
         case "grok-cookie-source":
             return options.cookie_source;
+        case "codex-spark-usage-visible":
+            return extensions.spark_usage_visible;
         case "codex-external-oauth-sources":
             return extensions.external_oauth_sources;
         case "copilot-budget-extras":
@@ -772,6 +774,8 @@ Item {
     function defaultProviderSettingValue(provider, control) {
         var item = typedControlItem(control);
         var settingId = item ? String(item.id || "") : "";
+        if (settingId === "codex-spark-usage-visible")
+            return true;
         if (settingId === "zai-api-region")
             return "global";
         if (String(control && control.kind || "") === "toggle")
@@ -1186,6 +1190,8 @@ Item {
         var extras = Array.isArray(sample.extra_windows) ? sample.extra_windows : [];
         for (var index = 0; index < extras.length; index++) {
             var extra = extras[index];
+            if (provider === "codex" && extra && String(extra.id || "").indexOf("codex-spark") === 0 && explicitProviderSettingValue("codex", "codex-spark-usage-visible") === false)
+                continue;
             var row = extra ? windowRow(String(extra.title || "Quota"), extra.window) : null;
             if (row)
                 values.push(row);

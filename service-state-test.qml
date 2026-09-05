@@ -31,6 +31,50 @@ ShellRoot {
     }
 
     function runCodexAccountTests() {
+        var sparkSample = {
+            extra_windows: [
+                {
+                    id: "codex-spark",
+                    title: "Spark",
+                    window: {
+                        usage: {
+                            state: "known",
+                            used_percent: 0
+                        }
+                    }
+                },
+                {
+                    id: "codex-spark-weekly",
+                    title: "Spark Weekly",
+                    window: {
+                        usage: {
+                            state: "known",
+                            used_percent: 1
+                        }
+                    }
+                },
+                {
+                    id: "gpt-reserve",
+                    title: "Reserve",
+                    window: {
+                        usage: {
+                            state: "known",
+                            used_percent: 2
+                        }
+                    }
+                }
+            ]
+        };
+        equal(accountService.windowsFrom(sparkSample, "codex").length, 3, "Spark default was hidden");
+        accountService.providerOptionsOverrides = {
+            codex: {
+                provider_options: {
+                    spark_usage_visible: false
+                }
+            }
+        };
+        equal(accountService.windowsFrom(sparkSample, "codex").length, 1, "Spark toggle did not preserve other quotas");
+        accountService.providerOptionsOverrides = {};
         var initialReloads = accountService.configReloads;
         accountService.accountConfigFixture = {
             config: {

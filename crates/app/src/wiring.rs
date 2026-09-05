@@ -1399,6 +1399,7 @@ fn describe_provider_settings(provider: Option<&str>, format: OutputFormat) -> A
 enum ProviderOptionUpdate {
     Source(Option<ProviderSourceMode>),
     ExternalOauthSources(Option<bool>),
+    CodexSparkVisible(Option<bool>),
     ExtrasEnabled(Option<bool>),
     CookieSource(Option<ProviderCookieSource>),
     EnterpriseHost(Option<String>),
@@ -1528,6 +1529,9 @@ fn provider_option_update(
         ProviderSettingId::GrokCookieSource => Ok(ProviderOptionUpdate::CookieSource(
             value.map(parse_grok_cookie_source).transpose()?,
         )),
+        ProviderSettingId::CodexSparkUsageVisible => Ok(ProviderOptionUpdate::CodexSparkVisible(
+            value.map(parse_boolean).transpose()?,
+        )),
         ProviderSettingId::CodexExternalOauthSources => Ok(
             ProviderOptionUpdate::ExternalOauthSources(value.map(parse_boolean).transpose()?),
         ),
@@ -1653,6 +1657,17 @@ fn apply_provider_option_update(route: &mut ProviderConfig, update: ProviderOpti
             }
             None => {
                 route.options.extensions.remove("external_oauth_sources");
+            }
+        },
+        ProviderOptionUpdate::CodexSparkVisible(value) => match value {
+            Some(value) => {
+                route.options.extensions.insert(
+                    "spark_usage_visible".to_owned(),
+                    ProviderOptionValue::Boolean(value),
+                );
+            }
+            None => {
+                route.options.extensions.remove("spark_usage_visible");
             }
         },
         ProviderOptionUpdate::ExtrasEnabled(value) => route.options.extras_enabled = value,

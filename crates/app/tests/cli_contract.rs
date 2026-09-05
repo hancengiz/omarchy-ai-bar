@@ -424,6 +424,13 @@ fn configure_runtime_backed_typed_provider_settings(fixture: &DaemonFixture) {
         [
             "config",
             "set-option",
+            "codex",
+            "codex-spark-usage-visible",
+            "false",
+        ],
+        [
+            "config",
+            "set-option",
             "claude",
             "claude-usage-source",
             "auto",
@@ -543,6 +550,10 @@ fn assert_typed_provider_settings_round_trip_and_clear(fixture: &DaemonFixture) 
         .find(|route| route["id"] == "codex")
         .expect("Codex route");
     assert_eq!(codex["options"]["source"], "pat");
+    assert_eq!(
+        codex["options"]["provider_options"]["spark_usage_visible"],
+        false
+    );
     assert_eq!(
         codex["options"]["provider_options"]["external_oauth_sources"],
         true

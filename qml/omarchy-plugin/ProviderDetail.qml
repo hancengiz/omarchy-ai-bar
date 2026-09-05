@@ -148,7 +148,12 @@ Item {
         var gap = item && item.availability ? String(item.availability.gap || "") : "";
         if (gap === "")
             return "unavailable in this build";
-        return gap.replace(/-/g, " ");
+        var explanations = {
+            "configurable-cost-ledger": "Cost estimates already run automatically. Choosing the native session history for a managed account is not supported yet.",
+            "configurable-history-tracking": "Personalized pace predictions from stored usage history are not implemented.",
+            "openai-web-extras": "ChatGPT web code-review usage, detailed breakdowns, and credit history are not implemented. Banked reset inventory is separate."
+        };
+        return explanations[gap] || gap.replace(/-/g, " ");
     }
 
     function controlInteractive(control) {
@@ -625,7 +630,7 @@ Item {
                                     Text {
                                         width: parent.width
                                         visible: !typedControl.implemented
-                                        text: "Not available on Omarchy yet · " + view.controlGap(typedControl.modelData)
+                                        text: "Not implemented yet · " + view.controlGap(typedControl.modelData)
                                         color: Color.urgent
                                         font.family: view.fontFamily()
                                         font.pixelSize: Style.font.caption
@@ -705,7 +710,7 @@ Item {
 
                                     Row {
                                         width: parent.width
-                                        visible: typedControl.controlKind === "toggle"
+                                        visible: typedControl.controlKind === "toggle" && typedControl.implemented
                                         spacing: Style.space(8)
 
                                         Text {
