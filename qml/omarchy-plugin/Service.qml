@@ -275,6 +275,28 @@ Item {
         return null;
     }
 
+    function shortestQuotaPercent(sample) {
+        if (!sample)
+            return null;
+        var windows = [sample.primary, sample.secondary, sample.tertiary].filter(function (window) {
+            return window && window.usage && window.usage.state === "known" && isFinite(Number(window.usage.used_percent));
+        });
+        windows.sort(function (left, right) {
+            var a = Number(left.duration_seconds);
+            var b = Number(right.duration_seconds);
+            return (a > 0 ? a : Infinity) - (b > 0 ? b : Infinity);
+        });
+        return windows.length ? Math.round(Math.max(0, Math.min(100, Number(windows[0].usage.used_percent)))) : null;
+    }
+
+    function providerTabLabel(providerRow) {
+        var accounts = subscriptionRows(providerRow, "List");
+        var percentages = accounts.map(function (row) {
+            return row.tabPercent === null || row.tabPercent === undefined ? "—" : "%" + row.tabPercent;
+        });
+        return providerRow.label + " (" + percentages.join(" ") + ")";
+    }
+
     function subscriptionRows(providerRow, layout) {
         if (!providerRow || providerRow.provider !== "codex" || layout !== "List")
             return providerRow ? [providerRow] : [];
@@ -382,6 +404,7 @@ Item {
                 stale: snapshot && snapshot.freshness ? snapshot.freshness.state === "stale" : false,
                 staleSince: snapshot && snapshot.freshness && snapshot.freshness.state === "stale" ? String(snapshot.freshness.since || "") : "",
                 windows: sample ? windowsFrom(sample, provider) : [],
+                tabPercent: shortestQuotaPercent(sample),
                 summary: sample ? summaryFrom(sample) : "",
                 optionalSections: sample ? optionalSectionsFrom(sample) : [],
                 costStats: sample ? costStatsFrom(sample.cost_usage) : [],

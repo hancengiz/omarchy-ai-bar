@@ -187,10 +187,20 @@ Item {
                     model: view.providers
                     delegate: Button {
                         required property var modelData
-                        text: modelData.label
+                        text: view.panelRoot && view.panelRoot.service ? view.panelRoot.service.providerTabLabel(modelData) : modelData.label
                         foreground: view.foreground
                         focusable: true
-                        enabled: view.selectedProvider !== modelData.provider
+                        selected: view.selectedProvider === modelData.provider
+                        bordered: true
+                        accent: view.accentForProvider(modelData.provider)
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            height: Style.space(3)
+                            visible: parent.selected
+                            color: parent.accent
+                        }
                         onClicked: view.panelRoot.persistSetting("selectedProviderTab", modelData.provider)
                     }
                 }

@@ -31,6 +31,32 @@ ShellRoot {
     }
 
     function runCodexAccountTests() {
+        equal(accountService.shortestQuotaPercent({
+            primary: {
+                duration_seconds: 604800,
+                usage: {
+                    state: "known",
+                    used_percent: 85
+                }
+            },
+            secondary: {
+                duration_seconds: 18000,
+                usage: {
+                    state: "known",
+                    used_percent: 50
+                }
+            }
+        }), 50, "tab did not prioritize shortest quota window");
+        equal(accountService.shortestQuotaPercent({
+            primary: {
+                duration_seconds: 604800,
+                usage: {
+                    state: "known",
+                    used_percent: 85
+                }
+            }
+        }), 85, "tab did not fall back to weekly quota");
+        equal(accountService.shortestQuotaPercent(null), null, "missing quota became zero");
         var sparkSample = {
             extra_windows: [
                 {
@@ -130,6 +156,15 @@ ShellRoot {
         var envelope = {
             snapshots: [snapshot("ambient", 0), snapshot("alpha", 2), snapshot("beta", 5)]
         };
+        envelope.snapshots.forEach(function (entry, index) {
+            entry.last_known_good.primary = {
+                duration_seconds: 18000,
+                usage: {
+                    state: "known",
+                    used_percent: [50, 85, 0][index]
+                }
+            };
+        });
         var state = accountService.protocolState;
         state.snapshot = envelope;
         accountService.protocolState = Object.assign({}, state);
@@ -144,6 +179,7 @@ ShellRoot {
         var selectedRow = accountService.rowsFrom(envelope).filter(function (row) {
             return row.provider === "codex";
         })[0];
+        equal(accountService.providerTabLabel(selectedRow), "Codex (%50 %85 %0)", "provider tab omitted or mixed account percentages");
         equal(accountService.subscriptionRows(selectedRow, "Tabs").length, 1, "tabs rendered multiple cards");
         var listed = accountService.subscriptionRows(selectedRow, "List");
         equal(listed.length, 3, "list omitted a subscription");
