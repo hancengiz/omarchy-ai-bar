@@ -17,5 +17,9 @@ OMARCHY_AI_BAR_BRIDGE_SOURCE="$repo_root/qml/omarchy-plugin" \
 hyprctl eval \
   "hl.env(\"OMARCHY_AI_BAR_EXECUTABLE\", \"$repo_root/target/release/omarchy-ai-bar\")"
 
+if [[ -f $HOME/.config/systemd/user/omarchy-ai-bar.service ]]; then
+  systemctl --user restart omarchy-ai-bar.service
+fi
+
 omarchy restart shell
 printf 'dev-install: plugin reinstalled from %s\n' "$repo_root"
