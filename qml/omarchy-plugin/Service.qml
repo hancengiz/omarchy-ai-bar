@@ -1531,16 +1531,21 @@ Item {
     }
 
     function costChartFrom(costUsage, metric) {
-        if (!costUsage || !Array.isArray(costUsage.daily) || costUsage.daily.length === 0)
+        if (!costUsage || !costUsage.daily || !(costUsage.daily.length > 0))
             return null;
-        var useCost = metric ? metric === "cost" : costUsage.daily.some(function (bucket) {
+        // Repeater modelData wraps nested arrays as Qt sequence objects.
+        // Copy by index so charts accept both those lists and parsed JS arrays.
+        var daily = [];
+        for (var bucketIndex = 0; bucketIndex < costUsage.daily.length; bucketIndex++)
+            daily.push(costUsage.daily[bucketIndex]);
+        var useCost = metric ? metric === "cost" : daily.some(function (bucket) {
             return bucket && bucket.metrics && bucket.metrics.amount !== null && bucket.metrics.amount !== undefined;
         });
         var buckets = {};
-        costUsage.daily.forEach(function (bucket) {
+        daily.forEach(function (bucket) {
             buckets[String(bucket.day)] = bucket.metrics;
         });
-        var end = new Date(costUsage.updated_at || costUsage.daily[costUsage.daily.length - 1].day);
+        var end = new Date(costUsage.updated_at || daily[daily.length - 1].day);
         var count = Math.max(1, Math.min(365, Number(costUsage.history_days || 30)));
         var days = [];
         if (!isNaN(end.getTime())) {

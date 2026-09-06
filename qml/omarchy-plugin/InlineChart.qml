@@ -6,6 +6,7 @@ Item {
 
     property var chart: null
     property string sectionTitle: ""
+    property bool compact: false
     property int selectedIndex: -1
     activeFocusOnTab: visible
     Accessible.role: Accessible.Graphic
@@ -38,7 +39,7 @@ Item {
 
     readonly property var points: chart ? (chart.points || []) : []
     visible: points.length > 0
-    implicitHeight: visible ? chartColumn.implicitHeight : 0
+    implicitHeight: points.length > 0 ? chartColumn.implicitHeight : 0
 
     onChartChanged: {
         selectedIndex = -1;
@@ -55,7 +56,7 @@ Item {
 
         Row {
             width: parent.width
-            visible: titleText.text !== "" || unitText.text !== ""
+            visible: !root.compact && (titleText.text !== "" || unitText.text !== "")
 
             Text {
                 id: titleText
@@ -164,7 +165,7 @@ Item {
         }
         Text {
             width: parent.width
-            visible: root.points.some(function (point) {
+            visible: !root.compact && root.points.some(function (point) {
                 return !root.known(point);
             })
             text: "Dashes indicate unavailable values"
@@ -175,6 +176,7 @@ Item {
 
         Text {
             id: detailText
+            visible: !root.compact || root.selectedIndex >= 0 || root.activeFocus
             width: parent.width
             text: {
                 if (root.points.length === 0)

@@ -471,8 +471,42 @@ async fn write_snapshot(
     publication: &oab_runtime::snapshot_store::PublishedSnapshot,
 ) -> io::Result<()> {
     let sequence = Sequence::new(publication.sequence()).map_err(invalid_wire)?;
-    let snapshot = SurfaceSnapshotEnvelope::Trusted(publication.envelope().private_view());
+    let envelope = display_envelope(publication.envelope()).map_err(invalid_wire)?;
+    let snapshot = SurfaceSnapshotEnvelope::Trusted(envelope.private_view());
     write_message(writer, &ServerMessage::Snapshot { sequence, snapshot }).await
+}
+
+// Local history is also retained on quota samples for CLI and cache consumers.
+// The desktop reads local_history first, so sending an identical ledger twice
+// wastes the bounded display frame and can disconnect every provider at once.
+fn display_envelope(
+    envelope: &SnapshotEnvelopeV1,
+) -> Result<SnapshotEnvelopeV1, oab_domain::SnapshotError> {
+    let snapshots = envelope
+        .snapshots()
+        .iter()
+        .map(|snapshot| {
+            let Some(sample) = snapshot.last_known_good() else {
+                return Ok(snapshot.clone());
+            };
+            let history = snapshot.local_history();
+            let duplicate = sample.cost_usage().is_some()
+                && sample.cost_usage() == history.and_then(|history| history.data.as_ref());
+            if !duplicate {
+                return Ok(snapshot.clone());
+            }
+            ProviderSnapshot::ready(
+                sample.clone().without_cost_usage(),
+                snapshot.freshness().expect("ready snapshot has freshness"),
+                snapshot
+                    .refresh_phase()
+                    .expect("ready snapshot has refresh state"),
+                snapshot.error().cloned(),
+            )
+            .map(|snapshot| snapshot.with_local_history(history.cloned()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    SnapshotEnvelopeV1::new(envelope.generated_at(), snapshots)
 }
 
 async fn write_message(
@@ -623,4 +657,146 @@ fn diagnostics_value(snapshot: &Value) -> Value {
         "generated_at": snapshot.get("generated_at").cloned().unwrap_or(Value::Null),
         "providers": providers,
     })
+}
+
+#[cfg(test)]
+mod display_tests {
+    use super::display_envelope;
+    use oab_domain::{
+        CostProvenance, CostUnit, CostUsageCoverage, CostUsageDailyBucket, CostUsageMetrics,
+        CostUsageModelBreakdown, CostUsageSnapshot, CostUsageTokenMix, CurrencyCode, ExactDecimal,
+        Freshness, LocalHistoryScope, LocalHistorySnapshot, LocalHistoryState, ProviderSnapshot,
+        RefreshPhase, SnapshotEnvelopeV1, SurfaceSnapshotEnvelope,
+    };
+    use oab_ipc::codec::encode_json_line;
+    use oab_ipc::protocol::{Sequence, ServerMessage};
+
+    fn ledger(fixture: &SnapshotEnvelopeV1) -> CostUsageSnapshot {
+        let metrics = CostUsageMetrics::new(
+            CostUsageTokenMix::new(Some(100), Some(20), None, None, None),
+            Some(120),
+            Some(1),
+            Some(ExactDecimal::parse("0.5").unwrap()),
+            CostUsageCoverage::new(1, 0, 0, 0).unwrap(),
+        )
+        .unwrap();
+        let daily = (1..=30)
+            .map(|day| {
+                let models = (0..3)
+                    .map(|index| {
+                        CostUsageModelBreakdown::new(
+                            format!("model-{index}-{}", "x".repeat(80)),
+                            metrics.clone(),
+                            None,
+                            None,
+                            None,
+                            None,
+                        )
+                        .unwrap()
+                    })
+                    .collect();
+                CostUsageDailyBucket::new(
+                    format!("2026-08-{day:02}"),
+                    None,
+                    metrics.clone(),
+                    vec![],
+                    models,
+                    vec![],
+                )
+                .unwrap()
+            })
+            .collect();
+        CostUsageSnapshot::new(
+            CostUnit::Currency(CurrencyCode::new("USD").unwrap()),
+            metrics.clone(),
+            metrics,
+            None,
+            30,
+            true,
+            None,
+            None,
+            daily,
+            vec![],
+            vec![],
+            vec![],
+            fixture.generated_at(),
+            CostProvenance::ListPriceEstimate,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn display_sends_one_ledger_and_keeps_a_large_history_inside_the_frame_limit() {
+        let fixture: SnapshotEnvelopeV1 =
+            serde_json::from_str(include_str!("../../../fixtures/domain/snapshot-v1.json"))
+                .unwrap();
+        let history = ledger(&fixture);
+        let provider = ProviderSnapshot::ready(
+            fixture.snapshots()[0]
+                .last_known_good()
+                .unwrap()
+                .clone()
+                .with_cost_usage(history.clone()),
+            Freshness::Fresh,
+            RefreshPhase::Idle,
+            None,
+        )
+        .unwrap()
+        .with_local_history(Some(LocalHistorySnapshot {
+            scope: LocalHistoryScope::Machine,
+            state: LocalHistoryState::Ready,
+            data: Some(history.clone()),
+        }));
+        let envelope = SnapshotEnvelopeV1::new(fixture.generated_at(), vec![provider]).unwrap();
+        let sequence = Sequence::new(1).unwrap();
+        assert!(
+            encode_json_line(&ServerMessage::Snapshot {
+                sequence,
+                snapshot: SurfaceSnapshotEnvelope::Trusted(envelope.private_view()),
+            })
+            .is_err(),
+            "fixture must reproduce the oversized display frame"
+        );
+        let display = display_envelope(&envelope).unwrap();
+        assert!(
+            encode_json_line(&ServerMessage::Snapshot {
+                sequence,
+                snapshot: SurfaceSnapshotEnvelope::Trusted(display.private_view()),
+            })
+            .is_ok()
+        );
+        let row = &display.snapshots()[0];
+        assert!(row.last_known_good().unwrap().cost_usage().is_none());
+        assert_eq!(row.local_history().unwrap().data.as_ref(), Some(&history));
+        assert!(
+            envelope.snapshots()[0]
+                .last_known_good()
+                .unwrap()
+                .cost_usage()
+                .is_some(),
+            "CLI and cache data must remain intact"
+        );
+
+        let scanning =
+            envelope.snapshots()[0]
+                .clone()
+                .with_local_history(Some(LocalHistorySnapshot {
+                    scope: LocalHistoryScope::Machine,
+                    state: LocalHistoryState::Scanning,
+                    data: None,
+                }));
+        let scanning = SnapshotEnvelopeV1::new(fixture.generated_at(), vec![scanning]).unwrap();
+        assert_eq!(
+            display_envelope(&scanning).unwrap(),
+            scanning,
+            "retained history must survive a scan without data"
+        );
+        let legacy = envelope.snapshots()[0].clone().with_local_history(None);
+        let legacy = SnapshotEnvelopeV1::new(fixture.generated_at(), vec![legacy]).unwrap();
+        assert_eq!(
+            display_envelope(&legacy).unwrap(),
+            legacy,
+            "providers without independent history keep their sample ledger"
+        );
+    }
 }

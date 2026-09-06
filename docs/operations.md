@@ -338,6 +338,11 @@ plugin replacement. Restart only when the rescan fails or the widget remains
 on the previous payload.
 
 
+After an upgrade, check the live UI as well as `bridge status`. Matching files
+on disk do not prove that Quickshell loaded the new code. If the daemon reports
+ready providers but the popup remains empty after the rescan finishes, run
+`omarchy restart shell` and verify `omarchy shell omarchy-ai-bar debugProviderState`.
+
 ## Local activity controls
 
 Codex account quotas and local session activity have separate sources. A managed
@@ -365,3 +370,16 @@ omarchy-ai-bar config set-option claude claude-daily-routines-usage-visible fals
 It hides the routines row in the popup and preview. Other model-scoped limits,
 collected quota data, and CLI output remain unchanged. The global optional-credit
 and extra-usage display switch also hides Daily Routines.
+
+### Compact activity display
+
+Local activity shows Today and the history-period total for the selected Tokens
+or Cost metric, followed by the daily chart. Scope remains visible as “This
+machine” or “This account.” Model attribution and update time are under Details;
+loading and empty states use a single short message. Charts accept Qt list values
+from popup delegates as well as JavaScript arrays. Missing prices leave token
+activity visible and cost values unknown, with a pricing note in the Cost view.
+
+Display frames send matching local history only once per account. CLI and cache
+snapshots retain their existing cost fields. This avoids disconnecting the whole
+popup when duplicated ledgers exceed the 64 KiB display-message limit.

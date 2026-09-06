@@ -133,4 +133,22 @@ if [[ "$service_test_output" == *OAB_SERVICE_STATE_TEST_FAIL* || "$service_test_
   exit 1
 fi
 
+# Exercise the real activity component after an initially hidden popup receives data.
+activity_dir="$format_dir/activity"
+mkdir -p -- "$activity_dir"
+ln -s -- "$plugin_dir" "$activity_dir/Plugin"
+ln -s -- "${OMARCHY_PATH:-/usr/share/omarchy}/shell/Commons" "$activity_dir/Commons"
+ln -s -- "${OMARCHY_PATH:-/usr/share/omarchy}/shell/Ui" "$activity_dir/Ui"
+cp -- "$tests_dir/quickshell/activity-view.qml" "$activity_dir/shell.qml"
+activity_output=""
+if ! activity_output=$(OMARCHY_AI_BAR_EXECUTABLE=/usr/bin/true QT_QPA_PLATFORM=offscreen timeout 10 \
+  "$quickshell_bin" -n --no-color -p "$activity_dir/shell.qml" 2>&1); then
+  printf '%s\n' "$activity_output" >&2
+  exit 1
+fi
+if [[ "$activity_output" == *OAB_ACTIVITY_VIEW_TEST_FAIL* || "$activity_output" != *OAB_ACTIVITY_VIEW_TEST_PASS* ]]; then
+  printf '%s\n' "$activity_output" >&2
+  exit 1
+fi
+
 "$cargo_bin" test -p omarchy-ai-bar --test ui_socket_smoke --locked
