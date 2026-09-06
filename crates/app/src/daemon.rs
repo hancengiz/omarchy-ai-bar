@@ -40,7 +40,7 @@ use crate::single_instance::{
 const MAX_ACCEPT_BATCH: usize = 4;
 const FRONTEND_GRACE: Duration = Duration::from_secs(5);
 const TRAY_TICK: Duration = Duration::from_millis(250);
-const SNAPSHOT_CACHE_BYTES: usize = 4 * 1024 * 1024;
+pub(crate) const SNAPSHOT_CACHE_BYTES: usize = 4 * 1024 * 1024;
 
 /// Path-free daemon lifecycle failure.
 #[derive(Debug, Error)]

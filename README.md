@@ -223,6 +223,11 @@ means no usable inventory was returned. Choose **Tabs** or **List** under **Sett
 providers and accounts within a provider. Account lists stack every account’s
 full usage card, including banked resets. Layouts and the selected provider tab
 are saved when the popup closes.
+When every enabled Codex account's weekly limit is reached, the Codex usage
+card adds a **reset coach**: it names the account and soonest-expiring banked
+reset a redemption would spend, balanced against the next natural reset, so
+short gaps can be waited out and perishable resets are spent first. Only the
+main model lanes count; extra windows such as Codex Spark never trigger it.
 Reset inventory is read-only.
 
 The same lifecycle is available from the terminal:
@@ -233,6 +238,13 @@ omarchy-ai-bar codex list
 omarchy-ai-bar codex activate ambient
 omarchy-ai-bar codex activate acct-0123456789abcdef01234567
 omarchy-ai-bar codex remove acct-0123456789abcdef01234567
+```
+
+Ask which account or banked reset to spend next when limits are hit:
+
+```sh
+omarchy-ai-bar codex advise
+omarchy-ai-bar codex advise --active --format json
 ```
 
 `ambient` means the native Codex CLI account. Signing in again with an account
@@ -268,14 +280,20 @@ omarchy restart shell
 
 Then start the daemon in a terminal from this repository (add provider
 environment variables to this command if needed):
-
 ```sh
 target/release/omarchy-ai-bar daemon
 ```
 
 The `AI` widget should appear in the Omarchy bar. Left-click opens the provider
-rows; middle/right-click refreshes them. To remove the development
-bridge afterward:
+rows; middle/right-click refreshes them. After changing Rust code or plugin
+QML, one script rebuilds and reinstalls the plugin from this checkout (the
+packaged `/usr` files are never touched):
+
+```sh
+scripts/dev-install.sh
+```
+
+To remove the development bridge afterward:
 
 ```sh
 target/release/omarchy-ai-bar bridge uninstall

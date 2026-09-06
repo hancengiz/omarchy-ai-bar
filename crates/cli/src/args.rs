@@ -300,6 +300,14 @@ pub enum CodexAction {
         /// Managed account ID.
         account: String,
     },
+    /// Recommend which Codex account or banked reset to use next.
+    Advise {
+        /// Advise for someone actively working right now.
+        #[arg(long)]
+        active: bool,
+        #[command(flatten)]
+        output: OutputArgs,
+    },
 }
 
 /// Shell-free external hook operations.
@@ -520,6 +528,27 @@ mod tests {
             Some(Command::Codex(CodexArgs {
                 action: Some(CodexAction::Activate { account })
             })) if account == "acct-0123456789abcdef01234567"
+        ));
+    }
+
+    #[test]
+    fn codex_advise_defaults_to_idle() {
+        let idle = Cli::try_parse_from(["omarchy-ai-bar", "codex", "advise"])
+            .expect("parse idle Codex advice");
+        assert!(matches!(
+            idle.command,
+            Some(Command::Codex(CodexArgs {
+                action: Some(CodexAction::Advise { active, .. })
+            })) if !active
+        ));
+
+        let active = Cli::try_parse_from(["omarchy-ai-bar", "codex", "advise", "--active"])
+            .expect("parse active Codex advice");
+        assert!(matches!(
+            active.command,
+            Some(Command::Codex(CodexArgs {
+                action: Some(CodexAction::Advise { active, .. })
+            })) if active
         ));
     }
 

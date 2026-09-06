@@ -258,6 +258,84 @@ ShellRoot {
         require(!boundaryRows[2].urgent, "exactly 48h was highlighted");
         equal(boundaryRows[3].value, "Expiry not provided", "unknown expiry was fabricated");
         equal(accountService.resetCreditsSectionFrom(null, true).rows[0].value, "Unavailable", "failed inventory was rendered as zero");
+        accountService.resetInventoryNow = Date.parse("2026-09-06T12:46:36Z");
+        function advisedSnapshot(id, usedPercent, resetsAt, creditExpiries) {
+            return {
+                state: "ready",
+                last_known_good: {
+                    scope: {
+                        provider: "codex",
+                        instance: "default",
+                        account: id
+                    },
+                    identity: {
+                        email: id + "@example.test"
+                    },
+                    primary: null,
+                    secondary: {
+                        duration_seconds: 604800,
+                        usage: {
+                            state: "known",
+                            used_percent: usedPercent
+                        },
+                        resets_at: resetsAt
+                    },
+                    extra_windows: [
+                        {
+                            id: "codex-spark",
+                            title: "Spark",
+                            window: {
+                                usage: {
+                                    state: "known",
+                                    used_percent: 0
+                                }
+                            }
+                        }
+                    ],
+                    reset_credits: {
+                        reported_available_count: creditExpiries.length,
+                        credits: creditExpiries.map(function (expiry) {
+                            return {
+                                status: "available",
+                                expires_at: expiry
+                            };
+                        }),
+                        updated_at: "2026-09-06T12:46:36Z"
+                    }
+                }
+            };
+        }
+        var stockedAccount = advisedSnapshot("cengizhan", 100, "2026-09-07T06:38:49Z", [
+            "2026-09-20T23:55:02Z",
+            "2026-10-04T01:50:29Z",
+            "2026-10-05T04:18:19Z"
+        ]);
+        var loneAccount = advisedSnapshot("fabriqa", 100, "2026-09-12T21:22:55Z", [
+            "2026-10-05T04:19:02Z"
+        ]);
+        var coach = accountService.codexAdviceFrom([stockedAccount, loneAccount]);
+        equal(coach.headline, "Weekly limits reached on all 2 Codex accounts", "capped headline was not shown");
+        require(coach.detail.indexOf("Spend the reset expiring") === 0, "redemption did not lead the advice");
+        require(coach.detail.indexOf(" on cengizhan@example.test.") !== -1, "stocked account was not the redemption target");
+        require(coach.detail.indexOf("resets in 17h 52m") !== -1, "wait alternative missed the soonest natural reset");
+        var switchCoach = accountService.codexAdviceFrom([
+            stockedAccount,
+            advisedSnapshot("fabriqa", 40, "2026-09-12T21:22:55Z", [])
+        ]);
+        equal(switchCoach.headline, "Switch to fabriqa@example.test", "headroom account was not recommended for switching");
+        var blockedCoach = accountService.codexAdviceFrom([
+            advisedSnapshot("cengizhan", 100, "2026-09-07T06:38:49Z", []),
+            advisedSnapshot("fabriqa", 100, "2026-09-12T21:22:55Z", [])
+        ]);
+        require(blockedCoach.detail.indexOf("No banked resets left.") === 0, "empty inventory was not reported");
+        require(blockedCoach.detail.indexOf("resets in 17h 52m") !== -1, "blocked advice missed the next reset");
+        var expiringCoach = accountService.codexAdviceFrom([
+            advisedSnapshot("expiry", 100, "2026-09-20T00:00:00Z", ["2026-09-09T00:00:00Z"])
+        ]);
+        require(expiringCoach.detail.indexOf("A reset on expiry@example.test expires in 2d 11h.") !== -1, "perishable credit was not flagged");
+        equal(accountService.codexAdviceFrom([
+            advisedSnapshot("fresh", 12, "2026-09-13T00:00:00Z", [])
+        ]), null, "uncapped accounts produced advice");
         accountService.protocolState = Protocol.reconnectingState(accountService.protocolState);
         accountService.accountConfigFixture.config.providers[0].options.provider_options.active_account = "alpha";
         accountService.handleProtocolLine(helloLine("00000000000000000000000000000082"));

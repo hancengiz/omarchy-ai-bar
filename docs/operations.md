@@ -158,6 +158,23 @@ are marked last known, and known expirations are updated while the UI is open.
 This feature never redeems a reset. Normalized reset IDs use an installation-local
 private `privacy-key` in the application data directory.
 
+When every enabled Codex account is capped, the Codex usage card also shows a
+read-only reset coach: which account still has headroom to switch to, or which
+account and which expiring banked reset a redemption would spend, balanced
+against the soonest natural weekly reset. Only the primary and secondary
+main-model lanes count as capped; extra windows such as Codex Spark never
+trigger the coach. The same decision is scriptable:
+
+```sh
+omarchy-ai-bar codex advise
+omarchy-ai-bar codex advise --active --format json
+```
+
+Without `--active` the recommendation prefers waiting for the next natural
+reset and names the redemption as the alternative; with `--active` the roles
+swap. The command reads the running daemon and falls back to the persisted
+last-known-good snapshot. It never redeems anything.
+
 Typed providers may expose more than one purpose-specific credential. Supply
 the exact descriptor slot with `--slot`; unsupported provider/slot pairs are
 rejected before Secret Service is opened:

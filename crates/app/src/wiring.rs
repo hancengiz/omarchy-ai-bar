@@ -27,6 +27,7 @@ use oab_cli::exit_code::AppExitCode;
 use oab_cli::output::{OutputFormat, write_json_line, write_toon};
 use oab_domain::{
     AccountKey, AccountScope, ClassifiedError, ErrorKind, ProviderId, ProviderInstanceId,
+    ProviderSnapshot,
 };
 use oab_providers::providers::copilot::{
     CopilotDeviceFlow, CopilotLoginValidator, ValidatedCopilotCredential, normalize_enterprise_host,
@@ -166,6 +167,9 @@ fn run_codex(arguments: &CodexArgs) -> AppExitCode {
                 }
                 Err(error) => codex_account_failure(&error),
             }
+        }
+        Some(CodexAction::Advise { active, output }) => {
+            return run_codex_advise(&paths, *active, output.format);
         }
     };
     if result == AppExitCode::Success
@@ -2240,6 +2244,189 @@ fn run_guard(arguments: &GuardArgs) -> AppExitCode {
         );
     }
     AppExitCode::Success
+}
+fn run_codex_advise(paths: &AppPaths, active: bool, format: OutputFormat) -> AppExitCode {
+    let forwarded = match forward(&paths.socket_path(), ControlAction::Usage) {
+        Ok(ForwardOutcome::Response(response)) if response.status() == ControlStatus::Accepted => {
+            response.payload().cloned()
+        }
+        Ok(ForwardOutcome::Response(_) | ForwardOutcome::NoDaemon) => None,
+        Err(_error) => None,
+    };
+    let now = wall_clock_now();
+    let envelope = forwarded.map_or_else(
+        || {
+            let cache = paths.cache_dir().join("last-known-good.json");
+            read_private_file(&cache, crate::daemon::SNAPSHOT_CACHE_BYTES)
+                .ok()
+                .flatten()
+                .and_then(|bytes| serde_json::from_slice::<oab_domain::SnapshotEnvelopeV1>(&bytes).ok())
+        },
+        |payload| serde_json::from_value::<oab_domain::SnapshotEnvelopeV1>(payload).ok(),
+    );
+    let Some(envelope) = envelope else {
+        eprintln!("{DAEMON_UNAVAILABLE_MESSAGE}");
+        return AppExitCode::Unavailable;
+    };
+    let accounts: Vec<oab_domain::AdvisorAccount> = envelope
+        .snapshots()
+        .iter()
+        .filter(|snapshot| snapshot.scope().provider() == ProviderId::Codex)
+        .filter_map(ProviderSnapshot::last_known_good)
+        .filter_map(|sample| oab_domain::AdvisorAccount::from_sample(sample, now))
+        .collect();
+    let Ok(advice) = oab_domain::ResetAdvice::evaluate(&accounts, now, active) else {
+        eprintln!("{INTERNAL_MESSAGE}");
+        return AppExitCode::Internal;
+    };
+    match format {
+        OutputFormat::Human => write_codex_advise_human(&accounts, &advice, active),
+        OutputFormat::Json | OutputFormat::Toon => {
+            let Ok(advice_value) = serde_json::to_value(&advice) else {
+                eprintln!("{INTERNAL_MESSAGE}");
+                return AppExitCode::Internal;
+            };
+            write_local_value(
+                format,
+                &json!({
+                    "schema_version": 1,
+                    "generated_at": now,
+                    "active": active,
+                    "codex_accounts": accounts.len(),
+                    "advice": advice_value,
+                }),
+            )
+        }
+    }
+}
+fn wall_clock_now() -> oab_domain::Timestamp {
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since_epoch| {
+            i64::try_from(since_epoch.as_secs()).unwrap_or(i64::MAX)
+        });
+    oab_domain::Timestamp::from_unix_timestamp(seconds).expect("wall clock is representable")
+}
+
+fn write_codex_advise_human(
+    accounts: &[oab_domain::AdvisorAccount],
+    advice: &oab_domain::ResetAdvice,
+    active: bool,
+) -> AppExitCode {
+    use oab_domain::AdviceAction;
+
+    let capped = accounts.iter().filter(|account| account.is_capped()).count();
+    println!(
+        "Codex reset advice ({} account(s), {capped} capped)",
+        accounts.len()
+    );
+    match advice.primary() {
+        AdviceAction::NotApplicable {} => {
+            println!("No capped Codex account needs a reset decision.");
+        }
+        AdviceAction::Switch { account } => {
+            println!("Switch to {account}: it still has main-model headroom.");
+        }
+        AdviceAction::Redeem {
+            account,
+            credit_expires_at,
+            ..
+        } => {
+            let credit = credit_expires_at.map_or_else(
+                || "a non-expiring credit".to_owned(),
+                |expires_at| format!("the credit expiring {expires_at}"),
+            );
+            println!(
+                "{}: redeem on {account}, spending {credit}.",
+                if active { "Working now" } else { "If you keep working now" }
+            );
+            for alternative in advice.alternatives() {
+                let AdviceAction::Wait {
+                    account,
+                    resets_at,
+                    resets_in_seconds,
+                } = alternative
+                else {
+                    continue;
+                };
+                println!(
+                    "{}: wait for {account} — resets in {} ({resets_at}).",
+                    if active { "If you can pause" } else { "Otherwise" },
+                    human_duration(*resets_in_seconds)
+                );
+            }
+        }
+        AdviceAction::Wait {
+            account,
+            resets_at,
+            resets_in_seconds,
+        } => {
+            println!(
+                "{}: wait for {account} — resets in {} ({resets_at}).",
+                if active { "If you can pause" } else { "Recommended" },
+                human_duration(*resets_in_seconds)
+            );
+            for alternative in advice.alternatives() {
+                let AdviceAction::Redeem {
+                    account,
+                    credit_expires_at,
+                    ..
+                } = alternative
+                else {
+                    continue;
+                };
+                let credit = credit_expires_at.map_or_else(
+                    || "a non-expiring credit".to_owned(),
+                    |expires_at| format!("the credit expiring {expires_at}"),
+                );
+                println!(
+                    "{}: redeem on {account}, spending {credit}.",
+                    if active { "Working now" } else { "If you keep working now" }
+                );
+            }
+        }
+        AdviceAction::Blocked {} => {
+            println!("Every Codex account is capped and no banked resets are available.");
+            for alternative in advice.alternatives() {
+                let AdviceAction::Wait {
+                    account,
+                    resets_at,
+                    resets_in_seconds,
+                } = alternative
+                else {
+                    continue;
+                };
+                println!(
+                    "Next natural reset: {account} in {} ({resets_at}).",
+                    human_duration(*resets_in_seconds)
+                );
+            }
+        }
+    }
+    for expiring in advice.expiring() {
+        println!(
+            "{} expires in {} ({}) while its account is capped.",
+            expiring.account(),
+            human_duration(expiring.expires_in_seconds()),
+            expiring.expires_at()
+        );
+    }
+    println!("Advice only: no reset was redeemed.");
+    AppExitCode::Success
+}
+
+fn human_duration(seconds: i64) -> String {
+    let seconds = seconds.max(0);
+    let days = seconds / 86_400;
+    let hours = (seconds % 86_400) / 3_600;
+    let minutes = (seconds % 3_600) / 60;
+    if days > 0 {
+        format!("{days}d {hours}h")
+    } else if hours > 0 {
+        format!("{hours}h {minutes}m")
+    } else {
+        format!("{minutes}m")
+    }
 }
 
 fn write_control_output(

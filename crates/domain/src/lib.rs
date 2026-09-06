@@ -1,5 +1,6 @@
 //! Shared domain models.
 
+mod advisor;
 mod cost_usage;
 mod credits;
 mod error;
@@ -16,6 +17,11 @@ mod status;
 mod text;
 mod timestamp;
 
+pub use advisor::{
+    AdviceAction, AdvisorAccount, CAPPED_USED_PERCENT, EXPIRY_NOTE_HORIZON_SECONDS,
+    ExpiringCredit, MAX_ADVISED_ACCOUNTS, MAX_ADVISED_CREDITS, MAX_ADVISOR_LABEL_LENGTH,
+    MAX_EXPIRY_NOTES, ResetAdvice,
+};
 pub use cost_usage::{
     CostUsageCoverage, CostUsageDailyBucket, CostUsageError, CostUsageHourlyBucket,
     CostUsageInterval, CostUsageLineItem, CostUsageMetrics, CostUsageModelBreakdown,

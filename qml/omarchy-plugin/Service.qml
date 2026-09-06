@@ -406,6 +406,7 @@ Item {
                 stale: snapshot && snapshot.freshness ? snapshot.freshness.state === "stale" : false,
                 staleSince: snapshot && snapshot.freshness && snapshot.freshness.state === "stale" ? String(snapshot.freshness.since || "") : "",
                 windows: sample ? windowsFrom(sample, provider) : [],
+                advice: provider === "codex" ? codexAdviceFrom(candidates) : null,
                 tabPercent: shortestQuotaPercent(sample),
                 summary: sample ? summaryFrom(sample) : "",
                 optionalSections: sample ? optionalSectionsFrom(sample) : [],
@@ -1389,6 +1390,181 @@ Item {
             rows: rows,
             caption: missing > 0 ? "Expiry details unavailable for " + missing + (missing === 1 ? " reset." : " resets.") : "",
             captionSensitivity: "public"
+        };
+    }
+
+    function advisorAccountsFrom(candidates) {
+        var accounts = [];
+        for (var index = 0; index < candidates.length; index++) {
+            var sample = sampleFrom(candidates[index]);
+            if (!sample)
+                continue;
+            // Mirrors the Rust advisor: only the primary and secondary main
+            // model lanes judge exhaustion; extra windows such as Spark never do.
+            var lanes = [sample.primary, sample.secondary];
+            var known = false;
+            var capped = false;
+            var remaining = null;
+            var naturalResetMs = null;
+            for (var laneIndex = 0; laneIndex < lanes.length; laneIndex++) {
+                var lane = lanes[laneIndex];
+                if (!lane || !lane.usage || lane.usage.state !== "known" || typeof lane.usage.used_percent !== "number")
+                    continue;
+                known = true;
+                var used = lane.usage.used_percent;
+                remaining = remaining === null ? 100 - used : Math.min(remaining, 100 - used);
+                if (used >= 99.5) {
+                    capped = true;
+                    var resetMs = lane.resets_at ? Date.parse(lane.resets_at) : NaN;
+                    if (isFinite(resetMs) && resetMs > resetInventoryNow)
+                        naturalResetMs = naturalResetMs === null ? resetMs : Math.min(naturalResetMs, resetMs);
+                }
+            }
+            if (!known)
+                continue;
+            var identity = sample.identity || {};
+            var label = identity.email || identity.account_label || accountIdFromSnapshot(candidates[index]);
+            var credits = [];
+            var inventory = sample.reset_credits;
+            if (inventory && Array.isArray(inventory.credits)) {
+                for (var creditIndex = 0; creditIndex < inventory.credits.length; creditIndex++) {
+                    var credit = inventory.credits[creditIndex];
+                    if (String(credit.status || "") !== "available")
+                        continue;
+                    if (credit.expires_at) {
+                        var expiryMs = Date.parse(credit.expires_at);
+                        if (!isFinite(expiryMs) || expiryMs <= resetInventoryNow)
+                            continue;
+                        credits.push(expiryMs);
+                    } else {
+                        credits.push(null);
+                    }
+                }
+            }
+            accounts.push({
+                label: String(label),
+                capped: capped,
+                remaining: remaining,
+                naturalResetMs: naturalResetMs,
+                credits: credits
+            });
+        }
+        accounts.sort(function (left, right) {
+            return left.label < right.label ? -1 : (left.label > right.label ? 1 : 0);
+        });
+        return accounts;
+    }
+
+    function advisorNextCreditExpiry(account) {
+        var soonest = null;
+        for (var index = 0; index < account.credits.length; index++) {
+            var expiry = account.credits[index];
+            if (expiry === null)
+                continue;
+            if (soonest === null || expiry < soonest)
+                soonest = expiry;
+        }
+        return soonest;
+    }
+
+    function advisorFormatDuration(ms) {
+        var seconds = Math.max(0, Math.floor(ms / 1000));
+        var days = Math.floor(seconds / 86400);
+        var hours = Math.floor((seconds % 86400) / 3600);
+        var minutes = Math.floor((seconds % 3600) / 60);
+        if (days > 0)
+            return days + "d " + hours + "h";
+        if (hours > 0)
+            return hours + "h " + minutes + "m";
+        return minutes + "m";
+    }
+
+    function codexAdviceFrom(candidates) {
+        var accounts = advisorAccountsFrom(candidates);
+        if (accounts.length === 0)
+            return null;
+        var capped = accounts.filter(function (account) {
+            return account.capped;
+        });
+        if (capped.length === 0)
+            return null;
+        var headroom = accounts.filter(function (account) {
+            return !account.capped;
+        });
+        if (headroom.length > 0) {
+            var best = headroom[0];
+            for (var headroomIndex = 1; headroomIndex < headroom.length; headroomIndex++) {
+                if (headroom[headroomIndex].remaining > best.remaining)
+                    best = headroom[headroomIndex];
+            }
+            return {
+                headline: "Switch to " + best.label,
+                detail: "This account still has weekly headroom; keep your resets banked."
+            };
+        }
+        var wait = null;
+        for (var cappedIndex = 0; cappedIndex < capped.length; cappedIndex++) {
+            var account = capped[cappedIndex];
+            if (account.naturalResetMs === null)
+                continue;
+            if (wait === null || account.naturalResetMs < wait.naturalResetMs || (account.naturalResetMs === wait.naturalResetMs && account.label < wait.label))
+                wait = account;
+        }
+        // Prefer an account whose redemption keeps a credit reserve elsewhere,
+        // then the most perishable credit, then the soonest natural reset.
+        var redeem = null;
+        for (var candidateIndex = 0; candidateIndex < capped.length; candidateIndex++) {
+            var candidate = capped[candidateIndex];
+            if (candidate.credits.length === 0)
+                continue;
+            if (redeem === null) {
+                redeem = candidate;
+                continue;
+            }
+            var candidateReserve = candidate.credits.length < 2;
+            var redeemReserve = redeem.credits.length < 2;
+            if (candidateReserve !== redeemReserve) {
+                if (!candidateReserve)
+                    redeem = candidate;
+                continue;
+            }
+            var candidateExpiry = advisorNextCreditExpiry(candidate);
+            var redeemExpiry = advisorNextCreditExpiry(redeem);
+            if (candidateExpiry === null)
+                continue;
+            if (redeemExpiry === null || candidateExpiry < redeemExpiry) {
+                redeem = candidate;
+                continue;
+            }
+            if (candidateExpiry === redeemExpiry && (candidate.naturalResetMs !== null && (redeem.naturalResetMs === null || candidate.naturalResetMs < redeem.naturalResetMs)))
+                redeem = candidate;
+        }
+        var detail = "";
+        var waitText = wait ? wait.label + " resets in " + advisorFormatDuration(wait.naturalResetMs - resetInventoryNow) + " (" + Qt.formatDateTime(new Date(wait.naturalResetMs), "dd MMM HH:mm") + ")" : "";
+        if (redeem) {
+            var expiry = advisorNextCreditExpiry(redeem);
+            detail = "Spend " + (expiry === null ? "a non-expiring reset" : "the reset expiring " + Qt.formatDateTime(new Date(expiry), "dd MMM HH:mm")) + " on " + redeem.label + ".";
+            if (waitText !== "")
+                detail += " Or keep it banked: " + waitText + ".";
+        } else {
+            detail = "No banked resets left." + (waitText !== "" ? " " + waitText + "." : "");
+        }
+        for (var expiringIndex = 0; expiringIndex < capped.length; expiringIndex++) {
+            var cappedAccount = capped[expiringIndex];
+            for (var creditExpiryIndex = 0; creditExpiryIndex < cappedAccount.credits.length; creditExpiryIndex++) {
+                var creditExpiry = cappedAccount.credits[creditExpiryIndex];
+                if (creditExpiry === null)
+                    continue;
+                var remainingMs = creditExpiry - resetInventoryNow;
+                if (remainingMs > 0 && remainingMs <= 14 * 24 * 60 * 60 * 1000) {
+                    detail += " A reset on " + cappedAccount.label + " expires in " + advisorFormatDuration(remainingMs) + ".";
+                    break;
+                }
+            }
+        }
+        return {
+            headline: capped.length === 1 ? "Weekly limit reached on " + capped[0].label : "Weekly limits reached on all " + capped.length + " Codex accounts",
+            detail: detail
         };
     }
 

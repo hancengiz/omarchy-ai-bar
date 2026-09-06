@@ -215,6 +215,31 @@ Item {
                     width: usageColumn.width
                     spacing: Style.space(8)
 
+                    Column {
+                        width: usageColumn.width
+                        visible: providerGroup.modelData.provider === "codex" && providerGroup.modelData.advice !== null
+                        spacing: Style.space(2)
+
+                        Text {
+                            width: parent.width
+                            text: providerGroup.modelData.advice ? providerGroup.modelData.advice.headline : ""
+                            color: view.accentForProvider(providerGroup.modelData.provider)
+                            font.family: view.fontFamily()
+                            font.pixelSize: Style.font.bodySmall
+                            font.bold: true
+                            wrapMode: Text.WordWrap
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: providerGroup.modelData.advice ? providerGroup.modelData.advice.detail : ""
+                            color: view.muted
+                            font.family: view.fontFamily()
+                            font.pixelSize: Style.font.bodySmall
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+
                     Repeater {
                         model: view.panelRoot && view.panelRoot.service ? view.panelRoot.service.subscriptionRows(providerGroup.modelData, view.setting("accountLayout", view.setting("codexAccountLayout", "Tabs"))) : [providerGroup.modelData]
                         delegate: BorderSurface {
