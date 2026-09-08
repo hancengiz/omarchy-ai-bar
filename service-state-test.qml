@@ -379,6 +379,44 @@ ShellRoot {
         equal(service.windowsForDisplay({
             windows: service.windowsFrom(claudeUsage, "claude")
         }, false).length, 1, "optional-extras master switch did not hide Daily Routines");
+        var zaiUsage = {
+            primary: {
+                usage: {
+                    state: "known",
+                    used_percent: 1
+                }
+            },
+            secondary: null,
+            tertiary: null,
+            extra_windows: [
+                {
+                    id: "zai-mcp",
+                    title: "MCP",
+                    window: {
+                        usage: {
+                            state: "known",
+                            used_percent: 8.1
+                        }
+                    }
+                }
+            ]
+        };
+        equal(service.percentFrom(zaiUsage), 1, "bar percent folded the z.ai MCP extra window into the token quota");
+        equal(service.percentFrom({
+            primary: zaiUsage.primary,
+            secondary: {
+                usage: {
+                    state: "known",
+                    used_percent: 29
+                }
+            },
+            tertiary: {
+                usage: {
+                    state: "unknown"
+                }
+            }
+        }), 29, "bar percent ignored the highest semantic lane");
+        equal(service.percentFrom(null), 0, "bar percent fabricated usage without a sample");
         var historyCost = {
             updated_at: "2026-09-05T23:50:00Z",
             history_days: 3,

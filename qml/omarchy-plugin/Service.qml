@@ -1802,13 +1802,23 @@ Item {
     function percentFrom(sample) {
         if (!sample)
             return 0;
-        var windows = windowsFrom(sample);
+        // The bar percent follows the semantic quota lanes exactly like
+        // CodexBar's automatic menu-bar metric, where z.ai resolves to
+        // mostConstrained(primary, secondary). Extra windows such as z.ai's
+        // 30-day MCP quota stay popup-only rows; folding them into the bar
+        // would show 8% MCP while the token quota the provider dashboard
+        // reports is at 1%.
+        var lanes = [sample.primary, sample.secondary, sample.tertiary];
         var maximum = 0;
-        for (var index = 0; index < windows.length; index++) {
-            if (windows[index].known)
-                maximum = Math.max(maximum, Number(windows[index].percent || 0));
+        for (var index = 0; index < lanes.length; index++) {
+            var lane = lanes[index];
+            if (!lane || !lane.usage || lane.usage.state !== "known")
+                continue;
+            var used = Number(lane.usage.used_percent);
+            if (isFinite(used))
+                maximum = Math.max(maximum, Math.max(0, Math.min(100, used)));
         }
-        return Math.max(0, Math.min(100, maximum));
+        return maximum;
     }
 
     function labelForProvider(provider) {
