@@ -305,27 +305,27 @@ ShellRoot {
                 }
             };
         }
-        var stockedAccount = advisedSnapshot("cengizhan", 100, "2026-09-07T06:38:49Z", [
+        var stockedAccount = advisedSnapshot("primary", 100, "2026-09-07T06:38:49Z", [
             "2026-09-20T23:55:02Z",
             "2026-10-04T01:50:29Z",
             "2026-10-05T04:18:19Z"
         ]);
-        var loneAccount = advisedSnapshot("fabriqa", 100, "2026-09-12T21:22:55Z", [
+        var loneAccount = advisedSnapshot("secondary", 100, "2026-09-12T21:22:55Z", [
             "2026-10-05T04:19:02Z"
         ]);
         var coach = accountService.codexAdviceFrom([stockedAccount, loneAccount]);
         equal(coach.headline, "Weekly limits reached on all 2 Codex accounts", "capped headline was not shown");
         require(coach.detail.indexOf("Spend the reset expiring") === 0, "redemption did not lead the advice");
-        require(coach.detail.indexOf(" on cengizhan@example.test.") !== -1, "stocked account was not the redemption target");
+        require(coach.detail.indexOf(" on primary@example.test.") !== -1, "stocked account was not the redemption target");
         require(coach.detail.indexOf("resets in 17h 52m") !== -1, "wait alternative missed the soonest natural reset");
         var switchCoach = accountService.codexAdviceFrom([
             stockedAccount,
-            advisedSnapshot("fabriqa", 40, "2026-09-12T21:22:55Z", [])
+            advisedSnapshot("secondary", 40, "2026-09-12T21:22:55Z", [])
         ]);
-        equal(switchCoach.headline, "Switch to fabriqa@example.test", "headroom account was not recommended for switching");
+        equal(switchCoach.headline, "Switch to secondary@example.test", "headroom account was not recommended for switching");
         var blockedCoach = accountService.codexAdviceFrom([
-            advisedSnapshot("cengizhan", 100, "2026-09-07T06:38:49Z", []),
-            advisedSnapshot("fabriqa", 100, "2026-09-12T21:22:55Z", [])
+            advisedSnapshot("primary", 100, "2026-09-07T06:38:49Z", []),
+            advisedSnapshot("secondary", 100, "2026-09-12T21:22:55Z", [])
         ]);
         require(blockedCoach.detail.indexOf("No banked resets left.") === 0, "empty inventory was not reported");
         require(blockedCoach.detail.indexOf("resets in 17h 52m") !== -1, "blocked advice missed the next reset");

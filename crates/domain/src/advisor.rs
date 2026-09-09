@@ -456,7 +456,7 @@ mod tests {
     fn live_scenario() -> Vec<AdvisorAccount> {
         vec![
             account(
-                "cengiz@cengizhan.com",
+                "primary@example.test",
                 100.0,
                 Some("2026-09-07T06:38:49Z"),
                 &[
@@ -466,7 +466,7 @@ mod tests {
                 ],
             ),
             account(
-                "cengiz@fabriqa.ai",
+                "secondary@example.test",
                 100.0,
                 Some("2026-09-12T21:22:55Z"),
                 &[Some("2026-10-05T04:19:02Z")],
@@ -485,13 +485,13 @@ mod tests {
         else {
             panic!("expected redeem, got {:?}", advice.primary());
         };
-        assert_eq!(account, "cengiz@cengizhan.com");
+        assert_eq!(account, "primary@example.test");
         assert_eq!(credit_expires_at, &Some(ts("2026-09-20T23:55:02Z")));
         assert_eq!(advances_availability_by_seconds, &Some(64_333));
         assert_eq!(
             advice.alternatives(),
             [AdviceAction::Wait {
-                account: "cengiz@cengizhan.com".to_owned(),
+                account: "primary@example.test".to_owned(),
                 resets_at: ts("2026-09-07T06:38:49Z"),
                 resets_in_seconds: 64_333,
             }]
@@ -505,7 +505,7 @@ mod tests {
         assert_eq!(
             advice.primary(),
             &AdviceAction::Wait {
-                account: "cengiz@cengizhan.com".to_owned(),
+                account: "primary@example.test".to_owned(),
                 resets_at: ts("2026-09-07T06:38:49Z"),
                 resets_in_seconds: 64_333,
             }
@@ -516,18 +516,18 @@ mod tests {
                 advice.alternatives()
             );
         };
-        assert_eq!(*account, "cengiz@cengizhan.com");
+        assert_eq!(*account, "primary@example.test");
     }
 
     #[test]
     fn headroom_account_switches_instead_of_redeeming() {
         let mut accounts = live_scenario();
-        accounts[1] = account("cengiz@fabriqa.ai", 40.0, Some("2026-09-12T21:22:55Z"), &[]);
+        accounts[1] = account("secondary@example.test", 40.0, Some("2026-09-12T21:22:55Z"), &[]);
         let advice = ResetAdvice::evaluate(&accounts, now(), true).expect("advice");
         assert_eq!(
             advice.primary(),
             &AdviceAction::Switch {
-                account: "cengiz@fabriqa.ai".to_owned()
+                account: "secondary@example.test".to_owned()
             }
         );
         assert!(advice.alternatives().is_empty());
@@ -553,7 +553,7 @@ mod tests {
         assert_eq!(
             advice.alternatives(),
             [AdviceAction::Wait {
-                account: "cengiz@cengizhan.com".to_owned(),
+                account: "primary@example.test".to_owned(),
                 resets_at: ts("2026-09-07T06:38:49Z"),
                 resets_in_seconds: 64_333,
             }]
